@@ -69,4 +69,9 @@ jobs:
             echo "No changes"; exit 0
           fi
           git commit -q -m "Market data $(date -u +%Y-%m-%d)"
-          git push -q origin HEAD:market-data
+          # Retry: GitHub occasionally returns transient 5xx errors on push.
+          for i in 1 2 3 4; do
+            git push -q origin HEAD:market-data && exit 0
+            sleep $((i * i * 5))
+          done
+          exit 1

@@ -126,57 +126,34 @@ then **intraday** (needs Angel One), **Telegram last**.
 | # | Phase | Delivered |
 |---|---|---|
 | 1 | Setup | Project structure, SQLite database, `.env` config, Angel One data-only client, CLI |
-| 2 | Data pipeline | Daily prices since 2010 for Nifty 100 + 12 indices, split/bonus handling, incremental updates, data-check report, intraday downloader (ready for Angel One) |
+| 2 | Data pipeline | Daily prices since 2010 for Nifty 100 + indices, split/bonus handling, incremental updates, data-check, intraday downloader (ready for Angel One) |
 | 2b | Git data store | CSV store on `market-data` branch, daily GitHub Actions updater, shallow `sync-data` on the Mac |
-| 3 | Long-term features | 51 features: momentum, trend, 52-week range, volatility/drawdown, RSI/MACD/ADX/Bollinger, volume, beta, relative strength vs Nifty & sector, weekly candles, market regime, cross-sectional ranks; look-ahead tests |
+| 3 | Long-term features | 51 features: momentum, trend, 52-week range, volatility/drawdown, RSI/MACD/ADX/Bollinger, volume, beta, strength vs Nifty & sector peers, weekly candles, market regime, ranks; look-ahead tests |
+| 4 | Fundamentals & news | Google News RSS + FinBERT sentiment in GitHub Actions (4×/day); weekly fundamentals snapshots |
+| 5 | Long-term model + backtest | LightGBM ranker, walk-forward with embargo, next-day execution, delivery costs, benchmarks, momentum baseline |
+| 6 | Paper trading + accuracy | ₹1 lakh account, queued orders filled at next price, predictions judged after 3 months vs random baseline |
+| 7 | Streamlit app | Picks, Paper trading, My portfolio, Accuracy, Model, Settings; live auto-refresh; light/dark |
+| 8 | My Portfolio | Manual Groww trades, average cost, realized/unrealized P&L, stop-loss alerts |
+| 9 | Live monitor | 1-min prices & stop-losses, 15-min news & provisional scores, after-close decision, weekend retrain, holiday detection, catch-up |
 
-### Track A — Long-term (build now)
+**Track A is complete.** Long-term paper trading starts now and runs while Track B is built.
 
-**Phase 4 — Fundamentals & news**
-- Free fundamentals: quarterly results (revenue, profit, EPS growth), P/E, P/B, ROE, debt/equity — from yfinance / NSE filings, only as of the date they were public
-- News: Google News RSS, ET / Moneycontrol RSS, NSE corporate announcements, GDELT history
-- FinBERT sentiment (local, free) → per-stock sentiment score, news count, results / event flags
-- Daily news collection starts here so history builds up for intraday later
-- *Done when:* fundamentals + sentiment columns join the feature table; news fetch runs daily
+### Backtest findings (2015 – Sep 2026, walk-forward, costs included)
 
-**Phase 5 — Long-term model + backtest**
-- Target: rank of each stock's next **3-month return vs Nifty 50** (1-month as secondary)
-- LightGBM ranker, walk-forward: train on past years, predict next period, roll forward
-- Portfolio rules (defaults, editable): hold **top 10, equal weight**; decisions daily after close; exit when a stock drops out of the top 30, hits its stop-loss, or gets strongly negative news (buffer avoids churn)
-- Compare daily vs weekly decision frequency after costs
-- Delivery costs included: STT, exchange charges, stamp duty, DP charges, GST, slippage
-- Compare against Nifty 50 buy-and-hold and equal-weight Nifty 100
-- Report: CAGR, return vs Nifty, Sharpe, max drawdown, hit rate, turnover
-- *Done when:* backtest report exists and we decide honestly whether the model beats the benchmarks
+| Strategy | Yearly return | Sharpe | Worst fall |
+|---|---|---|---|
+| Model, weekly rebalance | 28.4% | 1.47 | −48% |
+| Model, daily rebalance | 27.3% | 1.34 | −49% |
+| Momentum only (no ML) | 28.0% | 1.11 | −45% |
+| Equal-weight Nifty 100 | 19.0% | 1.09 | −38% |
+| Nifty 50 | 9.0% | 0.56 | −38% |
 
-**Phase 6 — Long-term paper trading + accuracy**
-- ₹1,00,000 virtual portfolio following the daily decisions (buy / hold / exit)
-- Live valuation during market hours; emergency exits at live prices
-- Records every trade with costs; realized & unrealized P&L
-- Accuracy: % of picks beating Nifty, % profitable, accuracy by confidence, rolling trend, vs random-pick baseline
-- *Done when:* a daily run produces decisions and updates the paper portfolio + accuracy tables
+- Top-10 picks beat Nifty over 3 months 57% of the time (all stocks: 52%); IC 0.044 (t≈2).
+- **Weekly rank rebalancing is the default** (better risk-adjusted, ~⅓ lower costs); stop-loss and news exits stay daily.
+- ⚠️ **Survivorship bias:** only today's Nifty 100 members are in the data, so absolute returns are overstated (equal-weight shows 19% vs Nifty's 9%). Compare against equal-weight, not Nifty. The model roughly matches plain momentum on return with smoother results. Paper trading is the real test.
+- News and fundamentals are an overlay (skip/exit on strongly negative news; P/E and ROE shown) until enough history exists to train on them.
 
-**Phase 7 — Streamlit app (long-term pages)**
-- Long-term Picks (buy / hold / exit with reasons and news)
-- Paper Trading — Long-term (prediction vs reality table, P&L chart)
-- Accuracy page, Model page (backtest, feature importance, last retrain), Settings
-- Auto-refresh every minute in market hours; live scores with ↑↓ rank movement (provisional)
-- *Done when:* `streamlit run` shows all long-term pages from real data
-
-**Phase 8 — My Portfolio (real trades)**
-- Manual entry / edit / delete of Groww trades, separate Long-term and Intraday tabs
-- Invested amount, current value, realized / unrealized P&L, allocation chart
-- Live prices and stop-loss alerts for real holdings
-- *Done when:* entered trades show correct P&L at latest prices
-
-**Phase 9 — Scheduler & live monitor (long-term)**
-- Market hours: 1-min live prices / stop-loss checks, 15-min live scores + news watch
-- Daily after close: sync data, official decisions, paper portfolio update
-- Weekly: model retraining
-- NSE holiday calendar; missed runs caught up when the laptop is opened
-- *Done when:* jobs run on their own for a week without manual steps
-
-➡️ **Long-term paper trading starts here** and runs while Track B is built.
+**Possible improvements:** broader universe (Nifty 200/500) with point-in-time selection to reduce survivorship bias; add news and fundamentals as model inputs after ~6-12 months of collection.
 
 ### Track B — Intraday (after Angel One is active)
 

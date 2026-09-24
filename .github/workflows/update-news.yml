@@ -57,4 +57,9 @@ jobs:
           git add -A
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
           git commit -q -m "News $(date -u +%Y-%m-%dT%H:%M)"
-          git push -q origin HEAD:market-data
+          # Retry: GitHub occasionally returns transient 5xx errors on push.
+          for i in 1 2 3 4; do
+            git push -q origin HEAD:market-data && exit 0
+            sleep $((i * i * 5))
+          done
+          exit 1

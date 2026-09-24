@@ -276,8 +276,13 @@ def accuracy(conn: sqlite3.Connection, horizon: str = HORIZON) -> dict:
     out = {"total": len(df), "matured": 0}
     m = df.dropna(subset=["correct"])
     if not m.empty:
-        m = m.assign(bucket=pd.cut(m["confidence"], [0, 0.2, 0.8, 0.9, 1.0],
-                                   labels=["bottom 20%", "middle", "80-90%", "top 10%"]))
+        n = m.groupby("date")["rank"].transform("max")
+        up = m["direction"] == "up"
+        strong = (up & (m["rank"] <= 3)) | (~up & (m["rank"] > n - 3))
+        m = m.assign(bucket=pd.Categorical(
+            [("Top 1-3" if s else "Top 4-10") if u else ("Weakest 3" if s else "Weakest 4-10")
+             for u, s in zip(up, strong)],
+            categories=["Top 1-3", "Top 4-10", "Weakest 4-10", "Weakest 3"], ordered=True))
         out.update({
             "matured": len(m),
             "accuracy": m["correct"].mean(),

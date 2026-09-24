@@ -242,6 +242,15 @@ def cmd_run(settings, args) -> None:
         print("Stopped.")
 
 
+def cmd_app(settings) -> None:
+    import subprocess
+
+    app = Path(__file__).parent / "app" / "main.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app),
+                    "--server.headless", "false", "--browser.gatherUsageStats", "false",
+                    "--client.toolbarMode", "minimal"])
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -326,6 +335,7 @@ COMMANDS = {
     "tokens": (cmd_tokens, "Map stocks to Angel One instrument tokens"),
     "check-angel": (cmd_check_angel, "Test Angel One login and fetch one live price"),
     "status": (cmd_status, "Show configuration and database status"),
+    "app": (cmd_app, "Open the dashboard in your browser"),
 }
 
 
