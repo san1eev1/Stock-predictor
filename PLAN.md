@@ -12,7 +12,7 @@ Everything runs **locally on my laptop** and costs **₹0** (no paid APIs, no cl
 - **Long-term:** weekly picks to buy / hold / exit, holding period 1–3 months.
 - Use candle patterns, technical indicators, strategy signals, market context and **company news** as model inputs.
 - Paper-trade both strategies and track **accuracy** and **profit/loss** honestly (after costs).
-- Simple UI + Telegram alerts.
+- Simple local dashboard with alerts.
 
 ## 2. Key decisions
 
@@ -27,7 +27,7 @@ Everything runs **locally on my laptop** and costs **₹0** (no paid APIs, no cl
 | Paper capital | ₹1,00,000 intraday + ₹1,00,000 long-term |
 | Real capital | To be set later in Settings |
 | News analysis | Free, local (FinBERT) |
-| Alerts | Telegram bot (free) |
+| Alerts | Dashboard sidebar (Telegram dropped) |
 | Runs on | My laptop for training, live monitoring and the app (catches up if opened late) |
 | Data storage | Market data on git (`market-data` branch), updated daily by free GitHub Actions; Mac keeps only a shallow snapshot |
 | Long-term decisions | Official buy / hold / exit **daily after close**; live monitoring all day; emergency exits on stop-loss or strongly negative news |
@@ -88,7 +88,7 @@ Rules:
    - Accuracy by confidence level
    - Comparison vs a random-pick baseline
 6. **Model:** backtest results, feature importance, last retrain date.
-7. **Settings:** capital amounts, stop-loss %, confidence threshold, Telegram setup.
+7. **Settings:** capital amounts, stop-loss %, rules for both tracks.
 
 ## 7. Automation & live design
 
@@ -107,19 +107,19 @@ Live prices: Yahoo Finance (may lag a few minutes) until Angel One is active, th
 
 **Intraday**
 
-- **9:45 AM (market days):** fetch data + news → intraday picks → save → Telegram alert.
+- **9:46 AM (market days):** first 30 minutes → intraday picks → paper trades → dashboard alert.
 - **3:20 PM:** record actual results → update paper P&L and accuracy.
 - **Weekly:** long-term picks + model retraining.
 - NSE holidays skipped automatically; missed runs caught up when the laptop is opened.
 
 ## 8. Tech stack
 
-Python · Angel One SmartAPI · yfinance · SQLite · pandas · TA-Lib · LightGBM · FinBERT · Streamlit · APScheduler · Telegram Bot API
+Python · Angel One SmartAPI · yfinance · SQLite · pandas · LightGBM · FinBERT (GitHub Actions) · Streamlit · Altair
 
 ## 9. Build phases
 
 Order: **long-term first** (needs only free daily data, available now),
-then **intraday** (needs Angel One), **Telegram last**.
+then **intraday** (needs Angel One). Telegram was dropped.
 
 ### ✅ Done
 
@@ -155,26 +155,19 @@ then **intraday** (needs Angel One), **Telegram last**.
 
 **Possible improvements:** broader universe (Nifty 200/500) with point-in-time selection to reduce survivorship bias; add news and fundamentals as model inputs after ~6-12 months of collection.
 
-### Track B — Intraday (after Angel One is active)
+### ✅ Track B — Intraday (complete)
 
-**Phase 10 — Intraday data & features**
-- 5-min / 1-min history from Angel One (`prices-intraday`)
-- Intraday candle patterns, first-30-min behaviour (9:15–9:45 return, volume surge, range), VWAP position, gap from previous close, opening-range breakout
-- Market context at 9:45: Nifty / sector moves, VIX, GIFT Nifty gap, overnight news sentiment
+| # | Phase | Delivered |
+|---|---|---|
+| 10 | Intraday data & features | One compact summary row per stock-day (first 30 min, 15:15 exit, first-hit times for ±0.5–3% levels) instead of raw bars: ~3 MB/year. GitHub Actions collect Yahoo 5-min data daily; `intraday-backfill` pulls ~2 years from Angel One into a small local file. 9:45 features: gap, first-30-min move, opening-range position, VWAP distance, volume surge, market breadth, previous-day context |
+| 11 | Intraday model & backtest | LightGBM ranker, monthly walk-forward; top N long / bottom N short, stop-loss/target replayed from first-hit times, 15:15 square-off, MIS costs; compared with momentum/reversal baselines, position-count variants and a stop/target grid |
+| 12 | Intraday paper trading, app, monitor | 9:46 picks at live prices, minute-by-minute stop/target exits, 15:15 square-off and evaluation vs random baseline; Intraday picks page and intraday tabs; weekend retraining |
 
-**Phase 11 — Intraday model + backtest**
-- Target: return from 9:45 to 3:15; LightGBM ranker → top 5 up / top 5 down
-- Intraday costs (brokerage, STT, charges, slippage), ATR stop-loss / target, "skip today" threshold
-- Walk-forward backtest vs random baseline — *proves whether an intraday edge exists*
+**First intraday result (59 days of Yahoo data, only 17 out-of-sample days):** the model called direction right 63% of the time vs 51% for random picks (IC 0.088), but **lost 2.1% after costs**. Ten ₹10k positions a day pay ~0.36% per round trip, which ate the gross profit. Fewer, larger positions reduce costs (brokerage is capped at ₹20 per order). Too little data to conclude: run `intraday-backfill` + `backtest-intraday` on the Mac before trusting intraday picks. **Intraday stays paper-only until the backtest on ~2 years is positive after costs.**
 
-**Phase 12 — Intraday paper trading, app pages, scheduler jobs**
-- ₹1,00,000 intraday paper account; 9:45 AM picks job and 3:20 PM results job
-- Intraday Picks page, Intraday Paper Trading tab, intraday accuracy
+### Dropped
 
-### Final
-
-**Phase 13 — Telegram alerts**
-- Weekly long-term picks and daily 9:45 intraday picks, plus end-of-day P&L summary
+- Telegram alerts (alerts are shown in the dashboard sidebar instead).
 
 Then: **paper trade for 2–3 months** before trusting real money to the picks.
 

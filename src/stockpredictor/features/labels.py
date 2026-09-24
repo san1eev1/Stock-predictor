@@ -20,6 +20,16 @@ LABELS = {
     "rs_sector_63": "strength vs sector peers", "mkt_above_ma200": "Nifty above 200-day average",
     "mkt_ret_63": "Nifty 3-month return", "mkt_vol_21": "market volatility",
     "vix": "India VIX", "vix_pct_252": "VIX vs past year",
+    # intraday
+    "gap": "opening gap", "r30": "first-30-min move", "r_prev": "move since yesterday's close",
+    "range30_atr": "opening range vs normal", "gap_atr": "gap vs normal range",
+    "r30_atr": "first-30-min move vs normal", "pos30": "position in opening range",
+    "vwap_dev": "distance from VWAP", "vol30_adv": "opening volume vs daily volume",
+    "vol30_rel": "opening volume vs usual", "mkt_r30": "market first-30-min move",
+    "mkt_gap": "market gap", "breadth30": "share of stocks rising", "rel_r30": "move vs market",
+    "rel_gap": "gap vs market", "atr_pct": "daily range (ATR)", "ret_1": "yesterday's return",
+    "d_body": "yesterday's candle body", "d_upper": "yesterday's upper wick",
+    "d_lower": "yesterday's lower wick",
 }
 
 

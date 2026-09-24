@@ -251,7 +251,8 @@ def cmd_run(settings, args) -> None:
     db.init_db(settings.db_path)
     conn = db.connect(settings.db_path)
     mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
-                          settings.paper_capital_longterm)
+                          settings.paper_capital_longterm,
+                          capital_intraday=settings.paper_capital_intraday)
     try:
         monitor.run_forever(mon)
     except KeyboardInterrupt:
@@ -267,10 +268,49 @@ def cmd_app(settings) -> None:
                     "--client.toolbarMode", "minimal"])
 
 
+def _intraday_features(d: Path):
+    from stockpredictor import store
+    from stockpredictor.data import intraday
+    from stockpredictor.features import intraday as FI
+    from stockpredictor.paper.engine import MarketContext
+
+    ctx = MarketContext.load(d)
+    return FI.build(intraday.load_summaries(d), ctx.daily, ctx.feats, store.load_actions(d))
+
+
+def cmd_train_intraday(settings, args) -> None:
+    from stockpredictor.models import intraday as MI
+
+    feats = _intraday_features(Path(args.dir))
+    days = feats["date"].nunique()
+    if days < MI.MIN_TRAIN_DAYS:
+        print(f"Only {days} days of intraday data; need {MI.MIN_TRAIN_DAYS}. "
+              "Run intraday-backfill (Angel One) or wait for daily collection.")
+        return
+    model = MI.IntradayModel.train(feats)
+    model.save()
+    print(f"Intraday model trained on {model.train_days} days up to {model.train_to}")
+    print("Top features:", ", ".join(model.importance().head(8).index))
+
+
+def cmd_backtest_intraday(settings, args) -> None:
+    from stockpredictor.backtest import intraday as B
+    from stockpredictor.models import intraday as MI
+
+    feats = _intraday_features(Path(args.dir))
+    scores = MI.walk_forward(feats)
+    if scores.empty:
+        print(f"Not enough intraday history ({feats['date'].nunique()} days).")
+        return
+    report = B.run(feats, scores, capital=settings.paper_capital_intraday)
+    print(B.format_report(report))
+    B.save(report, MI.MODEL_DIR / "backtest.json")
+    print(f"\nSaved report to {MI.MODEL_DIR / 'backtest.json'}")
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
-    print(f"Telegram:        {'set' if settings.telegram_bot_token else 'not set'}")
     print(f"Paper capital:   intraday ₹{settings.paper_capital_intraday:,.0f}, "
           f"long-term ₹{settings.paper_capital_longterm:,.0f}")
     if settings.db_path.exists():
@@ -330,6 +370,9 @@ def _daily_args(p):
 
 
 ARG_COMMANDS = {
+    "train-intraday": (cmd_train_intraday, "Train the intraday model", _dir_arg),
+    "backtest-intraday": (cmd_backtest_intraday, "Walk-forward backtest of the intraday model",
+                          _dir_arg),
     "run": (cmd_run, "Start the live monitor (keep running during market hours)", _dir_arg),
     "daily": (cmd_daily, "After-close job: sync, decide, paper-trade, evaluate", _daily_args),
     "train": (cmd_train, "Train the long-term model on all data", _dir_arg),

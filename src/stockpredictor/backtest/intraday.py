@@ -145,6 +145,11 @@ def run(feats: pd.DataFrame, scores: pd.DataFrame, rules: IntradayRules = Intrad
         out["strategies"][name] = metrics(simulate(sc, summ, rules, capital), capital)
     out["strategies"]["model, skip weak days"] = metrics(simulate(
         scores, summ, IntradayRules(**{**asdict(rules), "skip_quantile": 0.5}), capital), capital)
+    # Fewer, larger positions: brokerage is capped per order, so costs fall as a share.
+    for n in (3, 2, 1):
+        r = IntradayRules(**{**asdict(rules), "n_long": n, "n_short": n})
+        out["strategies"][f"model, {n} long + {n} short"] = metrics(
+            simulate(scores, summ, r, capital), capital)
     for sl in (0.75, 1.0, 1.5):
         for tp in (0.0, 1.5, 2.0, 3.0):
             r = IntradayRules(**{**asdict(rules), "stop_loss": sl, "target": tp})

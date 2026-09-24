@@ -18,7 +18,10 @@ from stockpredictor.features.labels import reason_text
 from stockpredictor.live.prices import in_market_hours, now_ist
 from stockpredictor.models import longterm as M
 from stockpredictor.paper import daily as D
+from stockpredictor.backtest import intraday as BI
+from stockpredictor.models import intraday as MI
 from stockpredictor.paper import engine as E
+from stockpredictor.paper import intraday as PI
 from stockpredictor.portfolio import real as R
 
 st.set_page_config(page_title="Stock Predictor", page_icon="📈", layout="wide")
@@ -194,7 +197,7 @@ def page_paper():
     st.title("Paper trading")
     tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
     with tab_id:
-        st.info("Intraday paper trading arrives in Track B (after Angel One intraday data).")
+        paper_intraday()
     with tab_lt:
         if need_data():
             return
@@ -248,7 +251,7 @@ def paper_longterm():
         n = nifty.reindex(eq["date"]).ffill().bfill().values
         df = pd.concat([eq.assign(series="Model", value=eq["equity"]),
                         eq.assign(series="Nifty 50", value=n / n[0] * eq["equity"].iloc[0])])
-        st.altair_chart(C.lines(df, "date", "value", "series", ",.0f", "₹"),
+        st.altair_chart(C.lines(df, "date", "value", "series", ",.0f", "Value (₹)"),
                         width="stretch")
 
     st.subheader("Closed trades — prediction vs reality")
@@ -266,6 +269,108 @@ def paper_longterm():
             hide_index=True, width="stretch", column_config={
                 "Return": st.column_config.NumberColumn(format="percent"),
                 "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
+
+
+def page_intraday():
+    st.title("Intraday picks")
+    c = conn()
+    rules, enabled = PI.get_rules(c)
+    st.caption(f"At 9:45 the model ranks all Nifty 100 stocks on the first 30 minutes: "
+               f"{rules.n_long} longs, {rules.n_short} shorts, stop-loss {rules.stop_loss}%, "
+               f"target {rules.target or 'none'}%, squared off at 15:15. Paper trading only.")
+    if not enabled:
+        st.warning("Intraday is switched off in Settings.")
+    if not (MI.MODEL_DIR / "model.txt").exists():
+        st.info("No intraday model yet. In the terminal: `python -m stockpredictor intraday-backfill`"
+                " (Angel One), then `python -m stockpredictor train-intraday`.")
+    last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'intraday'").fetchone()[0]
+    if not last:
+        st.caption("No intraday picks yet — they appear at 9:46 on trading days while the live "
+                   "monitor runs.")
+        return
+    intraday_live(last)
+
+
+@st.fragment(run_every=REFRESH)
+def intraday_live(day: str):
+    c = conn()
+    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'intraday' AND date = ?",
+                        c, params=(day,))
+    live = live_prices(c)
+    st.subheader(f"Picks for {pd.Timestamp(day):%d %b %Y}")
+    for direction, title in (("up", "▲ Long (expected to rise)"), ("down", "▼ Short (expected to fall)")):
+        p = preds[preds["direction"] == direction].sort_values("rank").copy()
+        if p.empty:
+            continue
+        sign = 1 if direction == "up" else -1
+        p["Now"] = [live.get(s_, x) if pd.isna(x) else x
+                    for s_, x in zip(p["symbol"], p["actual_exit"])]
+        p["Move"] = sign * (p["Now"] / p["entry_price"] - 1)
+        p["Result"] = ["⏳" if pd.isna(x) else "✅" if x else "❌" for x in p["correct"]]
+        p["Why"] = [reason_text(json.loads(r or "[]")) for r in p["reasons"]]
+        st.caption(title)
+        st.dataframe(p[["symbol", "confidence", "entry_price", "stop_loss", "target", "Now",
+                        "Move", "Result", "Why"]].rename(columns={
+            "symbol": "Stock", "confidence": "Confidence", "entry_price": "Entry 9:45",
+            "stop_loss": "Stop-loss", "target": "Target", "Move": "Move (in our favour)",
+            "Why": "Signals (↑ raised score, ↓ lowered it)"}), hide_index=True, width="stretch",
+            column_config={"Confidence": st.column_config.ProgressColumn(
+                format="percent", min_value=0, max_value=1),
+                **{k_: st.column_config.NumberColumn(format="₹%.2f")
+                   for k_ in ["Entry 9:45", "Stop-loss", "Target", "Now"]},
+                "Move (in our favour)": st.column_config.NumberColumn(format="percent")})
+
+
+@st.fragment(run_every=REFRESH)
+def paper_intraday():
+    c = conn()
+    E.ensure_account(c, SETTINGS.paper_capital_intraday, PI.HORIZON)
+    v = PI.value(c, live_prices(c))
+    k = st.columns(4)
+    k[0].metric("Capital", rupees(v["capital"]))
+    k[1].metric("Current value", rupees(v["equity"]), C.money(v["pnl"]))
+    k[2].metric("Cash", rupees(v["cash"]))
+    k[3].metric("Open positions", f"{v['positions']}")
+    trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'intraday' "
+                         "ORDER BY entry_time DESC, id", c)
+    if trades.empty:
+        st.caption("No intraday paper trades yet.")
+        return
+    live = live_prices(c)
+    open_ = trades[trades["status"] == "open"].copy()
+    if not open_.empty:
+        st.subheader("Open now")
+        sign = open_["side"].map({"long": 1, "short": -1})
+        open_["Live"] = open_["symbol"].map(live).fillna(open_["entry_price"])
+        open_["P&L"] = sign * (open_["Live"] - open_["entry_price"]) * open_["qty"] - open_["costs"]
+        st.dataframe(open_[["symbol", "side", "qty", "entry_price", "Live", "stop_loss", "target",
+                            "P&L"]].rename(columns={"symbol": "Stock", "side": "Side", "qty": "Qty",
+                                                    "entry_price": "Entry", "stop_loss": "Stop-loss",
+                                                    "target": "Target"}),
+                     hide_index=True, width="stretch", column_config={
+                         k_: st.column_config.NumberColumn(format="₹%.2f")
+                         for k_ in ["Entry", "Live", "Stop-loss", "Target", "P&L"]})
+    eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'intraday' ORDER BY date", c)
+    if len(eq) >= 2:
+        st.subheader("Value over time")
+        eq["date"] = pd.to_datetime(eq["date"])
+        st.altair_chart(C.lines(eq.assign(series="Model", value=eq["equity"]), "date", "value",
+                                "series", ",.0f", "Value (₹)"), width="stretch")
+    closed = trades[trades["status"] == "closed"].copy()
+    if not closed.empty:
+        st.subheader("Closed trades")
+        closed["Day"] = closed["entry_time"].str[:10]
+        daily_pnl = closed.groupby("Day")["pnl"].sum()
+        st.caption(f"{len(daily_pnl)} trading days · profitable days {(daily_pnl > 0).mean():.0%} · "
+                   f"trades won {(closed['pnl'] > 0).mean():.0%} · total P&L {C.money(closed['pnl'].sum())}")
+        closed["Result"] = ["✅ profit" if x > 0 else "❌ loss" for x in closed["pnl"]]
+        st.dataframe(closed[["Day", "symbol", "side", "entry_price", "exit_price", "exit_reason",
+                             "pnl", "Result"]].rename(columns={
+            "symbol": "Stock", "side": "Side", "entry_price": "Entry", "exit_price": "Exit",
+            "exit_reason": "Exit reason", "pnl": "P&L (after costs)"}),
+            hide_index=True, width="stretch", column_config={
+                k_: st.column_config.NumberColumn(format="₹%.2f")
+                for k_ in ["Entry", "Exit", "P&L (after costs)"]})
 
 
 def page_portfolio():
@@ -340,56 +445,73 @@ def portfolio_live(h: str):
 
 def page_accuracy():
     st.title("Accuracy")
-    c = conn()
     tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
-    with tab_id:
-        st.info("Intraday accuracy arrives in Track B.")
     with tab_lt:
-        a = E.accuracy(c)
-        st.caption("A long-term prediction is judged after 3 months: a top pick is ✅ if it beat "
-                   "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.")
-        k = st.columns(4)
-        k[0].metric("Predictions made", a["total"])
-        k[1].metric("Judged so far", a["matured"])
-        if a["matured"]:
-            k[2].metric("Accuracy", f"{a['accuracy']:.0%}",
-                        f"{(a['accuracy'] - a['random_baseline']) * 100:+.0f} pts vs random")
-            k[3].metric("Random-pick baseline", f"{a['random_baseline']:.0%}")
-            cols = st.columns(2)
-            with cols[0]:
-                st.caption("Accuracy by pick strength (dashed line = random picks)")
-                bc = pd.DataFrame({"bucket": list(a["by_confidence"]),
-                                   "accuracy": list(a["by_confidence"].values())})
-                st.altair_chart(C.bars(bc, "bucket", "accuracy", ref=a["random_baseline"],
-                                       sort=list(a["by_confidence"])), width="stretch")
-            with cols[1]:
-                st.caption("Rolling accuracy (30 prediction days)")
-                roll = a["rolling"].reset_index().rename(columns={"correct": "value"})
-                roll["date"] = pd.to_datetime(roll["date"])
-                st.altair_chart(C.lines(roll.assign(series="Model"), "date", "value", "series",
-                                        ".0%"), width="stretch")
-            st.caption(f"Up picks: {a['accuracy_up']:.0%} · Weakest picks: {a['accuracy_down']:.0%}"
-                       + (f" · Paper trades profitable: {a['profitable_trades']:.0%} of "
-                          f"{a['closed_trades']}" if a.get("closed_trades") else ""))
-        else:
-            k[2].metric("Accuracy", "—")
-            st.info("First results appear ~3 months after the first prediction. Meanwhile the "
-                    "table below shows how each open prediction is doing so far.")
-        preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'longterm' "
-                            "ORDER BY date DESC, direction DESC, rank", c)
-        if not preds.empty:
-            preds["Result"] = ["⏳ open" if pd.isna(x) else "✅" if x else "❌"
-                               for x in preds["correct"]]
-            st.subheader("Prediction vs reality")
-            st.dataframe(preds[["date", "symbol", "direction", "confidence", "entry_price",
-                                "actual_exit", "actual_return", "Result"]].rename(columns={
-                "date": "Date", "symbol": "Stock", "direction": "Predicted", "confidence": "Confidence",
-                "entry_price": "Price then", "actual_exit": "Price now/at end",
-                "actual_return": "vs Nifty"}), hide_index=True, width="stretch",
-                column_config={"Confidence": st.column_config.NumberColumn(format="percent"),
-                               "vs Nifty": st.column_config.NumberColumn(format="percent"),
-                               "Price then": st.column_config.NumberColumn(format="₹%.2f"),
-                               "Price now/at end": st.column_config.NumberColumn(format="₹%.2f")})
+        accuracy_tab("longterm")
+    with tab_id:
+        accuracy_tab("intraday")
+
+
+ACCURACY_TEXT = {
+    "longterm": ("A long-term prediction is judged after 3 months: a top pick is ✅ if it beat "
+                 "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.",
+                 "First results appear ~3 months after the first prediction.", "vs Nifty"),
+    "intraday": ("An intraday pick is judged at 15:15 the same day: a long is ✅ if the price rose "
+                 "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 100 "
+                 "stocks that moved that way.", "Results appear after the first trading day.",
+                 "9:45 → 15:15"),
+}
+
+
+def accuracy_tab(h: str):
+    c = conn()
+    a = E.accuracy(c, h)
+    intro, waiting, ret_label = ACCURACY_TEXT[h]
+    st.caption(intro)
+    k = st.columns(4)
+    k[0].metric("Predictions made", a["total"])
+    k[1].metric("Judged so far", a["matured"])
+    if a["matured"]:
+        k[2].metric("Accuracy", f"{a['accuracy']:.0%}",
+                    f"{(a['accuracy'] - a['random_baseline']) * 100:+.0f} pts vs random")
+        k[3].metric("Random-pick baseline", f"{a['random_baseline']:.0%}")
+        cols = st.columns(2)
+        with cols[0]:
+            st.caption("Accuracy by pick strength (dashed line = random picks)")
+            bc = pd.DataFrame({"bucket": list(a["by_confidence"]),
+                               "accuracy": list(a["by_confidence"].values())})
+            st.altair_chart(C.bars(bc, "bucket", "accuracy", ref=a["random_baseline"],
+                                   sort=list(a["by_confidence"])), width="stretch")
+        with cols[1]:
+            st.caption("Rolling accuracy (30 prediction days)")
+            roll = a["rolling"].reset_index().rename(columns={"correct": "value"})
+            roll["date"] = pd.to_datetime(roll["date"])
+            st.altair_chart(C.lines(roll.assign(series="Model"), "date", "value", "series",
+                                    ".0%"), width="stretch")
+        up_name, down_name = ("Longs", "Shorts") if h == "intraday" else ("Up picks", "Weakest picks")
+        st.caption(f"{up_name}: {a['accuracy_up']:.0%} · {down_name}: {a['accuracy_down']:.0%}"
+                   + (f" · Paper trades profitable: {a['profitable_trades']:.0%} of "
+                      f"{a['closed_trades']}" if a.get("closed_trades") else ""))
+    else:
+        k[2].metric("Accuracy", "—")
+        st.info(waiting)
+    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = ? "
+                        "ORDER BY date DESC, direction DESC, rank", c, params=(h,))
+    if preds.empty:
+        return
+    preds["Result"] = ["⏳ open" if pd.isna(x) else "✅" if x else "❌" for x in preds["correct"]]
+    if h == "intraday":
+        preds["direction"] = preds["direction"].map({"up": "long ▲", "down": "short ▼"})
+    st.subheader("Prediction vs reality")
+    st.dataframe(preds[["date", "symbol", "direction", "confidence", "entry_price",
+                        "actual_exit", "actual_return", "Result"]].rename(columns={
+        "date": "Date", "symbol": "Stock", "direction": "Predicted", "confidence": "Confidence",
+        "entry_price": "Price then", "actual_exit": "Price now/at end",
+        "actual_return": ret_label}), hide_index=True, width="stretch",
+        column_config={"Confidence": st.column_config.NumberColumn(format="percent"),
+                       ret_label: st.column_config.NumberColumn(format="percent"),
+                       "Price then": st.column_config.NumberColumn(format="₹%.2f"),
+                       "Price now/at end": st.column_config.NumberColumn(format="₹%.2f")})
 
 
 def page_model():
@@ -397,8 +519,9 @@ def page_model():
     path = M.MODEL_DIR / "meta.json"
     if path.exists():
         meta = json.loads(path.read_text())
-        st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on data up to "
-                   f"{meta['train_to']}. Retrains automatically every weekend.")
+        st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on every week whose "
+                   f"3-month outcome is known (up to {meta['train_to']}); today's picks use "
+                   "today's data. Retrains automatically every weekend.")
         model = M.LongTermModel.load(M.MODEL_DIR)
         from stockpredictor.features.labels import label
         imp = model.importance().head(15)
@@ -420,6 +543,7 @@ def page_model():
     st.subheader("Backtest (walk-forward, costs included)")
     if not bt.exists():
         st.caption("Run `python -m stockpredictor backtest` in the terminal (takes a few minutes).")
+        model_intraday()
         return
     r = json.loads(bt.read_text())
     st.caption(f"{r['period']} · out-of-sample: each year predicted by a model trained only on "
@@ -452,6 +576,40 @@ def page_model():
                         width="stretch")
         with st.expander("Table view"):
             st.dataframe(cv.resample("YE").last().style.format("₹{:,.0f}"), width="stretch")
+    model_intraday()
+
+
+def model_intraday():
+    st.divider()
+    st.header("Intraday model")
+    path = MI.MODEL_DIR / "meta.json"
+    if not path.exists():
+        st.info("Not trained yet: `python -m stockpredictor intraday-backfill` (Angel One, one-time), "
+                "then `python -m stockpredictor train-intraday`.")
+        return
+    meta = json.loads(path.read_text())
+    st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on {meta.get('train_days', '?')} "
+               f"days up to {meta['train_to']}. Retrains every weekend.")
+    from stockpredictor.features.labels import label
+    imp = MI.IntradayModel.load().importance().head(12)
+    imp = (imp / imp.sum()).rename("share").reset_index().rename(columns={"index": "feature"})
+    imp["feature"] = imp["feature"].map(label)
+    st.altair_chart(C.hbars(imp, "feature", "share", ".0%"), width="stretch")
+    bt = MI.MODEL_DIR / "backtest.json"
+    if not bt.exists():
+        st.caption("Run `python -m stockpredictor backtest-intraday` for backtest results.")
+        return
+    r = json.loads(bt.read_text())
+    st.subheader("Intraday backtest (walk-forward, costs included)")
+    st.caption(f"{r['period']} · IC {r['ic_mean']:.3f}, positive on {r['ic_positive_share']:.0%} of days")
+    rows = [{"Strategy": k, "Days": m.get("trading_days", 0), "Return": m.get("return_pct"),
+             "Sharpe": m.get("sharpe"), "Profitable days": m.get("win_days"),
+             "Direction accuracy": m.get("direction_accuracy"), "Random": m.get("random_baseline")}
+            for k, m in r["strategies"].items() if m.get("trading_days")]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
+        k_: st.column_config.NumberColumn(format="percent")
+        for k_ in ["Return", "Profitable days", "Direction accuracy", "Random"]} | {
+        "Sharpe": st.column_config.NumberColumn(format="%.2f")})
 
 
 def page_settings():
@@ -480,6 +638,29 @@ def page_settings():
                 put(c, k_, v_)
             st.success("Saved.")
 
+    st.subheader("Intraday paper trading rules")
+    irules, ienabled = PI.get_rules(c)
+    with st.form("irules"):
+        cols = st.columns(3)
+        on = cols[0].checkbox("Intraday picks enabled", ienabled)
+        nl = cols[1].number_input("Longs", 0, 10, irules.n_long)
+        ns = cols[2].number_input("Shorts", 0, 10, irules.n_short)
+        cols = st.columns(3)
+        levels = list(BI.I.LEVELS)
+        isl = cols[0].selectbox("Stop-loss %", levels, index=levels.index(BI.snap(irules.stop_loss)))
+        itp = cols[1].selectbox("Target %", [0.0] + levels,
+                                index=([0.0] + levels).index(BI.snap(irules.target)),
+                                help="0 = no target, hold until 15:15")
+        skip = cols[2].selectbox("Skip weak days", [0.0, 0.3, 0.5], index=[0.0, 0.3, 0.5].index(
+            irules.skip_quantile) if irules.skip_quantile in (0.0, 0.3, 0.5) else 0,
+            help="Skip days whose signal is weaker than this share of the last 60 days")
+        st.caption("Fewer, larger positions cost less as a share: brokerage is capped at ₹20 an order.")
+        if st.form_submit_button("Save intraday rules", type="primary"):
+            for k_, v_ in {"id_enabled": int(on), "id_n_long": nl, "id_n_short": ns,
+                           "id_stop_loss": isl, "id_target": itp, "id_skip_q": skip}.items():
+                put(c, k_, v_)
+            st.success("Saved.")
+
     st.subheader("My portfolio stop-loss")
     with st.form("pf_sl"):
         cols = st.columns(2)
@@ -495,20 +676,22 @@ def page_settings():
     st.subheader("Paper account")
     cap = st.number_input("Starting capital ₹", 10_000, 10_000_000,
                           int(SETTINGS.paper_capital_longterm), step=10_000)
-    if st.button("Reset long-term paper account", help="Deletes paper trades and starts again"):
+    which = st.selectbox("Account", ["longterm", "intraday"],
+                         format_func={"longterm": "Long-term", "intraday": "Intraday"}.get)
+    if st.button("Reset paper account", help="Deletes this account's paper trades and starts again"):
         for t in ("paper_trades", "paper_orders", "paper_equity", "paper_accounts"):
-            c.execute(f"DELETE FROM {t} WHERE horizon = 'longterm'")
+            c.execute(f"DELETE FROM {t} WHERE horizon = ?", (which,))
         c.execute("DELETE FROM app_settings WHERE key IN ('lt_last_rebalance')")
         c.commit()
-        E.ensure_account(c, cap)
+        E.ensure_account(c, cap, which)
         st.success(f"Paper account reset to {rupees(cap)}.")
 
     st.subheader("Connections")
     st.write(f"Angel One keys: {'✅ set' if SETTINGS.angel.is_complete else '— not set (Yahoo used for live prices)'}")
-    st.write(f"Telegram: {'✅ set' if SETTINGS.telegram_bot_token else '— final phase'}")
 
 
 pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
+         st.Page(page_intraday, title="Intraday picks", icon="⚡"),
          st.Page(page_paper, title="Paper trading", icon="🧪"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),

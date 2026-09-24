@@ -17,7 +17,8 @@ DAILY_CONTEXT = ["ret_5", "ret_21", "ret_63", "rsi_14", "dist_ma50", "dist_ma200
                  "mkt_ret_63", "mkt_vol_21", "vix", "vix_pct_252", "wk_streak"]
 RANKED = ["gap", "r30", "rel_r30", "vwap_dev", "vol30_adv", "pos30", "ret_5"]
 PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close"]
-EXCLUDE = {"symbol", "date", "source", "target", "target_ret", "prev_date", *PRICE_COLS,
+EXCLUDE = {"symbol", "date", "source", "target", "target_ret", "prev_date", "prev_close", "adv20",
+           *PRICE_COLS,
            "v30", *I.LEVEL_COLS}
 
 

@@ -23,12 +23,18 @@ from stockpredictor.data import news as N
 from stockpredictor.features import longterm as F
 from stockpredictor.live.prices import IST, LivePrices, in_market_hours, now_ist
 from stockpredictor.models import longterm as M
+from stockpredictor.live import intraday_bars
+from stockpredictor.models import intraday as MI
 from stockpredictor.paper import daily as D
 from stockpredictor.paper import engine as E
+from stockpredictor.paper import intraday as PI
 from stockpredictor.portfolio import real as R
 
 log = logging.getLogger(__name__)
 AFTER_CLOSE = time(17, 15)
+INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
+INTRADAY_LATEST = time(10, 15)     # too late to act on a 9:45 signal after this
+INTRADAY_SQUARE_OFF = time(15, 15)
 FIRST_FILL = time(9, 20)       # skip the opening minutes' noise
 LIVE_HISTORY_DAYS = 400        # enough history for 12-month features
 
@@ -54,14 +60,18 @@ def alert(conn: sqlite3.Connection, source: str, kind: str, symbol: str | None, 
 
 class Monitor:
     def __init__(self, conn: sqlite3.Connection, store_dir: Path, prices: LivePrices,
-                 capital: float, clock=now_ist, sync=store.sync):
+                 capital: float, clock=now_ist, sync=store.sync,
+                 capital_intraday: float = 100_000):
         self.conn, self.store_dir, self.prices = conn, store_dir, prices
         self.capital, self.clock, self.sync = capital, clock, sync
         self._ctx: E.MarketContext | None = None
         self._model: M.LongTermModel | None = None
         self._last_quarter: datetime | None = None
         self._live_day: tuple | None = None   # (date, is_trading_day)
+        self._imodel: MI.IntradayModel | None = None
+        self.capital_intraday = capital_intraday
         E.ensure_account(conn, capital)
+        E.ensure_account(conn, capital_intraday, PI.HORIZON)
 
     # --- helpers -----------------------------------------------------------
     def ctx(self, reload: bool = False) -> E.MarketContext:
@@ -74,8 +84,14 @@ class Monitor:
             self._model = D.load_or_train(self.ctx())
         return self._model
 
+    def intraday_model(self) -> MI.IntradayModel | None:
+        if self._imodel is None and (MI.MODEL_DIR / "model.txt").exists():
+            self._imodel = MI.IntradayModel.load()
+        return self._imodel
+
     def watched_symbols(self) -> set[str]:
         syms = set(E.holdings(self.conn))
+        syms |= {t["symbol"] for t in PI.open_trades(self.conn)}
         syms |= {r[0] for r in self.conn.execute(
             "SELECT symbol FROM paper_orders WHERE status = 'pending'")}
         for h in R.HORIZONS:
@@ -94,8 +110,16 @@ class Monitor:
         done = []
         _set(self.conn, "monitor_heartbeat", now.isoformat(timespec="seconds"))
         if in_market_hours(now) and self.trading_today(now):
+            day = f"{now:%Y-%m-%d}"
+            if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
+                    and _setting(self.conn, "id_last_picks") != day:
+                self.intraday_picks_job(now)
+                done.append("intraday-picks")
             self.minute_job(now)
             done.append("minute")
+            if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
+                self.square_off_job(now)
+                done.append("square-off")
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
                 self.quarter_job(now)
                 self._last_quarter = now
@@ -135,6 +159,11 @@ class Monitor:
                 alert(self.conn, "paper-longterm", "stop-loss", sym,
                       f"{now:%Y-%m-%d} paper stop-loss: sold {sym} at {p:.2f}")
 
+        # Intraday paper: stop-loss / target exits.
+        for line in PI.check_exits(self.conn, prices, stamp):
+            kind = "stop-loss" if "stop-loss" in line else "target"
+            alert(self.conn, "paper-intraday", kind, line.split()[1], f"{stamp} {line}")
+
         # Real portfolio: alerts only (you place trades yourself on Groww).
         for h in R.HORIZONS:
             s = R.summary(self.conn, h, prices)
@@ -143,6 +172,49 @@ class Monitor:
                     alert(self.conn, f"portfolio-{h}", "stop-loss", r.symbol,
                           f"{now:%Y-%m-%d} {r.symbol} at {r.price:.2f} hit your stop-loss "
                           f"{r.stop_loss:.2f} (avg cost {r.avg_cost:.2f})")
+
+    def intraday_picks_job(self, now: datetime) -> None:
+        day = f"{now:%Y-%m-%d}"
+        _set(self.conn, "id_last_picks", day)       # at most one attempt per day
+        rules, enabled = PI.get_rules(self.conn)
+        model = self.intraday_model()
+        if not enabled:
+            return
+        if model is None:
+            alert(self.conn, "paper-intraday", "info", None,
+                  f"{day} no intraday model yet - run `train-intraday` (after intraday-backfill)")
+            return
+        ctx = self.ctx()
+        active = sorted(ctx.universe.loc[ctx.universe["active"] == 1, "symbol"])
+        f30 = intraday_bars.first30(self.prices, active, now.date())
+        if len(f30) < 0.8 * len(active):
+            alert(self.conn, "paper-intraday", "info", None,
+                  f"{day} intraday skipped: first-30-minute data for only {len(f30)} stocks")
+            return
+        feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
+        prices = self.prices.get(sorted(feats["symbol"]))
+        summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
+        negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
+        strengths = PI.recent_strengths(model, self.store_dir, ctx, rules) \
+            if rules.skip_quantile > 0 else None
+        r = PI.run_picks(self.conn, feats, model, prices, pd.Timestamp(now.date()), rules,
+                         self.capital_intraday, negative, strengths)
+        msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
+        alert(self.conn, "paper-intraday", "decision", None, f"{day} 9:45 intraday: {msg}")
+
+    def square_off_job(self, now: datetime) -> None:
+        day = f"{now:%Y-%m-%d}"
+        _set(self.conn, "id_last_squareoff", day)
+        stamp = now.strftime("%Y-%m-%d %H:%M")
+        opens = [r[0] for r in self.conn.execute(
+            "SELECT symbol FROM intraday_open WHERE date = ?", (day,))]
+        symbols = sorted(set(opens) | {t["symbol"] for t in PI.open_trades(self.conn)})
+        if not symbols:
+            return
+        prices = self.prices.get(symbols)
+        for line in PI.square_off(self.conn, prices, stamp):
+            alert(self.conn, "paper-intraday", "fill", line.split()[1], f"{stamp} {line}")
+        PI.evaluate_day(self.conn, day, prices)
 
     def quarter_job(self, now: datetime) -> None:
         try:
@@ -234,7 +306,21 @@ class Monitor:
         self._model.save(M.MODEL_DIR)
         alert(self.conn, "model", "info", None,
               f"{now:%Y-%m-%d} model retrained on data up to {self._model.train_to}")
+        self.retrain_intraday(ctx, now)
         return True
+
+    def retrain_intraday(self, ctx: E.MarketContext, now: datetime) -> None:
+        from stockpredictor.data import intraday as I
+        from stockpredictor.features import intraday as FI
+
+        feats = FI.build(I.load_summaries(self.store_dir), ctx.daily, ctx.feats,
+                         store.load_actions(self.store_dir))
+        if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
+            return
+        self._imodel = MI.IntradayModel.train(feats)
+        self._imodel.save()
+        alert(self.conn, "model", "info", None,
+              f"{now:%Y-%m-%d} intraday model retrained on {self._imodel.train_days} days")
 
 
 def run_forever(monitor: Monitor, interval: int = 60) -> None:

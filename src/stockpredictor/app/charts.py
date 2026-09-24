@@ -43,7 +43,8 @@ def lines(df: pd.DataFrame, x: str, y: str, series: str, y_format: str = ",.0f",
                       legend=alt.Legend(orient="top", title=None))
     base = alt.Chart(df).encode(x=alt.X(f"{x}:T", title=None, axis=alt.Axis(**_axis())))
     line = base.mark_line(strokeWidth=2).encode(
-        y=alt.Y(f"{y}:Q", title=y_title, axis=alt.Axis(format=y_format, **_axis())), color=color)
+        y=alt.Y(f"{y}:Q", title=y_title, scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=y_format, **_axis())), color=color)
     hover = alt.selection_point(fields=[x], nearest=True, on="pointerover", empty=False)
     rule = base.mark_rule(opacity=0.4).encode(
         opacity=alt.condition(hover, alt.value(0.4), alt.value(0)),

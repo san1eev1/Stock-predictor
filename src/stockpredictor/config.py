@@ -28,8 +28,6 @@ class AngelCredentials:
 class Settings:
     db_path: Path
     angel: AngelCredentials
-    telegram_bot_token: str
-    telegram_chat_id: str
     paper_capital_intraday: float
     paper_capital_longterm: float
 
@@ -49,8 +47,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
             pin=os.getenv("ANGEL_PIN", ""),
             totp_secret=os.getenv("ANGEL_TOTP_SECRET", ""),
         ),
-        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
         paper_capital_intraday=float(os.getenv("PAPER_CAPITAL_INTRADAY", "100000")),
         paper_capital_longterm=float(os.getenv("PAPER_CAPITAL_LONGTERM", "100000")),
     )
