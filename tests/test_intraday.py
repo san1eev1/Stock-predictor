@@ -1,58 +1,63 @@
 from datetime import date, datetime
 
-from stockpredictor import db
-from stockpredictor.data import intraday, quality
+import numpy as np
+import pandas as pd
+import pytest
+
+from stockpredictor.data import intraday as I
 
 
-class FakeClient:
-    def __init__(self):
-        self.calls = []
-
-    def candles(self, token, interval, frm, to):
-        self.calls.append((frm, to))
-        ts = frm.replace(hour=9, minute=15).isoformat() + "+05:30"
-        return [[ts, 100, 101, 99, 100.5, 5000]]
+def day_bars(d="2026-09-21", path=None, vol=1000):
+    """75 five-minute bars 9:15..15:25; `path` = close price per bar."""
+    ts = pd.date_range(f"{d} 09:15", f"{d} 15:25", freq="5min")
+    path = np.asarray(path if path is not None else np.full(len(ts), 100.0), dtype=float)
+    return pd.DataFrame({"ts": ts, "open": path, "high": path + 0.1, "low": path - 0.1,
+                         "close": path, "volume": vol})
 
 
-def test_chunk_ranges_cover_period_without_overlap():
-    ranges = intraday.chunk_ranges(date(2024, 1, 1), date(2024, 3, 10), 30)
-    assert ranges[0] == (datetime(2024, 1, 1, 9, 15), datetime(2024, 1, 30, 15, 30))
-    assert ranges[1][0] == datetime(2024, 1, 31, 9, 15)
-    assert ranges[-1][1] == datetime(2024, 3, 10, 15, 30)
-    assert len(ranges) == 3
+def test_summary_first30_and_exit():
+    path = np.full(75, 100.0)
+    path[:6] = [99, 99.5, 100, 100.5, 101, 102]   # 9:15..9:40
+    path[6:] = 102
+    path[72] = 105                                  # 15:15 bar (after exit)
+    s = I.summarize_day(day_bars(path=path))
+    assert s["open"] == 99 and s["c30"] == 102 and s["h30"] == pytest.approx(102.1)
+    assert s["px_1515"] == 102 and s["close"] == 102
+    assert s["high_after"] == pytest.approx(102.1)  # the 15:15 spike is excluded
 
 
-def test_update_symbol_resumes_from_last_stored_day(tmp_path):
-    path = tmp_path / "t.db"
-    db.init_db(path)
-    client = FakeClient()
-    with db.connect(path) as conn:
-        intraday.update_symbol(conn, client, "ABC", "1", "ONE_MINUTE",
-                               date(2024, 1, 1), date(2024, 1, 20))
-        intraday.update_symbol(conn, client, "ABC", "1", "ONE_MINUTE",
-                               date(2024, 1, 1), date(2024, 1, 25))
-        assert client.calls[-1][0] == datetime(2024, 1, 1, 9, 15)
-        assert conn.execute("SELECT COUNT(*) FROM intraday_prices").fetchone()[0] == 1
+def test_first_hit_minutes():
+    path = np.full(75, 100.0)
+    path[8] = 99.0      # bar 9:55-10:00 -> first hit 15 min after 9:45
+    path[20] = 101.6    # bar 10:55-11:00 -> 75 min after 9:45
+    s = I.summarize_day(day_bars(path=path))
+    assert s["d100"] == 15 and s["d075"] == 15 and np.isnan(s["d150"])
+    assert s["u150"] == 75 and np.isnan(s["u200"])
 
 
-def test_split_factor(tmp_path):
-    path = tmp_path / "t.db"
-    db.init_db(path)
-    with db.connect(path) as conn:
-        conn.execute("INSERT INTO corporate_actions VALUES ('ABC', '2024-06-01', 'split', 2.0)")
-        assert intraday.split_factor(conn, "ABC", date(2024, 5, 1)) == 0.5
-        assert intraday.split_factor(conn, "ABC", date(2024, 7, 1)) == 1.0
+def test_incomplete_days_skipped_and_multi_day():
+    bars = pd.concat([day_bars("2026-09-21"), day_bars("2026-09-22").head(3)])
+    rows = I.summarize(bars, "ABC", "yahoo")
+    assert [r["date"] for r in rows] == ["2026-09-21"]
 
 
-def test_quality_report_flags_gaps(tmp_path):
-    path = tmp_path / "t.db"
-    db.init_db(path)
-    with db.connect(path) as conn:
-        conn.executemany(
-            "INSERT INTO daily_prices (symbol, date, open, high, low, close, volume) "
-            "VALUES ('ABC', ?, 1, 1, 1, 1, 10)",
-            [("2024-01-01",), ("2024-01-02",), ("2024-02-01",)])
-        report = quality.daily_report(conn, ["ABC", "XYZ"])
-    assert report[0]["gaps"] == 1 and report[0]["rows"] == 3
-    assert report[1]["rows"] == 0
-    assert "1 without data" in quality.format_report(report)
+def test_storage_merge_prefers_angel(tmp_path):
+    y = I.summarize(day_bars("2026-09-21"), "ABC", "yahoo")
+    a = [{**y[0], "c30": 123.0, "source": "angelone"}]
+    I.upsert_store(tmp_path / "store", y)
+    I.upsert_store(tmp_path / "store", y)            # idempotent
+    I.upsert_backfill(a, tmp_path / "bf.csv")
+    df = I.load_summaries(tmp_path / "store", tmp_path / "bf.csv")
+    assert len(df) == 1 and df["c30"].iloc[0] == 123.0
+
+
+def test_chunk_ranges_cover_period():
+    r = I.chunk_ranges(date(2024, 1, 1), date(2024, 3, 10), 30)
+    assert r[0] == (datetime(2024, 1, 1, 9, 15), datetime(2024, 1, 30, 15, 30))
+    assert r[-1][1] == datetime(2024, 3, 10, 15, 30) and len(r) == 3
+
+
+def test_split_factor():
+    ca = pd.DataFrame([{"symbol": "ABC", "date": "2024-06-01", "kind": "split", "value": 2.0}])
+    assert I.split_factor(ca, "ABC", date(2024, 5, 1)) == 0.5
+    assert I.split_factor(ca, "ABC", date(2024, 7, 1)) == 1.0

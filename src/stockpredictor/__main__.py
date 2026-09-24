@@ -65,28 +65,44 @@ def cmd_prices(settings, args) -> None:
         print(f"  {name}: {err}")
 
 
-def cmd_prices_intraday(settings, args) -> None:
+def cmd_intraday_collect(settings, args) -> None:
+    """Yahoo 5-minute bars -> daily summaries in the git store (run by GitHub Actions)."""
+    from stockpredictor import store
+    from stockpredictor.data import intraday
+
+    d = Path(args.dir)
+    uni = store.load_universe(d)
+    symbols = uni.loc[uni["active"] == 1, "symbol"].tolist()
+    bars = intraday.yahoo_bars(symbols, period=args.period)
+    rows = [r for s, b in bars.items() for r in intraday.summarize(b, s, "yahoo")]
+    n = intraday.upsert_store(d, rows)
+    print(f"Intraday summaries: {n} stock-days from {len(bars)}/{len(symbols)} stocks")
+
+
+def cmd_intraday_backfill(settings, args) -> None:
+    """Angel One 5-minute history -> local summaries (one-time, on the Mac)."""
+    from stockpredictor import store
     from stockpredictor.data import angelone, intraday
 
-    db.init_db(settings.db_path)
+    d = Path(args.dir)
+    uni = store.load_universe(d)
+    symbols = args.symbols or uni.loc[uni["active"] == 1, "symbol"].tolist()
     client = angelone.AngelDataClient(settings.angel)
-    start = date.today() - timedelta(days=args.days)
-    with db.connect(settings.db_path) as conn:
-        rows = conn.execute(
-            "SELECT symbol, angel_token FROM stocks WHERE active = 1 "
-            "AND angel_token IS NOT NULL ORDER BY symbol").fetchall()
-        if args.symbols:
-            rows = [r for r in rows if r["symbol"] in args.symbols]
-        if not rows:
-            print("No stocks with Angel One tokens — run `tokens` first.")
-            return
-        for i, r in enumerate(rows, 1):
-            try:
-                n = intraday.update_symbol(conn, client, r["symbol"], r["angel_token"],
-                                           args.interval, start)
-                print(f"[{i}/{len(rows)}] {r['symbol']}: {n} candles", flush=True)
-            except Exception as exc:
-                print(f"[{i}/{len(rows)}] {r['symbol']}: error: {exc}", flush=True)
+    tokens = angelone.fetch_nse_equity_tokens()
+    start, end = date.today() - timedelta(days=args.days), date.today() - timedelta(days=1)
+    total = 0
+    for i, sym in enumerate(symbols, 1):
+        if sym not in tokens:
+            print(f"[{i}/{len(symbols)}] {sym}: no Angel One token")
+            continue
+        try:
+            rows = intraday.summarize(intraday.angel_bars(client, tokens[sym], start, end),
+                                      sym, "angelone")
+            total += intraday.upsert_backfill(rows)
+            print(f"[{i}/{len(symbols)}] {sym}: {len(rows)} days", flush=True)
+        except Exception as exc:
+            print(f"[{i}/{len(symbols)}] {sym}: error: {exc}", flush=True)
+    print(f"Saved {total} stock-days to {intraday.BACKFILL_PATH}")
 
 
 def cmd_data_check(settings, args) -> None:
@@ -262,10 +278,8 @@ def cmd_status(settings) -> None:
         with db.connect(settings.db_path) as conn:
             n = conn.execute("SELECT COUNT(*) FROM stocks WHERE active = 1").fetchone()[0]
             print(f"Active stocks:   {n}")
-            for table in ("daily_prices", "index_prices", "intraday_prices"):
-                cnt, last = conn.execute(
-                    f"SELECT COUNT(*), MAX({'ts' if table == 'intraday_prices' else 'date'}) "
-                    f"FROM {table}").fetchone()
+            for table in ("daily_prices", "index_prices"):
+                cnt, last = conn.execute(f"SELECT COUNT(*), MAX(date) FROM {table}").fetchone()
                 print(f"{table + ':':<17}{cnt:,} rows, latest {last or '-'}")
 
 
@@ -279,11 +293,15 @@ def _prices_args(p):
     p.add_argument("--start", default="2010-01-01", help="First date for new stocks (YYYY-MM-DD)")
 
 
-def _intraday_args(p):
+def _collect_args(p):
+    _dir_arg(p)
+    p.add_argument("--period", default="7d", help="Yahoo lookback, up to 60d (default 7d)")
+
+
+def _backfill_args(p):
+    _dir_arg(p)
     _symbols_arg(p)
-    p.add_argument("--interval", default="FIVE_MINUTE",
-                   help="ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ... (default FIVE_MINUTE)")
-    p.add_argument("--days", type=int, default=365, help="How many days back (default 365)")
+    p.add_argument("--days", type=int, default=730, help="How many days back (default 730)")
 
 
 def _dir_arg(p):
@@ -324,8 +342,10 @@ ARG_COMMANDS = {
     "export-store": (cmd_export_store, "Write database market data to CSV files", _dir_arg),
     "import-store": (cmd_import_store, "Load CSV market data into the database", _dir_arg),
     "prices": (cmd_prices, "Download/update daily prices for stocks and indices", _prices_args),
-    "prices-intraday": (cmd_prices_intraday, "Download intraday candles from Angel One",
-                        _intraday_args),
+    "intraday-collect": (cmd_intraday_collect, "Yahoo 5-min bars -> intraday summaries (git)",
+                         _collect_args),
+    "intraday-backfill": (cmd_intraday_backfill, "Angel One 5-min history -> local summaries",
+                          _backfill_args),
     "data-check": (cmd_data_check, "Report data coverage and gaps", _symbols_arg),
 }
 
