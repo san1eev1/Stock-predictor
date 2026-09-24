@@ -27,6 +27,8 @@ from stockpredictor.models import longterm as M
 
 HORIZON = "longterm"
 N_PICKS = 10    # predictions saved per side (up / down) each day
+# Strategy variants raced live on paper: momentum share of the score.
+SHADOW_VARIANTS = {"AI model": 0.0, "50/50 blend": 0.5, "Momentum only": 1.0}
 
 
 @dataclass
@@ -197,8 +199,10 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
     severe = set(summary.loc[summary["severe_negative"].astype(bool), "symbol"])
 
-    # 4. Save predictions (top picks = up, bottom = down) with reasons.
+    # 4. Save predictions (top picks = up, bottom = down) with reasons, and the
+    #    shadow predictions of each strategy variant for the live race.
     save_predictions(conn, today, model, date, ctx.nifty_close(date))
+    save_shadow(conn, today, model, date, ctx.nifty_close(date))
 
     # 5. Decide and queue orders for the next fill.
     rebalance = is_rebalance_day(conn, date, rebalance_mode)
@@ -235,18 +239,38 @@ def save_predictions(conn, today: pd.DataFrame, model: M.LongTermModel,
     conn.commit()
 
 
+def save_shadow(conn, today: pd.DataFrame, model: M.LongTermModel, date: pd.Timestamp,
+                nifty: float) -> None:
+    raw = pd.Series(model.model.predict(today[model.features]), index=today.index)
+    rows = []
+    for name, w in SHADOW_VARIANTS.items():
+        score = M.blend(raw, today, w)
+        ranked = today.assign(s=score.values).sort_values("s", ascending=False)
+        for direction, part in (("up", ranked.head(N_PICKS)), ("down", ranked.tail(N_PICKS))):
+            rows += [(name, f"{date:%Y-%m-%d}", r.symbol, direction, float(r.close), nifty)
+                     for r in part.itertuples()]
+    conn.executemany("INSERT OR REPLACE INTO shadow_predictions (variant, date, symbol, direction, "
+                     "entry_price, nifty_entry) VALUES (?, ?, ?, ?, ?, ?)", rows)
+    conn.commit()
+
+
 # --- Evaluation & accuracy ----------------------------------------------------------
 
 def evaluate_predictions(conn: sqlite3.Connection, ctx: MarketContext,
                          horizon_days: int = M.HORIZON) -> int:
     """Update running excess return; mark correct/incorrect once 3 months have passed."""
+    n = _evaluate(conn, ctx, horizon_days, "predictions", "horizon = 'longterm'")
+    _evaluate(conn, ctx, horizon_days, "shadow_predictions", "1 = 1")   # live strategy race
+    return n
+
+
+def _evaluate(conn, ctx, horizon_days: int, table: str, where: str) -> int:
     close = ctx.daily.pivot(index="date", columns="symbol", values="close").sort_index()
     nifty = ctx.indices[ctx.indices["symbol"] == F.MARKET_INDEX].set_index("date")["close"]
     nifty = nifty.reindex(close.index).ffill()
     dates = close.index
     done = 0
-    for p in conn.execute("SELECT * FROM predictions WHERE horizon = ? AND evaluated_at IS NULL",
-                          (HORIZON,)).fetchall():
+    for p in conn.execute(f"SELECT * FROM {table} WHERE {where} AND evaluated_at IS NULL").fetchall():
         d = pd.Timestamp(p["date"])
         if d not in dates or p["symbol"] not in close:
             continue
@@ -265,13 +289,31 @@ def evaluate_predictions(conn: sqlite3.Connection, ctx: MarketContext,
             share_up = float((all_ex.dropna() > 0).mean())
             base = share_up if p["direction"] == "up" else 1 - share_up
         conn.execute(
-            "UPDATE predictions SET actual_exit = ?, actual_return = ?, correct = ?, base_rate = ?, "
+            f"UPDATE {table} SET actual_exit = ?, actual_return = ?, correct = ?, base_rate = ?, "
             "evaluated_at = ? WHERE id = ?",
             (float(px.iloc[-1]), float(excess), correct, base,
              datetime.now().isoformat(timespec="seconds") if matured else None, p["id"]))
         done += 1
     conn.commit()
     return done
+
+
+def strategy_race(conn: sqlite3.Connection, last_days: int = 60) -> pd.DataFrame:
+    """Live accuracy of each strategy variant over its most recent judged prediction days."""
+    df = pd.read_sql("SELECT variant, date, direction, correct, base_rate, actual_return "
+                     "FROM shadow_predictions WHERE correct IS NOT NULL", conn)
+    cols = ["variant", "days", "predictions", "accuracy", "random", "avg_excess_up"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    recent = sorted(df["date"].unique())[-last_days:]
+    df = df[df["date"].isin(recent)]
+    g = df.groupby("variant")
+    out = pd.DataFrame({
+        "days": g["date"].nunique(), "predictions": g.size(), "accuracy": g["correct"].mean(),
+        "random": g["base_rate"].mean(),
+        "avg_excess_up": df[df["direction"] == "up"].groupby("variant")["actual_return"].mean(),
+    }).reset_index()
+    return out[cols].sort_values("accuracy", ascending=False)
 
 
 def accuracy(conn: sqlite3.Connection, horizon: str = HORIZON) -> dict:

@@ -448,6 +448,7 @@ def page_accuracy():
     tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
     with tab_lt:
         accuracy_tab("longterm")
+        strategy_race()
     with tab_id:
         accuracy_tab("intraday")
 
@@ -588,7 +589,8 @@ def training_history():
                        "FROM model_runs ORDER BY id", c)
     st.divider()
     st.header("Continuous training")
-    st.caption("Models retrain after every close on the newest data. Each weekend they self-tune: "
+    st.caption("Models retrain after every close on all history plus judged paper-trading "
+               "predictions (wrong ones weigh more). Each weekend they self-tune: "
                "several settings are scored out-of-sample (each period predicted by a model "
                "trained only on earlier data) and new settings are adopted only if they beat the "
                "current ones. Prediction quality (IC) above 0 means better than random; "
@@ -623,6 +625,31 @@ def training_history():
         st.caption("Last retrain: " + " · ".join(
             f"{'Long-term' if r.horizon == 'longterm' else 'Intraday'} "
             f"{r.version[:16].replace('T', ' ')} (data to {r.train_to})" for r in last.itertuples()))
+
+
+def strategy_race():
+    st.subheader("🏁 Live strategy race")
+    st.caption("Every day three variants also make paper predictions: the AI model, a 50/50 "
+               "blend with plain momentum, and momentum only. Each is judged after 3 months like "
+               "the real picks. Once every variant has 20+ judged days, the system switches to "
+               "the one with the best live accuracy if it leads by 5+ points.")
+    c = conn()
+    race = E.strategy_race(c)
+    current_w = M.current_params().get("mom_weight", 0.0)
+    now_using = min(E.SHADOW_VARIANTS, key=lambda k: abs(E.SHADOW_VARIANTS[k] - current_w))
+    started = c.execute("SELECT MIN(date), COUNT(DISTINCT date) FROM shadow_predictions").fetchone()
+    if race.empty:
+        msg = (f"Race started {started[0]}; {started[1]} prediction days so far. "
+               if started[0] else "The race starts with the first daily decision. ")
+        st.info(msg + f"First results ~3 months later. Currently using: **{now_using}**.")
+        return
+    race["Using now"] = ["✅" if v == now_using else "" for v in race["variant"]]
+    st.dataframe(race.rename(columns={
+        "variant": "Strategy", "days": "Judged days", "predictions": "Predictions",
+        "accuracy": "Live accuracy", "random": "Random picks",
+        "avg_excess_up": "Top picks vs Nifty"}), hide_index=True, width="stretch",
+        column_config={k_: st.column_config.NumberColumn(format="percent")
+                       for k_ in ["Live accuracy", "Random picks", "Top picks vs Nifty"]})
 
 
 def model_intraday():

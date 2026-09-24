@@ -29,7 +29,9 @@ GRID = {
     "lambda_l2": [1.0, 5.0, 10.0],
     "num_rounds": [200, 300, 400, 600],
 }
-LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0]}
+LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
+                 "recency_half_life": [0.0, 3.0, 5.0, 10.0], "tail_weight": [0.0, 1.0, 2.0]}
+FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
 MARGIN = 0.003          # IC improvement needed to switch settings
 
 
@@ -71,7 +73,28 @@ def _save_params(model_dir, params: dict) -> None:
 # --- Long-term ---------------------------------------------------------------------
 
 def longterm_labeled(ctx) -> pd.DataFrame:
-    return M.add_labels(F.weekly_snapshots(ctx.feats), ctx.daily, ctx.indices)
+    return M.add_labels(M.training_snapshots(ctx.feats), ctx.daily, ctx.indices)
+
+
+def paper_feedback(ctx, conn, labeled: pd.DataFrame) -> pd.DataFrame:
+    """Add the judged paper-trading predictions to the training data with extra weight
+    (more for the ones it got wrong), so the model concentrates on its own decisions."""
+    if conn is None:
+        return labeled
+    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
+                         "AND correct IS NOT NULL", conn)
+    if judged.empty:
+        return labeled
+    judged["date"] = pd.to_datetime(judged["date"])
+    rows = ctx.feats.merge(judged, on=["symbol", "date"])
+    if rows.empty:
+        return labeled
+    rows = M.add_labels(rows.drop(columns="correct"), ctx.daily, ctx.indices) \
+        .merge(judged, on=["symbol", "date"])
+    rows["fb_weight"] = rows["correct"].map(FEEDBACK_WEIGHT)
+    key = set(zip(rows["symbol"], rows["date"]))
+    rest = labeled[[k not in key for k in zip(labeled["symbol"], labeled["date"])]]
+    return pd.concat([rest, rows.drop(columns="correct")], ignore_index=True)
 
 
 def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> dict:
@@ -89,17 +112,18 @@ def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> di
 
 
 def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | None:
-    """Retrain when new 3-month outcomes have become known since the last training."""
-    labeled = longterm_labeled(ctx)
-    known = labeled.dropna(subset=["target"])["date"].max()
+    """Daily retrain on all history + judged paper predictions (once per day)."""
     if not force and (M.MODEL_DIR / "meta.json").exists():
         meta = json.loads((M.MODEL_DIR / "meta.json").read_text())
-        if pd.Timestamp(meta["train_to"]) >= known:
+        if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d"):
             return None
+    labeled = paper_feedback(ctx, conn, longterm_labeled(ctx))
     model = M.LongTermModel.train(labeled)
     model.save(M.MODEL_DIR)
+    fb = int(labeled["fb_weight"].notna().sum()) if "fb_weight" in labeled else 0
     log_run(conn, "longterm", "retrain", model.train_to,
-            {"rows": int(labeled["target"].notna().sum()), "params": M.current_params()})
+            {"rows": int(labeled["target"].notna().sum()), "feedback_rows": fb,
+             "params": M.current_params()})
     return model
 
 
@@ -124,6 +148,34 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
               "tested": len(results), "params": chosen["params"], "all": results}
     log_run(conn, "longterm", "tune", f"{labeled['date'].max():%Y-%m-%d}", report)
     retrain_longterm(ctx, conn, force=True)
+    return report
+
+
+LIVE_MIN_DAYS = 20       # judged prediction days needed before switching on live results
+LIVE_MIN_GAIN = 0.05     # accuracy lead (5 points) a variant needs to take over
+
+
+def live_selection(conn) -> dict | None:
+    """Switch the long-term strategy blend to the variant that wins the live paper race."""
+    from stockpredictor.paper import engine as E
+
+    race = E.strategy_race(conn)
+    if race.empty or race["days"].min() < LIVE_MIN_DAYS:
+        return None
+    params = M.current_params()
+    current_w = params.get("mom_weight", 0.0)
+    weights = E.SHADOW_VARIANTS
+    current = min(weights, key=lambda k: abs(weights[k] - current_w))
+    acc = race.set_index("variant")["accuracy"]
+    best = acc.idxmax()
+    switched = best != current and acc[best] >= acc.get(current, 0) + LIVE_MIN_GAIN
+    report = {"race": race.to_dict("records"), "current": current, "best": best,
+              "switched": bool(switched)}
+    if switched:
+        _save_params(M.MODEL_DIR, {**params, "mom_weight": weights[best]})
+        log_run(conn, "longterm", "live-switch", datetime.now().strftime("%Y-%m-%d"),
+                {**report, "ic": None, "adopted": True,
+                 "params": {"mom_weight": weights[best]}})
     return report
 
 
@@ -152,14 +204,15 @@ def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120) -
             "direction_accuracy": float(acc), "days": int(len(ic))}
 
 
-def retrain_intraday(ctx, store_dir, conn=None) -> MI.IntradayModel | None:
+def retrain_intraday(ctx, store_dir, conn=None, force: bool = False) -> MI.IntradayModel | None:
+    """Daily retrain on all intraday history (Yahoo + Angel One), once per day."""
+    if not force and (MI.MODEL_DIR / "meta.json").exists():
+        meta = json.loads((MI.MODEL_DIR / "meta.json").read_text())
+        if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d"):
+            return None
     feats = intraday_feats(ctx, store_dir)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
         return None
-    if (MI.MODEL_DIR / "meta.json").exists():
-        meta = json.loads((MI.MODEL_DIR / "meta.json").read_text())
-        if pd.Timestamp(meta["train_to"]) >= feats.dropna(subset=["target"])["date"].max():
-            return None
     model = MI.IntradayModel.train(feats)
     model.save()
     log_run(conn, "intraday", "retrain", model.train_to,

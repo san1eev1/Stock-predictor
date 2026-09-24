@@ -176,6 +176,23 @@ CREATE TABLE IF NOT EXISTS alerts (
     UNIQUE (source, kind, symbol, message)
 );
 
+-- Shadow predictions of strategy variants, judged like real ones (live strategy race)
+CREATE TABLE IF NOT EXISTS shadow_predictions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    variant       TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    direction     TEXT NOT NULL,
+    entry_price   REAL,
+    nifty_entry   REAL,
+    actual_exit   REAL,
+    actual_return REAL,
+    correct       INTEGER,
+    base_rate     REAL,
+    evaluated_at  TEXT,
+    UNIQUE (variant, date, symbol)
+);
+
 -- Latest live prices seen by the monitor
 CREATE TABLE IF NOT EXISTS live_prices (
     symbol  TEXT PRIMARY KEY,

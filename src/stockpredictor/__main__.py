@@ -93,18 +93,8 @@ def cmd_intraday_backfill(settings, args) -> None:
     client = angelone.AngelDataClient(settings.angel)
     tokens = angelone.fetch_nse_equity_tokens()
     start, end = date.today() - timedelta(days=args.days), date.today() - timedelta(days=1)
-    total = 0
-    for i, sym in enumerate(symbols, 1):
-        if sym not in tokens:
-            print(f"[{i}/{len(symbols)}] {sym}: no Angel One token")
-            continue
-        try:
-            rows = intraday.summarize(intraday.angel_bars(client, tokens[sym], start, end),
-                                      sym, "angelone")
-            total += intraday.upsert_backfill(rows)
-            print(f"[{i}/{len(symbols)}] {sym}: {len(rows)} days", flush=True)
-        except Exception as exc:
-            print(f"[{i}/{len(symbols)}] {sym}: error: {exc}", flush=True)
+    total = intraday.angel_backfill(client, tokens, symbols, start, end,
+                                    progress=lambda m: print(m, flush=True))
     print(f"Saved {total} stock-days to {intraday.BACKFILL_PATH}")
 
 
@@ -323,6 +313,56 @@ def cmd_app(settings) -> None:
         print("Stopped.")
 
 
+def _angel_startup(settings, store_dir: Path) -> None:
+    """Check the Angel One login; download intraday history in the background if missing."""
+    import threading
+
+    from stockpredictor.data import intraday
+
+    if not settings.angel.is_complete:
+        print("  Angel One: keys not set in .env - using Yahoo (prices may lag a few minutes)\n")
+        return
+    try:
+        from stockpredictor.data import angelone
+
+        client = angelone.AngelDataClient(settings.angel)
+        client.login()
+        print("  Angel One: login OK - real-time prices enabled")
+    except Exception as exc:
+        print(f"  Angel One: login FAILED ({exc}) - using Yahoo. Check the keys in .env.\n")
+        return
+    have = intraday.backfill_days()
+    if have >= 200:
+        print(f"  Angel One intraday history: {have} days available\n")
+        return
+    print("  Angel One intraday history: downloading ~2 years in the background "
+          "(about 15 minutes); the intraday model retrains when it finishes.\n")
+
+    def job():
+        import logging
+
+        from stockpredictor import store
+        from stockpredictor.models import trainer as T
+        from stockpredictor.paper.engine import MarketContext
+
+        log = logging.getLogger("backfill")
+        try:
+            uni = store.load_universe(store_dir)
+            symbols = uni.loc[uni["active"] == 1, "symbol"].tolist()
+            tokens = angelone.fetch_nse_equity_tokens()
+            n = intraday.angel_backfill(client, tokens, symbols, date.today() - timedelta(days=730),
+                                        date.today() - timedelta(days=1),
+                                        progress=lambda m: log.debug(m))
+            log.info("Angel One backfill finished: %s stock-days; retraining intraday model", n)
+            with db.connect(settings.db_path) as conn:
+                T.retrain_intraday(MarketContext.load(store_dir), store_dir, conn, force=True)
+            log.info("Intraday model retrained with Angel One history")
+        except Exception:
+            log.exception("Angel One backfill failed")
+
+    threading.Thread(target=job, daemon=True, name="angel-backfill").start()
+
+
 def cmd_start(settings, args) -> None:
     """Everything in one go: web dashboard + live monitor (+ continuous training)."""
     import logging
@@ -341,6 +381,7 @@ def cmd_start(settings, args) -> None:
     print("  Live monitor and continuous training are running. Ctrl+C stops everything.\n")
     if not args.no_browser:
         webbrowser.open(url)
+    _angel_startup(settings, Path(args.dir))
     conn = db.connect(settings.db_path)
     mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
                           settings.paper_capital_longterm,

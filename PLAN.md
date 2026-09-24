@@ -172,6 +172,13 @@ then **intraday** (needs Angel One). Telegram was dropped.
 - **VS Code:** one-click tasks and F5 launch; `start` runs web dashboard + monitor + training together.
 - **Fairer backtest:** trades the 100 most liquid of the 200 on each date (point-in-time proxy for index membership). Result 2012–2026: model 19.6%/yr, **momentum only 26.3%**, equal-weight 18.4%, Nifty 11.3% — the earlier 28% was mostly survivorship bias. Over the latest 3 years the model beats momentum (IC 0.061 vs 0.022, top-10 beat Nifty 61% vs 55%), so the weekly tuner decides the blend from recent out-of-sample evidence.
 
+### ✅ Learning from paper trading
+
+- Daily long-term retraining on all history (5-day snapshot grid anchored on the newest day) plus judged paper predictions as weighted feedback (wrong 2×, right 1.5×).
+- Live strategy race on paper (AI / 50-50 blend / momentum); automatic switch after 20+ judged days if a variant leads by 5+ accuracy points.
+- Weekly tuning also covers recency weighting and tail (extreme-outcome) weighting.
+- Angel One: login check at start, background 2-year intraday backfill, daily after-close top-up.
+
 ### Dropped
 
 - Telegram alerts (alerts are shown in the dashboard sidebar instead).

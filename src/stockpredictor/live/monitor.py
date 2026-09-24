@@ -288,6 +288,8 @@ class Monitor:
         waited_long = now.time() >= time(21, 0)
         if latest.date() < now.date() and not waited_long:
             return False   # today's data not published yet; try again in 15 minutes
+        # Add today's real Angel One intraday data (more accurate than Yahoo).
+        self.angel_topup(now)
         # Keep learning: retrain on the newest data before today's decision.
         try:
             lt = T.retrain_longterm(ctx, self.conn)
@@ -299,12 +301,40 @@ class Monitor:
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
+        # Learn from paper trading: switch strategy if a variant clearly wins live.
+        try:
+            sel = T.live_selection(self.conn)
+            if sel and sel["switched"]:
+                self._model = None
+                alert(self.conn, "model", "info", None,
+                      f"{now:%Y-%m-%d} live paper results: switched long-term strategy from "
+                      f"'{sel['current']}' to '{sel['best']}'")
+        except Exception:
+            log.exception("live strategy selection failed")
         for r in results:
             buys, sells = ", ".join(r["buys"]) or "none", ", ".join(s for s, _ in r["sells"]) or "none"
             alert(self.conn, "paper-longterm", "decision", None,
                   f"{r['date']:%Y-%m-%d} decision - buy: {buys}; sell: {sells}")
         _set(self.conn, "lt_after_close_day", f"{now:%Y-%m-%d}")
         return True
+
+    def angel_topup(self, now: datetime) -> None:
+        settings = getattr(self.prices, "settings", None)
+        if settings is None or not settings.angel.is_complete \
+                or _setting(self.conn, "angel_topup_day") == f"{now:%Y-%m-%d}":
+            return
+        try:
+            from stockpredictor.data import intraday as I
+
+            client = self.prices._angel_client()
+            ctx = self.ctx()
+            symbols = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
+            n = I.angel_backfill(client, self.prices._tokens, symbols, now.date(), now.date(),
+                                 progress=lambda m: None)
+            _set(self.conn, "angel_topup_day", f"{now:%Y-%m-%d}")
+            log.info("Angel One: saved today's intraday summaries for %s stocks", n)
+        except Exception:
+            log.exception("Angel One daily top-up failed")
 
     def weekly_retrain(self, now: datetime) -> bool:
         """Weekend self-tuning: try new model settings, keep them only if they test better."""

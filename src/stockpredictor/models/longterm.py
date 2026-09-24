@@ -56,21 +56,51 @@ def blend(scores: pd.Series, feats: pd.DataFrame, mom_weight: float) -> pd.Serie
     return (1 - mom_weight) * model_rank + mom_weight * mom_rank
 
 
+# Settings that shape the training data rather than LightGBM itself (tuned weekly).
+TRAINING_DEFAULTS = {"mom_weight": 0.0, "recency_half_life": 0.0, "tail_weight": 0.0}
+SNAPSHOT_STEP = 5       # use every 5th trading day, counted back from the newest day
+
+
 def current_params() -> dict:
     """Tuned settings if the weekly tuner saved any, else the defaults."""
     path = MODEL_DIR / "params.json"
-    if path.exists():
-        return json.loads(path.read_text())
-    return {**PARAMS, "num_rounds": NUM_ROUNDS}
+    saved = json.loads(path.read_text()) if path.exists() else {**PARAMS, "num_rounds": NUM_ROUNDS}
+    return {**TRAINING_DEFAULTS, **saved}
+
+
+def training_snapshots(feats: pd.DataFrame, step: int = SNAPSHOT_STEP) -> pd.DataFrame:
+    """Every `step`-th trading day counted back from the newest one. The grid moves each
+    day, so every daily retrain includes the newest day whose 3-month outcome is known."""
+    days = np.array(sorted(feats["date"].unique()))
+    keep = days[(len(days) - 1 - np.arange(len(days))) % step == 0]
+    return feats[feats["date"].isin(keep)].reset_index(drop=True)
+
+
+def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
+    """Recent years count more (half-life in years), the extreme winners/losers count more
+    (they decide the picks), and paper-trading feedback rows carry their own weight."""
+    w = np.ones(len(train))
+    hl = params.get("recency_half_life") or 0
+    if hl > 0:
+        age = (train["date"].max() - train["date"]).dt.days.to_numpy() / 365.25
+        w *= 0.5 ** (age / hl)
+    tail = params.get("tail_weight") or 0
+    if tail > 0:
+        w *= 1 + tail * (train["target"].to_numpy() - 0.5).__abs__() * 2
+    if "fb_weight" in train:
+        w *= train["fb_weight"].fillna(1.0).to_numpy()
+    return w
 
 
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> "_BoosterWrapper":
     import lightgbm as lgb
 
-    data = lgb.Dataset(train[cols], train["target"], free_raw_data=True)
-    params = dict(params or current_params())
+    params = {**TRAINING_DEFAULTS, **(params or current_params())}
+    data = lgb.Dataset(train[cols], train["target"], weight=sample_weights(train, params),
+                       free_raw_data=True)
     rounds = params.pop("num_rounds", NUM_ROUNDS)
-    params.pop("mom_weight", None)
+    for key in TRAINING_DEFAULTS:
+        params.pop(key, None)
     return _BoosterWrapper(lgb.train(params, data, num_boost_round=rounds))
 
 
@@ -139,7 +169,7 @@ class _BoosterWrapper:
 
 
 def _model_columns(df: pd.DataFrame) -> list[str]:
-    skip = F.FEATURE_COLUMNS_EXCLUDE | {"fwd_ret", "fwd_excess", "target"}
+    skip = F.FEATURE_COLUMNS_EXCLUDE | {"fwd_ret", "fwd_excess", "target", "fb_weight"}
     return [c for c in df.columns if c not in skip]
 
 

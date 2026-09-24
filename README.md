@@ -54,9 +54,19 @@ Terminal equivalents: `python -m stockpredictor start`, `... improve --tune`, `.
 | Intraday | Daily summaries of 5-min bars: 200 stocks, Yahoo (60 days, growing daily) + Angel One backfill (~2 years) | git + small local file |
 | News | Google News + FinBERT, 4× per trading day | git |
 
-The more days pass, the more data the models have: they retrain after every close and self-tune
-weekly. The **Model** page shows each tuning run (prediction quality before/after) so you can see
-whether accuracy actually improves.
+How the long-term model keeps learning:
+
+| When | What it learns from |
+|---|---|
+| **Every day after the close** | Retrains on all history (every 5th trading day since 2005, shifting daily so the newest known 3-month outcome is always included) **plus its own judged paper predictions** — wrong ones weigh 2×, right ones 1.5× |
+| **Every day (live race)** | Three variants — AI model, 50/50 blend with momentum, momentum only — each make paper predictions. After 20+ judged days, the system switches to the variant with the best **live** accuracy if it leads by 5+ points |
+| **Every weekend** | Self-tuning: tries new model settings, recency weighting (favour recent years) and focus on extreme winners/losers, scored out-of-sample; keeps changes only if they test better |
+
+The **Accuracy** page shows the live race; the **Model** page shows every retrain and tuning run.
+
+**Angel One:** with keys in `.env`, `start` checks the login, uses real-time prices, downloads ~2
+years of intraday history in the background the first time (~15 min), and after each close saves
+the day's Angel One intraday data.
 
 ## Dashboard pages
 

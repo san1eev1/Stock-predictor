@@ -160,6 +160,29 @@ def angel_bars(client, token: str, start: date, end: date,
     return df
 
 
+def angel_backfill(client, tokens: dict[str, str], symbols: list[str], start: date, end: date,
+                   progress=print) -> int:
+    """Download Angel One 5-minute history for `symbols` and save daily summaries locally."""
+    total = 0
+    for i, sym in enumerate(symbols, 1):
+        if sym not in tokens:
+            progress(f"[{i}/{len(symbols)}] {sym}: no Angel One token")
+            continue
+        try:
+            rows = summarize(angel_bars(client, tokens[sym], start, end), sym, "angelone")
+            total += upsert_backfill(rows)
+            progress(f"[{i}/{len(symbols)}] {sym}: {len(rows)} days")
+        except Exception as exc:
+            progress(f"[{i}/{len(symbols)}] {sym}: error: {exc}")
+    return total
+
+
+def backfill_days(path: Path = BACKFILL_PATH) -> int:
+    if not path.exists():
+        return 0
+    return int(pd.read_csv(path, usecols=["date"])["date"].nunique())
+
+
 # --- Storage ---------------------------------------------------------------------
 
 def _write(df: pd.DataFrame, path: Path) -> None:
