@@ -20,20 +20,14 @@ log = logging.getLogger(__name__)
 DEFAULT_START = date(2010, 1, 1)
 OVERLAP_DAYS = 5
 
-# Market context indices: our name -> Yahoo ticker.
+# Market context indices: our name -> Yahoo ticker. (Yahoo has no usable history
+# for most other NSE sector indices; sector strength is computed from peers instead.)
 INDICES = {
     "NIFTY50": "^NSEI",
     "BANKNIFTY": "^NSEBANK",
     "INDIAVIX": "^INDIAVIX",
     "NIFTYIT": "^CNXIT",
-    "NIFTYAUTO": "^CNXAUTO",
     "NIFTYPHARMA": "^CNXPHARMA",
-    "NIFTYFMCG": "^CNXFMCG",
-    "NIFTYMETAL": "^CNXMETAL",
-    "NIFTYREALTY": "^CNXREALTY",
-    "NIFTYENERGY": "^CNXENERGY",
-    "NIFTYPSUBANK": "^CNXPSUBANK",
-    "NIFTYFINSERV": "NIFTY_FIN_SERVICE.NS",
 }
 
 
@@ -163,6 +157,8 @@ def update_index(conn: sqlite3.Connection, name: str, ticker: str,
 def update_all(conn: sqlite3.Connection, symbols: list[str], start: date = DEFAULT_START,
                downloader=download_history, pause: float = 0.3) -> dict[str, str]:
     """Update every stock and index; returns {name: 'N rows' | 'error: ...'}."""
+    conn.execute(f"DELETE FROM index_prices WHERE symbol NOT IN ({','.join('?' * len(INDICES))})",
+                 list(INDICES))
     results = {}
     jobs = [(s, lambda s=s: update_stock(conn, s, start, downloader)) for s in symbols]
     jobs += [(n, lambda n=n, t=t: update_index(conn, n, t, start, downloader))

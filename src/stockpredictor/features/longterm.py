@@ -12,18 +12,6 @@ import pandas as pd
 
 MIN_HISTORY_DAYS = 200
 
-# NSE industry (from the Nifty 100 list) -> sector index in the store.
-SECTOR_INDEX = {
-    "Financial Services": "NIFTYFINSERV",
-    "Information Technology": "NIFTYIT",
-    "Automobile and Auto Components": "NIFTYAUTO",
-    "Healthcare": "NIFTYPHARMA",
-    "Fast Moving Consumer Goods": "NIFTYFMCG",
-    "Metals & Mining": "NIFTYMETAL",
-    "Realty": "NIFTYREALTY",
-    "Oil Gas & Consumable Fuels": "NIFTYENERGY",
-    "Power": "NIFTYENERGY",
-}
 MARKET_INDEX = "NIFTY50"
 
 RANKED = ["ret_21", "ret_63", "ret_126", "mom_12_1", "dist_52w_high", "vol_63",
@@ -87,8 +75,10 @@ def _stock_features(g: pd.DataFrame) -> pd.DataFrame:
     mid, sd = px.rolling(20).mean(), px.rolling(20).std()
     out["bb_pctb"] = (px - (mid - 2 * sd)) / (4 * sd).replace(0, np.nan)
 
+    # Yahoo sometimes has placeholder days with volume 0: treat as missing.
     vol = g["volume"].astype(float).replace(0, np.nan)
-    out["vol_ratio_20_120"] = vol.rolling(20).mean() / vol.rolling(120, min_periods=60).mean()
+    out["vol_ratio_20_120"] = (vol.rolling(20, min_periods=15).mean()
+                               / vol.rolling(120, min_periods=60).mean())
     out["turnover_log"] = np.log((g["close"] * vol).rolling(20, min_periods=10).mean())
     out["up_volume_ratio_20"] = ((vol * (ret > 0)).rolling(20, min_periods=10).sum()
                                  / vol.rolling(20, min_periods=10).sum())
@@ -183,14 +173,17 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
     feats["rs_nifty_126"] = feats["ret_126"] - feats["nifty_ret_126"]
     feats["beta_252"] = _rolling_beta(feats)
 
-    # Relative strength vs the stock's sector index.
-    sector = pd.Series(MARKET_INDEX, index=feats.index)
+    # Relative strength vs sector peers: average 3-month return of the other
+    # Nifty 100 stocks in the same NSE industry (Yahoo lacks most sector indices).
+    industry = pd.Series("", index=feats.index)
     if universe is not None and "industry" in universe:
-        industry = feats["symbol"].map(universe.set_index("symbol")["industry"])
-        sector = industry.map(SECTOR_INDEX).fillna(MARKET_INDEX)
-    feats["_sector"] = sector
-    sec = idx.rename(columns={"symbol": "_sector", "ret_63": "sector_ret_63"})
-    feats = feats.merge(sec[["_sector", "date", "sector_ret_63"]], on=["_sector", "date"], how="left")
+        industry = feats["symbol"].map(universe.set_index("symbol")["industry"]).fillna("")
+    grp = feats["ret_63"].groupby([feats["date"], industry])
+    peer_sum, peer_n = grp.transform("sum"), grp.transform("count")
+    own = feats["ret_63"].notna()
+    peers = peer_n - own.astype(int)
+    feats["sector_ret_63"] = ((peer_sum - feats["ret_63"].fillna(0)) / peers).where(
+        (peers > 0) & (industry != ""))
     feats["sector_ret_63"] = feats["sector_ret_63"].fillna(feats["nifty_ret_63"])
     feats["rs_sector_63"] = feats["ret_63"] - feats["sector_ret_63"]
 

@@ -23,7 +23,7 @@ def synthetic(n_days=600, symbols=("AAA", "BBB", "CCC"), seed=0):
     indices = pd.concat([candles("NIFTY50", 0.0003, 0.01), candles("NIFTYIT", 0.0004, 0.015),
                          candles("INDIAVIX", 0, 0.05)], ignore_index=True)
     universe = pd.DataFrame({"symbol": list(symbols),
-                             "industry": ["Information Technology", "Healthcare", "Unknown"]})
+                             "industry": ["Banks", "Banks", "Unknown"]})
     return daily, indices, universe
 
 
@@ -62,12 +62,15 @@ def test_values_sane(data):
     assert last["ret_21"] == pytest.approx(sym.iloc[i] / sym.iloc[i - 21] - 1)
 
 
-def test_sector_mapping_used(data):
-    feats = data[3]
-    aaa = feats[feats["symbol"] == "AAA"].dropna(subset=["rs_sector_63", "rs_nifty_63"])
-    ccc = feats[feats["symbol"] == "CCC"].dropna(subset=["rs_sector_63", "rs_nifty_63"])
-    assert not np.allclose(aaa["rs_sector_63"], aaa["rs_nifty_63"])   # IT index used
-    assert np.allclose(ccc["rs_sector_63"], ccc["rs_nifty_63"])       # falls back to Nifty
+def test_sector_strength_uses_peers(data):
+    feats = data[3].dropna(subset=["ret_63"])
+    wide = feats.pivot(index="date", columns="symbol", values="ret_63")
+    aaa = feats[feats["symbol"] == "AAA"].set_index("date")
+    # AAA's only peer in "Banks" is BBB, so its sector return is BBB's return.
+    assert np.allclose(aaa["sector_ret_63"], wide.loc[aaa.index, "BBB"])
+    # CCC has no peers -> falls back to Nifty.
+    ccc = feats[feats["symbol"] == "CCC"].dropna(subset=["rs_nifty_63"])
+    assert np.allclose(ccc["rs_sector_63"], ccc["rs_nifty_63"])
 
 
 @pytest.mark.parametrize("cut", ["2021-03-17", "2021-06-04", "2022-02-02"])
