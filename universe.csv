@@ -1,0 +1,101 @@
+symbol,name,industry,isin,active
+ABB,ABB India Ltd.,Capital Goods,INE117A01022,1
+ADANIENSOL,Adani Energy Solutions Ltd.,Power,INE931S01010,1
+ADANIENT,Adani Enterprises Ltd.,Metals & Mining,INE423A01024,1
+ADANIGREEN,Adani Green Energy Ltd.,Power,INE364U01010,1
+ADANIPORTS,Adani Ports and Special Economic Zone Ltd.,Services,INE742F01042,1
+ADANIPOWER,Adani Power Ltd.,Power,INE814H01029,1
+AMBUJACEM,Ambuja Cements Ltd.,Construction Materials,INE079A01024,1
+APOLLOHOSP,Apollo Hospitals Enterprise Ltd.,Healthcare,INE437A01024,1
+ASIANPAINT,Asian Paints Ltd.,Consumer Durables,INE021A01026,1
+AXISBANK,Axis Bank Ltd.,Financial Services,INE238A01034,1
+BAJAJ-AUTO,Bajaj Auto Ltd.,Automobile and Auto Components,INE917I01010,1
+BAJAJFINSV,Bajaj Finserv Ltd.,Financial Services,INE918I01026,1
+BAJAJHLDNG,Bajaj Holdings & Investment Ltd.,Financial Services,INE118A01012,1
+BAJFINANCE,Bajaj Finance Ltd.,Financial Services,INE296A01032,1
+BANKBARODA,Bank of Baroda,Financial Services,INE028A01039,1
+BEL,Bharat Electronics Ltd.,Capital Goods,INE263A01024,1
+BHARTIARTL,Bharti Airtel Ltd.,Telecommunication,INE397D01024,1
+BOSCHLTD,Bosch Ltd.,Automobile and Auto Components,INE323A01026,1
+BPCL,Bharat Petroleum Corporation Ltd.,Oil Gas & Consumable Fuels,INE029A01011,1
+BRITANNIA,Britannia Industries Ltd.,Fast Moving Consumer Goods,INE216A01030,1
+CANBK,Canara Bank,Financial Services,INE476A01022,1
+CGPOWER,CG Power and Industrial Solutions Ltd.,Capital Goods,INE067A01029,1
+CHOLAFIN,Cholamandalam Investment and Finance Company Ltd.,Financial Services,INE121A01024,1
+CIPLA,Cipla Ltd.,Healthcare,INE059A01026,1
+COALINDIA,Coal India Ltd.,Oil Gas & Consumable Fuels,INE522F01014,1
+CUMMINSIND,Cummins India Ltd.,Capital Goods,INE298A01020,1
+DIVISLAB,Divi's Laboratories Ltd.,Healthcare,INE361B01024,1
+DLF,DLF Ltd.,Realty,INE271C01023,1
+DMART,Avenue Supermarts Ltd.,Consumer Services,INE192R01011,1
+DRREDDY,Dr. Reddy's Laboratories Ltd.,Healthcare,INE089A01031,1
+EICHERMOT,Eicher Motors Ltd.,Automobile and Auto Components,INE066A01021,1
+ENRIN,Siemens Energy India Ltd.,Capital Goods,INE1NPP01017,1
+ETERNAL,Eternal Ltd.,Consumer Services,INE758T01015,1
+GAIL,GAIL (India) Ltd.,Oil Gas & Consumable Fuels,INE129A01019,1
+GODREJCP,Godrej Consumer Products Ltd.,Fast Moving Consumer Goods,INE102D01028,1
+GRASIM,Grasim Industries Ltd.,Construction Materials,INE047A01021,1
+HAL,Hindustan Aeronautics Ltd.,Capital Goods,INE066F01020,1
+HCLTECH,HCL Technologies Ltd.,Information Technology,INE860A01027,1
+HDFCAMC,HDFC Asset Management Company Ltd.,Financial Services,INE127D01025,1
+HDFCBANK,HDFC Bank Ltd.,Financial Services,INE040A01034,1
+HDFCLIFE,HDFC Life Insurance Company Ltd.,Financial Services,INE795G01014,1
+HINDALCO,Hindalco Industries Ltd.,Metals & Mining,INE038A01020,1
+HINDUNILVR,Hindustan Unilever Ltd.,Fast Moving Consumer Goods,INE030A01027,1
+HINDZINC,Hindustan Zinc Ltd.,Metals & Mining,INE267A01025,1
+HYUNDAI,Hyundai Motor India Ltd.,Automobile and Auto Components,INE0V6F01027,1
+ICICIBANK,ICICI Bank Ltd.,Financial Services,INE090A01021,1
+INDHOTEL,Indian Hotels Co. Ltd.,Consumer Services,INE053A01029,1
+INDIGO,InterGlobe Aviation Ltd.,Services,INE646L01027,1
+INFY,Infosys Ltd.,Information Technology,INE009A01021,1
+IOC,Indian Oil Corporation Ltd.,Oil Gas & Consumable Fuels,INE242A01010,1
+IRFC,Indian Railway Finance Corporation Ltd.,Financial Services,INE053F01010,1
+ITC,ITC Ltd.,Fast Moving Consumer Goods,INE154A01025,1
+JINDALSTEL,Jindal Steel Ltd.,Metals & Mining,INE749A01030,1
+JIOFIN,Jio Financial Services Ltd.,Financial Services,INE758E01017,1
+JSWSTEEL,JSW Steel Ltd.,Metals & Mining,INE019A01038,1
+KOTAKBANK,Kotak Mahindra Bank Ltd.,Financial Services,INE237A01036,1
+LODHA,Lodha Developers Ltd.,Realty,INE670K01029,1
+LT,Larsen & Toubro Ltd.,Construction,INE018A01030,1
+LTM,LTM Ltd.,Information Technology,INE214T01019,1
+M&M,Mahindra & Mahindra Ltd.,Automobile and Auto Components,INE101A01026,1
+MARUTI,Maruti Suzuki India Ltd.,Automobile and Auto Components,INE585B01010,1
+MAXHEALTH,Max Healthcare Institute Ltd.,Healthcare,INE027H01010,1
+MAZDOCK,Mazagoan Dock Shipbuilders Ltd.,Capital Goods,INE249Z01020,1
+MOTHERSON,Samvardhana Motherson International Ltd.,Automobile and Auto Components,INE775A01035,1
+MUTHOOTFIN,Muthoot Finance Ltd.,Financial Services,INE414G01012,1
+NESTLEIND,Nestle India Ltd.,Fast Moving Consumer Goods,INE239A01024,1
+NTPC,NTPC Ltd.,Power,INE733E01010,1
+ONGC,Oil & Natural Gas Corporation Ltd.,Oil Gas & Consumable Fuels,INE213A01029,1
+PFC,Power Finance Corporation Ltd.,Financial Services,INE134E01011,1
+PIDILITIND,Pidilite Industries Ltd.,Chemicals,INE318A01026,1
+PNB,Punjab National Bank,Financial Services,INE160A01022,1
+POWERGRID,Power Grid Corporation of India Ltd.,Power,INE752E01010,1
+RECLTD,REC Ltd.,Financial Services,INE020B01018,1
+RELIANCE,Reliance Industries Ltd.,Oil Gas & Consumable Fuels,INE002A01018,1
+SBILIFE,SBI Life Insurance Company Ltd.,Financial Services,INE123W01016,1
+SBIN,State Bank of India,Financial Services,INE062A01020,1
+SHREECEM,Shree Cement Ltd.,Construction Materials,INE070A01015,1
+SHRIRAMFIN,Shriram Finance Ltd.,Financial Services,INE721A01047,1
+SIEMENS,Siemens Ltd.,Capital Goods,INE003A01024,1
+SOLARINDS,Solar Industries India Ltd.,Chemicals,INE343H01029,1
+SUNPHARMA,Sun Pharmaceutical Industries Ltd.,Healthcare,INE044A01036,1
+TATACAP,Tata Capital Ltd.,Financial Services,INE976I01016,1
+TATACONSUM,Tata Consumer Products Ltd.,Fast Moving Consumer Goods,INE192A01025,1
+TATAPOWER,Tata Power Co. Ltd.,Power,INE245A01021,1
+TATASTEEL,Tata Steel Ltd.,Metals & Mining,INE081A01020,1
+TCS,Tata Consultancy Services Ltd.,Information Technology,INE467B01029,1
+TECHM,Tech Mahindra Ltd.,Information Technology,INE669C01036,1
+TITAN,Titan Company Ltd.,Consumer Durables,INE280A01028,1
+TMCV,Tata Motors Ltd.,Capital Goods,INE1TAE01010,1
+TMPV,Tata Motors Passenger Vehicles Ltd.,Automobile and Auto Components,INE155A01022,1
+TORNTPHARM,Torrent Pharmaceuticals Ltd.,Healthcare,INE685A01028,1
+TRENT,Trent Ltd.,Consumer Services,INE849A01020,1
+TVSMOTOR,TVS Motor Company Ltd.,Automobile and Auto Components,INE494B01023,1
+ULTRACEMCO,UltraTech Cement Ltd.,Construction Materials,INE481G01011,1
+UNIONBANK,Union Bank of India,Financial Services,INE692A01016,1
+UNITDSPR,United Spirits Ltd.,Fast Moving Consumer Goods,INE854D01024,1
+VBL,Varun Beverages Ltd.,Fast Moving Consumer Goods,INE200M01039,1
+VEDL,Vedanta Ltd.,Metals & Mining,INE205A01025,1
+WIPRO,Wipro Ltd.,Information Technology,INE075A01022,1
+ZYDUSLIFE,Zydus Lifesciences Ltd.,Healthcare,INE010B01027,1
