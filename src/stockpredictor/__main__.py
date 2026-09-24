@@ -193,6 +193,39 @@ def cmd_backtest(settings, args) -> None:
     print(f"\nSaved report to {M.MODEL_DIR / 'backtest.json'}")
 
 
+def cmd_daily(settings, args) -> None:
+    from stockpredictor import store
+    from stockpredictor.paper import daily, engine
+
+    d = Path(args.dir)
+    if not args.no_sync:
+        store.sync(d)
+    ctx = engine.MarketContext.load(d)
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        results = daily.run_daily(conn, ctx, settings.paper_capital_longterm)
+        if not results:
+            print("Already up to date.")
+        for r in results:
+            print(f"\n== {r['date']:%Y-%m-%d} "
+                  f"{'(rebalance)' if r.get('rebalance') else ''}")
+            for f in r["fills"]:
+                print("  filled:", f)
+            for sym, why in r["sells"]:
+                print(f"  queued SELL {sym} ({why})")
+            for sym in r["buys"]:
+                print(f"  queued BUY  {sym}")
+        if results and "value" in results[-1]:
+            v = results[-1]["value"]
+            print(f"\nPaper long-term: equity Rs {v['equity']:,.0f} "
+                  f"(P&L Rs {v['pnl']:+,.0f}), {v['positions']} positions, cash Rs {v['cash']:,.0f}")
+        top = conn.execute(
+            "SELECT symbol, confidence, reasons FROM predictions WHERE horizon = 'longterm' "
+            "AND direction = 'up' AND date = (SELECT MAX(date) FROM predictions) ORDER BY rank"
+        ).fetchall()
+        print("\nTop picks:", ", ".join(r["symbol"] for r in top))
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -248,7 +281,13 @@ def _backtest_args(p):
     p.add_argument("--start-year", type=int, default=2015, help="First out-of-sample year")
 
 
+def _daily_args(p):
+    _dir_arg(p)
+    p.add_argument("--no-sync", action="store_true", help="Use the local data snapshot as is")
+
+
 ARG_COMMANDS = {
+    "daily": (cmd_daily, "After-close job: sync, decide, paper-trade, evaluate", _daily_args),
     "train": (cmd_train, "Train the long-term model on all data", _dir_arg),
     "backtest": (cmd_backtest, "Walk-forward backtest of the long-term model", _backtest_args),
     "news-update": (cmd_news_update, "Fetch company news and score sentiment", _news_args),

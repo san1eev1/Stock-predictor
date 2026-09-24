@@ -133,6 +133,49 @@ CREATE TABLE IF NOT EXISTS model_runs (
     metrics     TEXT                         -- JSON
 );
 
+-- Paper trading accounts (one per horizon)
+CREATE TABLE IF NOT EXISTS paper_accounts (
+    horizon     TEXT PRIMARY KEY,
+    capital     REAL NOT NULL,
+    cash        REAL NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Orders decided by the model, filled at the next available price
+CREATE TABLE IF NOT EXISTS paper_orders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    horizon     TEXT NOT NULL,
+    created     TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+    reason      TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'filled', 'cancelled')),
+    fill_time   TEXT,
+    fill_price  REAL
+);
+
+-- Daily paper portfolio value
+CREATE TABLE IF NOT EXISTS paper_equity (
+    horizon   TEXT NOT NULL,
+    date      TEXT NOT NULL,
+    cash      REAL NOT NULL,
+    holdings  REAL NOT NULL,
+    equity    REAL NOT NULL,
+    PRIMARY KEY (horizon, date)
+);
+
+-- Alerts from the live monitor (stop-loss, news, ...)
+CREATE TABLE IF NOT EXISTS alerts (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL DEFAULT (datetime('now')),
+    source    TEXT NOT NULL,             -- paper-longterm / portfolio / ...
+    kind      TEXT NOT NULL,             -- stop-loss / target / negative-news / info
+    symbol    TEXT,
+    message   TEXT NOT NULL,
+    sent      INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (source, kind, symbol, message)
+);
+
 -- App settings editable from the UI
 CREATE TABLE IF NOT EXISTS app_settings (
     key    TEXT PRIMARY KEY,
@@ -157,6 +200,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
 # Columns added after a table was first released: (table, column, type).
 MIGRATIONS = [
     ("daily_prices", "adj_close", "REAL"),
+    ("predictions", "nifty_entry", "REAL"),
+    ("predictions", "base_rate", "REAL"),
+    ("predictions", "evaluated_at", "TEXT"),
+    ("paper_trades", "reason", "TEXT"),
+    ("paper_trades", "exit_reason", "TEXT"),
 ]
 
 

@@ -18,7 +18,7 @@ def synthetic(n_days=600, symbols=("AAA", "BBB", "CCC"), seed=0):
                              "low": low, "close": close, "adj_close": close,
                              "volume": rng.integers(1e5, 1e6, n_days), "source": "test"})
 
-    daily = pd.concat([candles(s, 0.0005 * i, 0.02) for i, s in enumerate(symbols)],
+    daily = pd.concat([candles(s, 0.0005 * (i % 3), 0.02) for i, s in enumerate(symbols)],
                       ignore_index=True)
     indices = pd.concat([candles("NIFTY50", 0.0003, 0.01), candles("NIFTYIT", 0.0004, 0.015),
                          candles("INDIAVIX", 0, 0.05)], ignore_index=True)
