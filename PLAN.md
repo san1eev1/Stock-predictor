@@ -151,7 +151,7 @@ then **intraday** (needs Angel One), **Telegram last**.
 - Top-10 picks beat Nifty over 3 months 57% of the time (all stocks: 52%); IC 0.044 (t≈2).
 - **Weekly rank rebalancing is the default** (better risk-adjusted, ~⅓ lower costs); stop-loss and news exits stay daily.
 - ⚠️ **Survivorship bias:** only today's Nifty 100 members are in the data, so absolute returns are overstated (equal-weight shows 19% vs Nifty's 9%). Compare against equal-weight, not Nifty. The model roughly matches plain momentum on return with smoother results. Paper trading is the real test.
-- News and fundamentals are an overlay (skip/exit on strongly negative news; P/E and ROE shown) until enough history exists to train on them.
+- News and fundamentals are an overlay until enough history exists to train on them: **bad news** (2+ negative headlines in 3 days, price-move headlines ignored) blocks buys and alerts; **severe news** (3+ very negative) also sells a paper holding. Tuned on real headlines: ~0.6 stocks flagged per day. P/E and ROE are shown on picks.
 
 **Possible improvements:** broader universe (Nifty 200/500) with point-in-time selection to reduce survivorship bias; add news and fundamentals as model inputs after ~6-12 months of collection.
 

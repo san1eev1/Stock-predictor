@@ -31,9 +31,13 @@ def test_decide_rules():
     prices["A"] = 89.0
     sells, buys = P.decide(hold, scores, prices, rules, rebalance=False)
     assert sells == [("A", "stop-loss")] and buys == []
-    # Negative news blocks buys and triggers exits.
+    # Negative news blocks buys; only severe news sells a holding.
     sells, buys = P.decide({}, scores, prices, rules, rebalance=True, negative_news={"A"})
     assert sells == [] and buys == ["B"]
+    prices["A"] = 100.0
+    held = {"A": P.Position(1, 100, pd.Timestamp("2024-01-01"))}
+    assert P.decide(held, scores, prices, rules, False, negative_news={"A"})[0] == []
+    assert P.decide(held, scores, prices, rules, False, severe_news={"A"})[0] == [("A", "negative news")]
 
 
 def test_simulate_uses_next_day_and_charges_costs():

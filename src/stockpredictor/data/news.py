@@ -22,9 +22,20 @@ import requests
 RSS_URL = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 NEWS_COLS = ["symbol", "published", "source", "title", "url", "sentiment"]
-STRONG_NEGATIVE = -0.6
+STRONG_NEGATIVE = -0.6      # a headline this negative counts as "bad news"
+MIN_BAD_HEADLINES = 2       # a flag needs a cluster of bad news within 3 days ...
+MAX_MEAN_3D = -0.3          # ... and a negative average tone
+SEVERE_BAD_HEADLINES = 3    # "severe" (enough to sell a holding) needs more evidence
+SEVERE_MEAN_3D = -0.6
+# Headlines that only report a price move; the model already sees prices.
+PRICE_MOVE = re.compile(
+    r"(?:share|stock|price)s?\b.*\b(?:fall|fell|drop|declin|slip|slump|down|tumbl|plung|los|"
+    r"crash|sink|sank|tank)|top (?:loser|gainer)|\b(?:sensex|nifty)\b|52[- ]?w(?:ee)?k|trades? flat|"
+    r"price target|target (?:price|cut)|stock (?:price|analysis)", re.I)
 
-_SUFFIXES = re.compile(r"\b(ltd|limited|corporation|corp|company|co|inc|india)\b\.?", re.I)
+_SUFFIXES = re.compile(r"\b(ltd|limited|corporation|corp|inc)\b\.?", re.I)
+# Headlines about foreign-listed namesakes (e.g. Cummins Inc on NYSE vs Cummins India).
+FOREIGN = re.compile(r"\((?:NYSE|NASDAQ|OTC|LSE|TSX)\s*:", re.I)
 
 
 def company_query(name: str) -> str:
@@ -42,7 +53,7 @@ def parse_rss(xml_text: str, symbol: str) -> list[dict]:
         if source and title.endswith(f" - {source}"):
             title = title[: -len(source) - 3].strip()
         pub = item.findtext("pubDate")
-        if not title or not pub:
+        if not title or not pub or FOREIGN.search(title):
             continue
         items.append({
             "symbol": symbol,
@@ -126,7 +137,8 @@ def score_missing(store_dir: Path, scorer) -> int:
 
 def news_summary(news: pd.DataFrame, asof: pd.Timestamp) -> pd.DataFrame:
     """Per-stock news signals using headlines published up to `asof` (UTC)."""
-    cols = ["symbol", "news_count_7d", "sent_mean_7d", "sent_min_3d", "strong_negative"]
+    cols = ["symbol", "news_count_7d", "sent_mean_7d", "sent_min_3d", "bad_news_3d",
+            "strong_negative", "severe_negative"]
     if news.empty:
         return pd.DataFrame(columns=cols)
     asof = pd.Timestamp(asof)
@@ -140,8 +152,14 @@ def news_summary(news: pd.DataFrame, asof: pd.Timestamp) -> pd.DataFrame:
         "sent_mean_7d": g7.mean(),
         "sent_min_3d": g3.min(),
     })
-    out["strong_negative"] = out["sent_min_3d"] <= STRONG_NEGATIVE
-    return out.reset_index()[cols]
+    events = last3[~last3["title"].str.contains(PRICE_MOVE) & ~last3["title"].str.contains(FOREIGN)]
+    ge = events.groupby("symbol")["sentiment"]
+    out["bad_news_3d"] = ge.apply(lambda x: int((x <= STRONG_NEGATIVE).sum()))
+    out["bad_news_3d"] = out["bad_news_3d"].fillna(0).astype(int)
+    mean3 = ge.mean().reindex(out.index)
+    out["strong_negative"] = (out["bad_news_3d"] >= MIN_BAD_HEADLINES) & (mean3 <= MAX_MEAN_3D)
+    out["severe_negative"] = (out["bad_news_3d"] >= SEVERE_BAD_HEADLINES) & (mean3 <= SEVERE_MEAN_3D)
+    return out.reset_index(names="symbol")[cols]
 
 
 def latest_headlines(news: pd.DataFrame, symbol: str, n: int = 5) -> pd.DataFrame:

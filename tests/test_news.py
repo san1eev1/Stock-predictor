@@ -16,6 +16,8 @@ RSS = """<?xml version="1.0"?><rss><channel>
 def test_company_query():
     assert news.company_query("Reliance Industries Ltd.") == '"Reliance Industries" share'
     assert news.company_query("Mahindra & Mahindra Ltd.") == '"Mahindra and Mahindra" share'
+    assert news.company_query("Coal India Ltd.") == '"Coal India" share'
+    assert news.company_query("Cummins India Ltd.") == '"Cummins India" share'
 
 
 def test_parse_rss_strips_source_and_skips_empty():
@@ -41,7 +43,7 @@ def test_news_summary_uses_only_past(tmp_path):
     news.score_missing(tmp_path, lambda t: [-0.9 if "probe" in x else 0.8 for x in t])
     df = news.load_news(tmp_path)
     s = news.news_summary(df, pd.Timestamp("2026-09-24T00:00:00Z")).iloc[0]
-    assert s["news_count_7d"] == 1 and s["strong_negative"]
+    assert s["news_count_7d"] == 1 and not s["strong_negative"]   # one headline is not enough
     s = news.news_summary(df, pd.Timestamp("2026-09-24T12:00:00Z")).iloc[0]
     assert s["news_count_7d"] == 2 and abs(s["sent_mean_7d"] + 0.05) < 1e-9
 
@@ -54,3 +56,16 @@ def test_fundamentals_parse_and_append(tmp_path):
     fundamentals.append_snapshot(tmp_path, [row])
     fundamentals.append_snapshot(tmp_path, [row])   # same date replaces, not duplicates
     assert len(fundamentals.load_latest(tmp_path)) == 1
+
+
+def test_strong_negative_needs_cluster_and_ignores_price_moves():
+    t = pd.Timestamp("2026-09-24T10:00:00Z")
+    rows = [("A", "SEBI probe into accounting fraud", -0.9), ("A", "Auditor resigns", -0.8),
+            ("B", "Shares fall 3% in weak market", -0.9), ("B", "Stock price dropped 8%", -0.9),
+            ("C", "Plant fire halts output", -0.9), ("C", "Record orders win", 0.9),
+            ("D", "Cummins (NYSE:CMI) target cut", -0.9), ("D", "Cummins Inc (NYSE:CMI) probe", -0.9),
+            ("E", "Britannia share price near 52-week low", -0.9), ("E", "52-week low", -0.9)]
+    df = pd.DataFrame([{"symbol": s, "published": t, "source": "x", "title": ti, "url": ti,
+                        "sentiment": v} for s, ti, v in rows])
+    flags = news.news_summary(df, t + pd.Timedelta(hours=1)).set_index("symbol")["strong_negative"]
+    assert flags.to_dict() == {"A": True, "B": False, "C": False, "D": False, "E": False}

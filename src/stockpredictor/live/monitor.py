@@ -153,13 +153,14 @@ class Monitor:
         ctx = self.ctx()
         summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
         negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
+        severe = set(summary.loc[summary["severe_negative"].astype(bool), "symbol"])
         rules, _ = D.get_rules(self.conn)
         paper = set(E.holdings(self.conn))
         for sym in negative & self.watched_symbols():
             head = N.latest_headlines(ctx.news, sym, 1)
             title = head["title"].iloc[0] if len(head) else ""
             alert(self.conn, "news", "negative-news", sym, f"{now:%Y-%m-%d} {sym}: {title}")
-            if sym in paper and rules.news_exit:
+            if sym in paper and sym in severe and rules.news_exit:
                 p = self.prices.get([sym]).get(sym)
                 if p:
                     E.queue_orders(self.conn, [(sym, "negative news")], [], f"{now:%Y-%m-%d %H:%M}")

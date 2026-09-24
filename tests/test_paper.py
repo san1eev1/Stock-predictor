@@ -73,6 +73,7 @@ def test_negative_news_blocks_buy(conn, ctx_model):
     conn.execute("DELETE FROM paper_orders")
     conn.execute("DELETE FROM app_settings")
     bad = pd.DataFrame([{"symbol": first, "published": pd.Timestamp(date, tz="UTC"),
-                         "source": "x", "title": "fraud probe", "url": "u", "sentiment": -0.95}])
+                         "source": "x", "title": t, "url": t, "sentiment": -0.95}
+                        for t in ("fraud probe", "auditor resigns")])
     ctx2 = E.MarketContext(ctx.daily, ctx.indices, ctx.universe, ctx.feats, bad)
     assert first not in E.run_decision(conn, ctx2, model, date)["buys"]

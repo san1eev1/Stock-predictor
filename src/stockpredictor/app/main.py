@@ -469,7 +469,11 @@ def page_settings():
                                 index=0 if mode == "weekly" else 1,
                                 help="Backtest: weekly had better risk-adjusted returns and "
                                      "~1/3 lower costs. Stop-loss and news exits are always daily.")
-        news_exit = cols[1].checkbox("Sell on strongly negative news", rules.news_exit)
+        news_exit = cols[1].checkbox(
+            "Sell on severe negative news", rules.news_exit,
+            help="Bad news (2+ negative headlines in 3 days) always blocks buying. Severe news "
+                 "(3+ very negative headlines) also sells a paper holding. Headlines that only "
+                 "report price moves are ignored - the model already sees prices.")
         if st.form_submit_button("Save rules", type="primary"):
             for k_, v_ in {"lt_n_hold": n_hold, "lt_exit_rank": exit_rank, "lt_stop_loss": sl / 100,
                            "lt_rebalance": reb, "lt_news_exit": int(news_exit)}.items():

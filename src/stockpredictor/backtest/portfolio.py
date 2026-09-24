@@ -33,15 +33,19 @@ class Position:
 
 def decide(holdings: dict[str, Position], scores: pd.Series, prices: dict[str, float],
            rules: Rules, rebalance: bool, blocked: set[str] = frozenset(),
-           negative_news: set[str] = frozenset()) -> tuple[list[tuple[str, str]], list[str]]:
-    """Return (sells [(symbol, reason)], buys [symbols in priority order])."""
+           negative_news: set[str] = frozenset(),
+           severe_news: set[str] = frozenset()) -> tuple[list[tuple[str, str]], list[str]]:
+    """Return (sells [(symbol, reason)], buys [symbols in priority order]).
+
+    negative_news: never buy these. severe_news: also sell them if held.
+    """
     ranks = scores.rank(ascending=False, method="first")
     sells = []
     for sym, pos in holdings.items():
         price = prices.get(sym)
         if price is not None and price <= pos.entry_price * (1 - rules.stop_loss):
             sells.append((sym, "stop-loss"))
-        elif rules.news_exit and sym in negative_news:
+        elif rules.news_exit and sym in severe_news:
             sells.append((sym, "negative news"))
         elif rebalance and ranks.get(sym, math.inf) > rules.exit_rank:
             sells.append((sym, "rank dropped"))

@@ -194,13 +194,15 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     # 3. News overlay: strongly negative headlines up to this evening.
     summary = N.news_summary(ctx.news, date + pd.Timedelta(hours=18))
     negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
+    severe = set(summary.loc[summary["severe_negative"].astype(bool), "symbol"])
 
     # 4. Save predictions (top picks = up, bottom = down) with reasons.
     save_predictions(conn, today, model, date, ctx.nifty_close(date))
 
     # 5. Decide and queue orders for the next fill.
     rebalance = is_rebalance_day(conn, date, rebalance_mode)
-    sells, buys = decide(holdings(conn), scores, prices, rules, rebalance, negative_news=negative)
+    sells, buys = decide(holdings(conn), scores, prices, rules, rebalance,
+                         negative_news=negative, severe_news=severe)
     queue_orders(conn, sells, buys, f"{date:%Y-%m-%d} 18:00")
     if rebalance:
         _set_setting(conn, "lt_last_rebalance", f"{date:%Y-%m-%d}")
