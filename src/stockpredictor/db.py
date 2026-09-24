@@ -194,6 +194,14 @@ CREATE TABLE IF NOT EXISTS live_scores (
     price          REAL
 );
 
+-- 9:45 prices of every stock (random-pick baseline for intraday accuracy)
+CREATE TABLE IF NOT EXISTS intraday_open (
+    date    TEXT NOT NULL,
+    symbol  TEXT NOT NULL,
+    c30     REAL NOT NULL,
+    PRIMARY KEY (date, symbol)
+);
+
 -- App settings editable from the UI
 CREATE TABLE IF NOT EXISTS app_settings (
     key    TEXT PRIMARY KEY,
@@ -223,6 +231,8 @@ MIGRATIONS = [
     ("predictions", "evaluated_at", "TEXT"),
     ("paper_trades", "reason", "TEXT"),
     ("paper_trades", "exit_reason", "TEXT"),
+    ("paper_trades", "stop_loss", "REAL"),
+    ("paper_trades", "target", "REAL"),
 ]
 
 

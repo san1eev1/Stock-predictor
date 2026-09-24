@@ -39,3 +39,30 @@ class DeliveryCosts:
 
 
 DEFAULT_COSTS = DeliveryCosts()
+
+
+@dataclass(frozen=True)
+class IntradayCosts:
+    """Approximate Indian intraday (MIS) equity charges per order."""
+    brokerage_pct: float = 0.001        # 0.1% ...
+    brokerage_min: float = 5.0
+    brokerage_max: float = 20.0         # ... max Rs 20 per order
+    stt_sell_pct: float = 0.00025       # 0.025% on the sell side
+    exchange_pct: float = 0.0000297
+    sebi_pct: float = 0.000001
+    stamp_buy_pct: float = 0.00003      # 0.003% on the buy side
+    gst_pct: float = 0.18
+    slippage_pct: float = 0.0005        # 0.05% per order
+
+    def cost(self, side: str, value: float) -> float:
+        if value <= 0:
+            return 0.0
+        brokerage = min(self.brokerage_max, max(self.brokerage_min, value * self.brokerage_pct))
+        exchange, sebi = value * self.exchange_pct, value * self.sebi_pct
+        total = (brokerage + exchange + sebi + self.gst_pct * (brokerage + exchange + sebi)
+                 + value * self.slippage_pct)
+        total += value * (self.stamp_buy_pct if side == "buy" else self.stt_sell_pct)
+        return round(total, 2)
+
+
+DEFAULT_INTRADAY_COSTS = IntradayCosts()

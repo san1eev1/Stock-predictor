@@ -115,6 +115,11 @@ def load_universe(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
     return pd.read_csv(store_dir / "universe.csv")
 
 
+def load_actions(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
+    path = store_dir / "corporate_actions.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame(columns=ACTION_COLS)
+
+
 # --- Syncing the data branch to the Mac --------------------------------------
 
 def _git(*args: str, cwd: Path) -> str:
