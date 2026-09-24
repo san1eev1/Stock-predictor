@@ -60,7 +60,14 @@ How the long-term model keeps learning:
 |---|---|
 | **Every day after the close** | Retrains on all history (every 5th trading day since 2005, shifting daily so the newest known 3-month outcome is always included) **plus its own judged paper predictions** — wrong ones weigh 2×, right ones 1.5× |
 | **Every day (live race)** | Three variants — AI model, 50/50 blend with momentum, momentum only — each make paper predictions. After 20+ judged days, the system switches to the variant with the best **live** accuracy if it leads by 5+ points |
-| **Every weekend** | Self-tuning: tries new model settings, recency weighting (favour recent years) and focus on extreme winners/losers, scored out-of-sample; keeps changes only if they test better |
+| **Every weekday evening** | Light self-tuning (2 new settings per model) |
+| **Every weekend** | Full self-tuning: tries new model settings, recency weighting (favour recent years) and focus on extreme winners/losers, scored out-of-sample; keeps changes only if they test better |
+
+The training engine uses **early stopping** (grows trees only while a held-out recent period
+improves) and an **average of 3 models** with different random seeds. Out-of-sample over the last
+3 years this raised long-term IC from 0.064 to 0.066 and top-10 hit rate from 60.5% to 61.9%,
+while training 40% faster. Features are cached (~100 MB in `data/cache`, turn off with
+`FEATURE_CACHE=0` in `.env`), so loading takes ~3 s instead of ~20 s.
 
 The **Accuracy** page shows the live race; the **Model** page shows every retrain and tuning run.
 
@@ -70,8 +77,8 @@ the day's Angel One intraday data.
 
 ## Dashboard pages
 
-- **Long-term picks** — top 10 / weakest 10 with confidence, reasons, news mood, P/E, ROE; live provisional ranking
-- **Intraday picks** — today's longs and shorts with entry, stop-loss, target, live move and result
+- **Long-term picks** — 10 buy and 10 sell candidates with confidence, reasons, news mood, P/E, ROE; live provisional ranking
+- **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live move and result (🧪 = paper-traded)
 - **Paper trading** — Rs 1 lakh each for long-term and intraday: holdings, orders, value, closed trades
 - **My portfolio** — add your Groww trades; live P&L, stop-loss alerts, allocation (Long-term / Intraday tabs)
 - **Accuracy** — long-term picks judged after 3 months vs Nifty; intraday picks at 15:15; both vs random picks

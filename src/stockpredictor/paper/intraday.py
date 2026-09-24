@@ -21,6 +21,7 @@ from stockpredictor.models import intraday as MI
 from stockpredictor.paper import engine as E
 
 HORIZON = "intraday"
+N_CANDIDATES = 10        # buy and sell candidates shown and judged each day
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
 
@@ -81,18 +82,27 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         conn.commit()
         return {"skipped": True, "strength": strength, "picks": []}
 
+    # 10 buy and 10 sell candidates are saved and judged; paper trades are opened for the
+    # strongest n_long / n_short of them (fewer, larger positions keep costs down).
     ranked = day.sort_values("score", ascending=False)
-    longs = ranked[~ranked["symbol"].isin(negative_news)].head(rules.n_long).assign(side="long")
-    shorts = ranked.tail(rules.n_short).iloc[::-1].assign(side="short")
-    picks = pd.concat([longs, shorts[~shorts["symbol"].isin(longs["symbol"])]])
-    picks["confidence"] = picks["score"].rank(pct=True).where(picks["side"] == "long",
-                                                              1 - picks["score"].rank(pct=True))
-    reasons = model.explain(picks)
-    slot = capital / (rules.n_long + rules.n_short)
+    n_buy, n_sell = max(N_CANDIDATES, rules.n_long), max(N_CANDIDATES, rules.n_short)
+    longs = ranked[~ranked["symbol"].isin(negative_news)].head(n_buy).assign(side="long")
+    shorts = ranked.tail(n_sell).iloc[::-1].assign(side="short")
+    shorts = shorts[~shorts["symbol"].isin(longs["symbol"])]
+    longs["rank"] = range(1, len(longs) + 1)
+    shorts["rank"] = range(1, len(shorts) + 1)
+    picks = pd.concat([longs, shorts])
+    pct = day["score"].rank(pct=True)
+    picks["confidence"] = pct.loc[picks.index].where(picks["side"] == "long",
+                                                     1 - pct.loc[picks.index])
+    reasons = [why if side == "long" else
+               [x for x in why if x.startswith("-")] + [x for x in why if x.startswith("+")]
+               for why, side in zip(model.explain(picks), picks["side"])]
+    slot = capital / max(1, rules.n_long + rules.n_short)
     sl, tp = B.snap(rules.stop_loss), B.snap(rules.target)
     opened = []
-    for (_, p), why, rank in zip(picks.iterrows(), reasons,
-                                 list(range(1, len(longs) + 1)) + list(range(1, len(picks) - len(longs) + 1))):
+    for (_, p), why in zip(picks.iterrows(), reasons):
+        rank = int(p["rank"])
         entry = prices.get(p["symbol"], p["c30"])
         sign = 1 if p["side"] == "long" else -1
         stop = entry * (1 - sign * sl / 100)
@@ -102,7 +112,8 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
             "entry_price, stop_loss, target, reasons, model_version) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (HORIZON, stamp, p["symbol"], "up" if sign > 0 else "down", float(p["confidence"]),
              rank, entry, stop, target, json.dumps(why), model.train_to))
-        qty = int(slot / entry)
+        limit = rules.n_long if sign > 0 else rules.n_short
+        qty = int(slot / entry) if rank <= limit else 0
         if qty <= 0:
             continue
         c = costs.cost("buy" if sign > 0 else "sell", qty * entry)

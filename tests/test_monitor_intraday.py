@@ -71,6 +71,6 @@ def test_intraday_day_cycle(tmp_path, monkeypatch):
     assert "square-off" in mon.tick()
     assert PI.open_trades(conn) == []
     acc = E.accuracy(conn, "intraday")
-    assert acc["matured"] == 10 and acc["closed_trades"] == 10
+    assert acc["matured"] == 20 and acc["closed_trades"] == 10   # 10+10 candidates, 5+5 traded
     assert conn.execute("SELECT COUNT(*) FROM alerts WHERE source = 'paper-intraday' "
                         "AND kind = 'decision'").fetchone()[0] == 1

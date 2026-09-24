@@ -316,7 +316,31 @@ class Monitor:
             alert(self.conn, "paper-longterm", "decision", None,
                   f"{r['date']:%Y-%m-%d} decision - buy: {buys}; sell: {sells}")
         _set(self.conn, "lt_after_close_day", f"{now:%Y-%m-%d}")
+        self.evening_tune(now)
         return True
+
+    def evening_tune(self, now: datetime) -> None:
+        """Keep training: a light self-tuning round every weekday evening (2 new settings
+        per model); the full round (5 settings) runs at the weekend."""
+        if _setting(self.conn, "last_light_tune") == f"{now:%Y-%m-%d}":
+            return
+        _set(self.conn, "last_light_tune", f"{now:%Y-%m-%d}")
+        try:
+            ctx = self.ctx()
+            lt = T.tune_longterm(ctx, self.conn, n_candidates=2)
+            if lt["adopted"]:
+                self._model = None
+                alert(self.conn, "model", "info", None,
+                      f"{now:%Y-%m-%d} evening tuning improved long-term IC "
+                      f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
+            it = T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=2)
+            if it and it["adopted"]:
+                self._imodel = None
+                alert(self.conn, "model", "info", None,
+                      f"{now:%Y-%m-%d} evening tuning improved intraday IC "
+                      f"{it['previous_ic']:.3f} -> {it['ic']:.3f}")
+        except Exception:
+            log.exception("evening tuning failed")
 
     def angel_topup(self, now: datetime) -> None:
         settings = getattr(self.prices, "settings", None)

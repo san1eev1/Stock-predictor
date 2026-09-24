@@ -16,6 +16,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from stockpredictor.backtest.portfolio import Position, Rules, decide
@@ -45,7 +46,7 @@ class MarketContext:
 
         daily, indices = store.load_daily(store_dir), store.load_indices(store_dir)
         universe = store.load_universe(store_dir)
-        return cls(daily, indices, universe, F.build_features(daily, indices, universe),
+        return cls(daily, indices, universe, cached_features(store_dir, daily, indices, universe),
                    N.load_news(store_dir))
 
     def closes_on(self, date: pd.Timestamp) -> dict[str, float]:
@@ -55,6 +56,41 @@ class MarketContext:
     def nifty_close(self, date: pd.Timestamp) -> float:
         n = self.indices[(self.indices["symbol"] == F.MARKET_INDEX) & (self.indices["date"] <= date)]
         return float(n["close"].iloc[-1])
+
+
+FEATURE_CACHE_VERSION = 1
+
+
+def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:
+    """Build features once per data update and reuse them (~1 s instead of ~15 s per load).
+    Stored as compressed float32 (~100 MB); set FEATURE_CACHE=0 in .env to turn it off."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from stockpredictor.config import DATA_DIR
+
+    if os.getenv("FEATURE_CACHE", "1") == "0":
+        return F.build_features(daily, indices, universe)
+    files = sorted(Path(store_dir).glob("daily/*.csv")) + sorted(Path(store_dir).glob("indices/*.csv")) \
+        + [Path(store_dir) / "universe.csv"]
+    sig = "|".join(f"{f.name}:{f.stat().st_size}:{f.stat().st_mtime_ns}" for f in files if f.exists())
+    key = hashlib.sha1(f"{FEATURE_CACHE_VERSION}|{sig}".encode()).hexdigest()[:16]
+    cache_dir = DATA_DIR / "cache"
+    path = cache_dir / f"longterm_features_{key}.pkl.gz"
+    if path.exists():
+        try:
+            return pd.read_pickle(path)
+        except Exception:
+            path.unlink(missing_ok=True)
+    feats = F.build_features(daily, indices, universe)
+    floats = feats.select_dtypes("float64").columns
+    feats[floats] = feats[floats].astype(np.float32)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    for old in cache_dir.glob("longterm_features_*"):
+        old.unlink(missing_ok=True)
+    feats.to_pickle(path, compression={"method": "gzip", "compresslevel": 1})
+    return feats
 
 
 # --- Account ------------------------------------------------------------------------
@@ -229,9 +265,14 @@ def save_predictions(conn, today: pd.DataFrame, model: M.LongTermModel,
     reasons = model.explain(picks)
     rows = []
     for (idx, r), why in zip(picks.iterrows(), reasons):
-        rows.append((HORIZON, f"{date:%Y-%m-%d}", r["symbol"], r["direction"],
-                     float(r["confidence"]), int(idx) + 1, float(r["close"]),
-                     json.dumps(why), model.train_to, nifty))
+        up = r["direction"] == "up"
+        # Confidence = how strongly the model expects this direction.
+        conf = float(r["confidence"]) if up else 1 - float(r["confidence"])
+        # For sell candidates, lead with the signals that pulled the score down.
+        if not up:
+            why = [x for x in why if x.startswith("-")] + [x for x in why if x.startswith("+")]
+        rows.append((HORIZON, f"{date:%Y-%m-%d}", r["symbol"], r["direction"], conf,
+                     int(idx) + 1, float(r["close"]), json.dumps(why), model.train_to, nifty))
     conn.executemany(
         "INSERT OR REPLACE INTO predictions (horizon, date, symbol, direction, confidence, rank, "
         "entry_price, reasons, model_version, nifty_entry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -241,7 +282,8 @@ def save_predictions(conn, today: pd.DataFrame, model: M.LongTermModel,
 
 def save_shadow(conn, today: pd.DataFrame, model: M.LongTermModel, date: pd.Timestamp,
                 nifty: float) -> None:
-    raw = pd.Series(model.model.predict(today[model.features]), index=today.index)
+    raw = pd.Series(model.model.predict(today[model.features].astype(np.float32)),
+                    index=today.index)
     rows = []
     for name, w in SHADOW_VARIANTS.items():
         score = M.blend(raw, today, w)

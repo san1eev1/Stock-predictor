@@ -12,7 +12,8 @@ import pandas as pd
 
 from stockpredictor.config import PROJECT_ROOT
 from stockpredictor.features import intraday as FI
-from stockpredictor.models.longterm import _BoosterWrapper
+from stockpredictor.models import engine
+from stockpredictor.models.engine import Ensemble
 
 MODEL_DIR = PROJECT_ROOT / "models" / "intraday"
 MIN_TRAIN_DAYS = 40
@@ -32,13 +33,9 @@ def current_params() -> dict:
     return {**PARAMS, "num_rounds": NUM_ROUNDS}
 
 
-def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> _BoosterWrapper:
-    import lightgbm as lgb
-
-    data = lgb.Dataset(train[cols], train["target"], free_raw_data=True)
-    params = dict(params or current_params())
-    rounds = params.pop("num_rounds", NUM_ROUNDS)
-    return _BoosterWrapper(lgb.train(params, data, num_boost_round=rounds))
+def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
+    params = {"early_stopping": True, "n_seeds": 3, **(params or current_params())}
+    return engine.fit(train, cols, params, gap_days=1, default_rounds=NUM_ROUNDS)
 
 
 @dataclass
@@ -58,10 +55,12 @@ class IntradayModel:
                    f"{train['date'].max():%Y-%m-%d}", int(train["date"].nunique()))
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
-        return pd.Series(self.model.predict(feats[self.features]), index=feats.index)
+        return pd.Series(self.model.predict(feats[self.features].astype(np.float32)),
+                         index=feats.index)
 
     def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
-        contrib = self.model.predict(feats[self.features], pred_contrib=True)[:, :-1]
+        contrib = self.model.predict(feats[self.features].astype(np.float32),
+                                     pred_contrib=True)[:, :-1]
         out = []
         for row in contrib:
             order = np.argsort(row)
@@ -70,22 +69,20 @@ class IntradayModel:
         return out
 
     def importance(self) -> pd.Series:
-        imp = self.model.booster_.feature_importance(importance_type="gain")
+        imp = self.model.feature_importance()
         return pd.Series(imp, index=self.features).sort_values(ascending=False)
 
     def save(self, path: Path = MODEL_DIR) -> None:
         path.mkdir(parents=True, exist_ok=True)
-        self.model.booster_.save_model(str(path / "model.txt"))
+        self.model.save(path)
         (path / "meta.json").write_text(json.dumps({
             "features": self.features, "trained_at": self.trained_at, "train_to": self.train_to,
             "train_days": self.train_days, "metrics": self.metrics}, indent=2))
 
     @classmethod
     def load(cls, path: Path = MODEL_DIR) -> "IntradayModel":
-        import lightgbm as lgb
-
         meta = json.loads((path / "meta.json").read_text())
-        return cls(_BoosterWrapper(lgb.Booster(model_file=str(path / "model.txt"))),
+        return cls(Ensemble.load(path),
                    meta["features"], meta["trained_at"], meta["train_to"],
                    meta.get("train_days", 0), meta.get("metrics", {}))
 
@@ -107,6 +104,6 @@ def walk_forward(feats: pd.DataFrame, min_train_days: int = MIN_TRAIN_DAYS,
         test = feats[(feats["date"].dt.to_period("M") == m) & (feats["date"] >= test_days[0])]
         if train["date"].nunique() < min_train_days or test.empty:
             continue
-        model = _fit(train, cols, params)
-        out.append(test[["symbol", "date"]].assign(score=model.predict(test[cols])))
+        model = _fit(train, cols, {**(params or current_params()), "n_seeds": 1})
+        out.append(test[["symbol", "date"]].assign(score=model.predict(test[cols].astype(np.float32))))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["symbol", "date", "score"])

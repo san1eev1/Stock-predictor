@@ -76,6 +76,11 @@ def put(c, key, value):
     c.commit()
 
 
+def dash(values, fmt: str) -> list[str]:
+    """Format numbers for display, with '—' where there is no value yet."""
+    return ["—" if v is None or pd.isna(v) else fmt.format(v) for v in values]
+
+
 def rupees(v: float) -> str:
     return f"₹{v:,.0f}"
 
@@ -136,7 +141,7 @@ def page_picks():
                "Top = most likely to beat Nifty over 3 months; bottom = most likely to lag.")
 
     def table(direction):
-        p = preds[preds["direction"] == direction].sort_values("rank")
+        p = preds[preds["direction"] == direction].sort_values("confidence", ascending=False)
         rows = []
         for r in p.itertuples():
             sent = summary["sent_mean_7d"].get(r.symbol)
@@ -149,19 +154,20 @@ def page_picks():
                 "P/E": fund["pe"].get(r.symbol), "ROE": fund["roe"].get(r.symbol),
             })
         df = pd.DataFrame(rows).rename(columns={"Why": "Signals (↑ raised score, ↓ lowered it)"})
-        df[["P/E", "ROE"]] = df[["P/E", "ROE"]].apply(pd.to_numeric, errors="coerce")
+        df["P/E"] = dash(pd.to_numeric(df["P/E"], errors="coerce"), "{:.1f}")
+        df["ROE"] = dash(pd.to_numeric(df["ROE"], errors="coerce"), "{:.1%}")
         st.dataframe(df, hide_index=True, width="stretch", column_config={
             "Confidence": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
             "Price": st.column_config.NumberColumn(format="₹%.2f"),
-            "P/E": st.column_config.NumberColumn(format="%.1f"),
-            "ROE": st.column_config.NumberColumn(format="percent"),
             "Signals (↑ raised score, ↓ lowered it)": st.column_config.TextColumn(width="large")})
 
-    st.subheader("▲ Top picks (buy candidates)")
+    st.subheader("▲ 10 Buy candidates")
+    st.caption("Most likely to beat Nifty 50 over the next 3 months.")
     table("up")
+    st.subheader("▼ 10 Sell candidates")
+    st.caption("Most likely to lag Nifty 50 — avoid, or consider selling if you hold them.")
+    table("down")
     live_block(c)
-    with st.expander("▼ Weakest stocks (avoid / may lag Nifty)"):
-        table("down")
 
     st.subheader("📰 Latest headlines for picks")
     picks = preds.loc[preds["direction"] == "up", "symbol"].tolist()
@@ -275,9 +281,11 @@ def page_intraday():
     st.title("Intraday picks")
     c = conn()
     rules, enabled = PI.get_rules(c)
-    st.caption(f"At 9:45 the model ranks all Nifty 100 stocks on the first 30 minutes: "
-               f"{rules.n_long} longs, {rules.n_short} shorts, stop-loss {rules.stop_loss}%, "
-               f"target {rules.target or 'none'}%, squared off at 15:15. Paper trading only.")
+    st.caption(f"At 9:45 the model ranks all Nifty 100 stocks on the first 30 minutes. "
+               f"Stop-loss {rules.stop_loss}%, "
+               f"target {rules.target or 'none'}%, squared off at 15:15. It lists 10 buy and 10 sell "
+               f"candidates; 🧪 marks the {rules.n_long} + {rules.n_short} strongest that are "
+               "paper-traded (change in Settings).")
     if not enabled:
         st.warning("Intraday is switched off in Settings.")
     if not (MI.MODEL_DIR / "model.txt").exists():
@@ -298,18 +306,26 @@ def intraday_live(day: str):
                         c, params=(day,))
     live = live_prices(c)
     st.subheader(f"Picks for {pd.Timestamp(day):%d %b %Y}")
-    for direction, title in (("up", "▲ Long (expected to rise)"), ("down", "▼ Short (expected to fall)")):
+    traded = {(r[0], r[1]) for r in c.execute(
+        "SELECT symbol, side FROM paper_trades WHERE horizon = 'intraday' AND entry_time LIKE ?",
+        (f"{day}%",))}
+    for direction, title in (("up", "▲ 10 Buy candidates (expected to rise 9:45 → 15:15)"),
+                             ("down", "▼ 10 Sell candidates (expected to fall 9:45 → 15:15)")):
         p = preds[preds["direction"] == direction].sort_values("rank").copy()
         if p.empty:
             continue
         sign = 1 if direction == "up" else -1
-        p["Now"] = [live.get(s_, x) if pd.isna(x) else x
-                    for s_, x in zip(p["symbol"], p["actual_exit"])]
-        p["Move"] = sign * (p["Now"] / p["entry_price"] - 1)
+        now_px = pd.Series([live.get(s_, x) if pd.isna(x) else x
+                            for s_, x in zip(p["symbol"], p["actual_exit"])], index=p.index, dtype=float)
+        p["Now"] = dash(now_px, "₹{:,.2f}")
+        p["Move"] = dash(sign * (now_px / p["entry_price"] - 1), "{:+.2%}")
+        p["target"] = dash(p["target"], "₹{:,.2f}")
         p["Result"] = ["⏳" if pd.isna(x) else "✅" if x else "❌" for x in p["correct"]]
         p["Why"] = [reason_text(json.loads(r or "[]")) for r in p["reasons"]]
-        st.caption(title)
-        st.dataframe(p[["symbol", "confidence", "entry_price", "stop_loss", "target", "Now",
+        side = "long" if direction == "up" else "short"
+        p["Paper"] = ["🧪" if (s_, side) in traded else "" for s_ in p["symbol"]]
+        st.markdown(f"**{title}**")
+        st.dataframe(p[["symbol", "Paper", "confidence", "entry_price", "stop_loss", "target", "Now",
                         "Move", "Result", "Why"]].rename(columns={
             "symbol": "Stock", "confidence": "Confidence", "entry_price": "Entry 9:45",
             "stop_loss": "Stop-loss", "target": "Target", "Move": "Move (in our favour)",
@@ -317,8 +333,7 @@ def intraday_live(day: str):
             column_config={"Confidence": st.column_config.ProgressColumn(
                 format="percent", min_value=0, max_value=1),
                 **{k_: st.column_config.NumberColumn(format="₹%.2f")
-                   for k_ in ["Entry 9:45", "Stop-loss", "Target", "Now"]},
-                "Move (in our favour)": st.column_config.NumberColumn(format="percent")})
+                   for k_ in ["Entry 9:45", "Stop-loss"]}})
 
 
 @st.fragment(run_every=REFRESH)

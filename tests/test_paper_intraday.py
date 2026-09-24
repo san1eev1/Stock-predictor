@@ -28,8 +28,9 @@ def test_picks_open_long_and_short(setup):
     assert sides.count("long") == 3 and sides.count("short") == 3
     v = PI.value(conn, prices)
     assert 998_000 < v["equity"] < 1_000_000       # only entry costs so far
-    n = conn.execute("SELECT COUNT(*) FROM predictions WHERE horizon='intraday'").fetchone()[0]
-    assert n == 6
+    ups, downs = conn.execute("SELECT SUM(direction='up'), SUM(direction='down') FROM predictions "
+                              "WHERE horizon='intraday'").fetchone()
+    assert ups == 10 and downs == 5          # 10 buy candidates; 15 stocks leave 5 to sell
 
 
 def test_stop_loss_target_squareoff_and_evaluation(setup):
@@ -47,9 +48,9 @@ def test_stop_loss_target_squareoff_and_evaluation(setup):
     assert len(log) == 2 and any("stop-loss" in x for x in log) and any("target" in x for x in log)
     PI.square_off(conn, moved, "15:15")
     assert PI.open_trades(conn) == []
-    assert PI.evaluate_day(conn, f"{d:%Y-%m-%d}", moved) == 4
+    assert PI.evaluate_day(conn, f"{d:%Y-%m-%d}", moved) == 15   # all candidates judged
     acc = E.accuracy(conn, "intraday")
-    assert acc["matured"] == 4 and acc["closed_trades"] == 4
+    assert acc["matured"] == 15 and acc["closed_trades"] == 4
     v = PI.value(conn, moved)
     assert v["positions"] == 0 and v["equity"] == pytest.approx(v["cash"])
 

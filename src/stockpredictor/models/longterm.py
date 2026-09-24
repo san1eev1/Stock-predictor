@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 
 from stockpredictor.features import longterm as F
+from stockpredictor.models import engine
+from stockpredictor.models.engine import Ensemble
 
 from stockpredictor.config import PROJECT_ROOT
 
@@ -57,7 +59,8 @@ def blend(scores: pd.Series, feats: pd.DataFrame, mom_weight: float) -> pd.Serie
 
 
 # Settings that shape the training data rather than LightGBM itself (tuned weekly).
-TRAINING_DEFAULTS = {"mom_weight": 0.0, "recency_half_life": 0.0, "tail_weight": 0.0}
+TRAINING_DEFAULTS = {"mom_weight": 0.0, "recency_half_life": 0.0, "tail_weight": 0.0,
+                     "early_stopping": True, "n_seeds": 3}
 SNAPSHOT_STEP = 5       # use every 5th trading day, counted back from the newest day
 
 
@@ -92,16 +95,13 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
     return w
 
 
-def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> "_BoosterWrapper":
-    import lightgbm as lgb
-
+def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {**TRAINING_DEFAULTS, **(params or current_params())}
-    data = lgb.Dataset(train[cols], train["target"], weight=sample_weights(train, params),
-                       free_raw_data=True)
-    rounds = params.pop("num_rounds", NUM_ROUNDS)
-    for key in TRAINING_DEFAULTS:
+    weights = sample_weights(train, params)
+    for key in ("mom_weight", "recency_half_life", "tail_weight"):
         params.pop(key, None)
-    return _BoosterWrapper(lgb.train(params, data, num_boost_round=rounds))
+    return engine.fit(train, cols, params, weights, gap_days=EMBARGO_DAYS,
+                      default_rounds=NUM_ROUNDS)
 
 
 @dataclass
@@ -123,12 +123,14 @@ class LongTermModel:
                    metrics={"mom_weight": params.get("mom_weight", 0.0)})
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
-        raw = pd.Series(self.model.predict(feats[self.features]), index=feats.index)
+        raw = pd.Series(self.model.predict(feats[self.features].astype(np.float32)),
+                        index=feats.index)
         return blend(raw, feats, self.metrics.get("mom_weight", 0.0))
 
     def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
         """Top positive and negative feature contributions per row, as readable text."""
-        contrib = self.model.predict(feats[self.features], pred_contrib=True)[:, :-1]
+        contrib = self.model.predict(feats[self.features].astype(np.float32),
+                                     pred_contrib=True)[:, :-1]
         reasons = []
         for row in contrib:
             order = np.argsort(row)
@@ -138,34 +140,22 @@ class LongTermModel:
         return reasons
 
     def importance(self) -> pd.Series:
-        imp = self.model.booster_.feature_importance(importance_type="gain")
+        imp = self.model.feature_importance()
         return pd.Series(imp, index=self.features).sort_values(ascending=False)
 
     def save(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
-        self.model.booster_.save_model(str(path / "model.txt"))
+        self.model.save(path)
         (path / "meta.json").write_text(json.dumps({
             "features": self.features, "trained_at": self.trained_at,
             "train_to": self.train_to, "metrics": self.metrics}, indent=2))
 
     @classmethod
     def load(cls, path: Path) -> "LongTermModel":
-        import lightgbm as lgb
-
         meta = json.loads((path / "meta.json").read_text())
-        return cls(model=_BoosterWrapper(lgb.Booster(model_file=str(path / "model.txt"))),
+        return cls(model=Ensemble.load(path),
                    features=meta["features"], trained_at=meta["trained_at"],
                    train_to=meta["train_to"], metrics=meta.get("metrics", {}))
-
-
-class _BoosterWrapper:
-    """Small wrapper so trained and loaded models share one interface."""
-
-    def __init__(self, booster):
-        self.booster_ = booster
-
-    def predict(self, X, pred_contrib=False):
-        return self.booster_.predict(X, pred_contrib=pred_contrib)
 
 
 def _model_columns(df: pd.DataFrame) -> list[str]:
@@ -188,8 +178,8 @@ def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,
         test = feats_daily[feats_daily["date"].dt.year == year]
         if len(train) < MIN_TRAIN_ROWS or test.empty:
             continue
-        model = _fit(train, cols, params)
-        raw = pd.Series(model.predict(test[cols]), index=test.index)
+        model = _fit(train, cols, {**(params or current_params()), "n_seeds": 1})
+        raw = pd.Series(model.predict(test[cols].astype(np.float32)), index=test.index)
         score = blend(raw, test, (params or current_params()).get("mom_weight", 0.0))
         out.append(test[["symbol", "date"]].assign(score=score.values))
     if not out:
