@@ -11,59 +11,52 @@ dashboard. See [PLAN.md](PLAN.md).
 > Market data only — this project never places orders. You trade manually on Groww.
 > Runs on your Mac at zero cost; market data and news are collected free by GitHub Actions.
 
-## One-time setup (macOS)
+## Run it from VS Code (no app to install)
 
-```bash
-brew install python@3.12 libomp git          # libomp is needed by LightGBM
-git clone https://github.com/san1eev1/Stock-predictor.git
-cd Stock-predictor
-git checkout claude/vibrant-heisenberg-yabdry
-git config remote.origin.fetch "+refs/heads/claude/vibrant-heisenberg-yabdry:refs/remotes/origin/claude/vibrant-heisenberg-yabdry"
+Everything runs from VS Code. The dashboard is a **local web page** at
+<http://localhost:8501>: open it in any browser, or inside VS Code with
+`Cmd+Shift+P` → **Simple Browser: Show** → `http://localhost:8501`.
 
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-cp .env.example .env        # Angel One keys: real-time prices + intraday history
-```
+**One-time setup**
 
-### Intraday setup (one-time, needs Angel One keys in `.env`)
+1. Install tools (Terminal): `brew install python@3.12 libomp git`
+2. Get the project: `git clone https://github.com/san1eev1/Stock-predictor.git`, then in VS Code
+   **File → Open Folder… → Stock-predictor** (on branch `claude/vibrant-heisenberg-yabdry`).
+3. Install the recommended **Python** extension when VS Code asks.
+4. `Cmd+Shift+P` → **Tasks: Run Task** → **1. First-time setup**
+   (creates `.venv`, installs everything, downloads the data).
+5. Optional: put your Angel One keys in `.env` (real-time prices + intraday history), then run the
+   tasks **Angel One: check login** and **Angel One: download intraday history (one-time)**.
 
-```bash
-python -m stockpredictor check-angel          # confirm login works
-python -m stockpredictor intraday-backfill    # ~2 years of 5-min history -> small local file (~5 MB)
-python -m stockpredictor train-intraday
-python -m stockpredictor backtest-intraday    # see whether intraday has an edge after costs
-```
+**Every day**
 
-Without the backfill, intraday learns only from the ~60 days GitHub collects from Yahoo.
+Press **F5** (▶ *Start Stock Predictor*), or `Cmd+Shift+B`. That one command:
 
-Every new terminal: `source .venv/bin/activate` (or select the `.venv` interpreter in VS Code).
+- opens the web dashboard
+- runs the live monitor (prices, stop-losses, news, 9:46 intraday picks, 15:15 square-off)
+- makes the after-close decision and **retrains both models on the newest data**
+- **self-tunes every weekend** (tries new model settings, keeps them only if they test better)
 
-## Daily use
+`Ctrl+C` in the terminal stops everything. Keep the Mac awake during market hours
+(the build task uses `caffeinate`).
 
-Two terminals:
+**Other tasks** (`Cmd+Shift+P` → Tasks: Run Task): *Keep training now (retrain + self-tune)*,
+*Get latest data*, *Backtest long-term*, *Backtest intraday*, *Web dashboard only*, *Run tests*.
 
-```bash
-# Terminal 1 - live monitor (leave running; caffeinate keeps the Mac awake)
-caffeinate -i python -m stockpredictor run
+Terminal equivalents: `python -m stockpredictor start`, `... improve --tune`, `... backtest`.
 
-# Terminal 2 - dashboard (opens in your browser)
-python -m stockpredictor app
-```
+## Data and continuous learning
 
-The monitor does everything on its own:
+| What | How much | Where |
+|---|---|---|
+| Daily prices | **Nifty 200** (training) since **2005**, ~830k rows | git `market-data` branch, updated 16:30 IST by GitHub Actions |
+| Trading universe | Nifty 100 (picks, paper trading, news) | |
+| Intraday | Daily summaries of 5-min bars: 200 stocks, Yahoo (60 days, growing daily) + Angel One backfill (~2 years) | git + small local file |
+| News | Google News + FinBERT, 4× per trading day | git |
 
-| When | What |
-|---|---|
-| 9:46 IST | Intraday picks: 5 long + 5 short paper trades at live prices |
-| Every minute, 9:15-15:30 IST | Live prices; fills queued paper orders; stop-loss/target exits (paper) and stop-loss alerts (your portfolio) |
-| 15:15 IST | Intraday square-off and evaluation |
-| Every 15 min, market hours | Pulls new scored news from git; negative-news alerts / paper exits; provisional live re-ranking |
-| From 17:15 IST | Syncs the day's data, makes the official decision, evaluates past predictions |
-| Weekends | Retrains the model if it is older than 6 days |
-
-If the Mac was off, it catches up on missed days when started. NSE holidays are detected automatically.
+The more days pass, the more data the models have: they retrain after every close and self-tune
+weekly. The **Model** page shows each tuning run (prediction quality before/after) so you can see
+whether accuracy actually improves.
 
 ## Dashboard pages
 
@@ -75,23 +68,13 @@ If the Mac was off, it catches up on missed days when started. NSE holidays are 
 - **Model** — what each model relies on, backtest results, retrain button
 - **Settings** — long-term and intraday rules, stop-losses, paper account reset
 
-## How data works
-
-GitHub Actions (free) keep the `market-data` branch up to date:
-
-| Job | When (IST) | What |
-|---|---|---|
-| Update market data | 16:30 Mon-Fri | Daily prices for Nifty 100 + indices; intraday summaries (Yahoo 5-min); fundamentals on Fridays |
-| Update news | 10:00, 12:00, 14:00, 17:00 Mon-Fri | Google News headlines scored by FinBERT |
-
-The Mac fetches only the latest snapshot (`sync-data`, ~35 MB, no history). Features are built in
-memory; the local SQLite database holds only app state.
-
 ## Commands
 
 ```bash
-python -m stockpredictor run           # live monitor
-python -m stockpredictor app           # dashboard
+python -m stockpredictor start         # everything: web dashboard + live monitor + training
+python -m stockpredictor app           # web dashboard only
+python -m stockpredictor run           # live monitor only
+python -m stockpredictor improve --tune  # sync, retrain, self-tune now
 python -m stockpredictor daily         # run the after-close decision by hand
 python -m stockpredictor sync-data     # fetch latest data snapshot
 python -m stockpredictor train         # retrain the model now

@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "▶ Start Stock Predictor (web dashboard + live monitor)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "stockpredictor",
+      "args": ["start"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Web dashboard only",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "stockpredictor",
+      "args": ["app"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Keep training now (retrain + self-tune)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "stockpredictor",
+      "args": ["improve", "--tune"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

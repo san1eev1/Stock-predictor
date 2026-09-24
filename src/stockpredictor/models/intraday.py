@@ -24,11 +24,21 @@ PARAMS = dict(
 )
 
 
-def _fit(train: pd.DataFrame, cols: list[str]) -> _BoosterWrapper:
+def current_params() -> dict:
+    """Tuned settings if the weekly tuner saved any, else the defaults."""
+    path = MODEL_DIR / "params.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return {**PARAMS, "num_rounds": NUM_ROUNDS}
+
+
+def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> _BoosterWrapper:
     import lightgbm as lgb
 
     data = lgb.Dataset(train[cols], train["target"], free_raw_data=True)
-    return _BoosterWrapper(lgb.train(PARAMS, data, num_boost_round=NUM_ROUNDS))
+    params = dict(params or current_params())
+    rounds = params.pop("num_rounds", NUM_ROUNDS)
+    return _BoosterWrapper(lgb.train(params, data, num_boost_round=rounds))
 
 
 @dataclass
@@ -41,10 +51,10 @@ class IntradayModel:
     metrics: dict = field(default_factory=dict)
 
     @classmethod
-    def train(cls, feats: pd.DataFrame) -> "IntradayModel":
+    def train(cls, feats: pd.DataFrame, params: dict | None = None) -> "IntradayModel":
         train = feats.dropna(subset=["target"])
         cols = FI.feature_columns(train)
-        return cls(_fit(train, cols), cols, datetime.now().isoformat(timespec="seconds"),
+        return cls(_fit(train, cols, params), cols, datetime.now().isoformat(timespec="seconds"),
                    f"{train['date'].max():%Y-%m-%d}", int(train["date"].nunique()))
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
@@ -80,21 +90,23 @@ class IntradayModel:
                    meta.get("train_days", 0), meta.get("metrics", {}))
 
 
-def walk_forward(feats: pd.DataFrame, min_train_days: int = MIN_TRAIN_DAYS) -> pd.DataFrame:
+def walk_forward(feats: pd.DataFrame, min_train_days: int = MIN_TRAIN_DAYS,
+                 params: dict | None = None, last_days: int | None = None) -> pd.DataFrame:
     """Out-of-sample scores: each month is scored by a model trained only on earlier days."""
     feats = feats.dropna(subset=["target"])
     days = sorted(feats["date"].unique())
     if len(days) <= min_train_days:
         return pd.DataFrame(columns=["symbol", "date", "score"])
     cols = FI.feature_columns(feats)
-    months = pd.Series(days[min_train_days:]).dt.to_period("M").unique()
+    test_days = days[min_train_days:] if last_days is None else days[max(min_train_days, len(days) - last_days):]
+    months = pd.Series(test_days).dt.to_period("M").unique()
     out = []
     for m in months:
         start = m.start_time
         train = feats[feats["date"] < start]
-        test = feats[feats["date"].dt.to_period("M") == m]
+        test = feats[(feats["date"].dt.to_period("M") == m) & (feats["date"] >= test_days[0])]
         if train["date"].nunique() < min_train_days or test.empty:
             continue
-        model = _fit(train, cols)
+        model = _fit(train, cols, params)
         out.append(test[["symbol", "date"]].assign(score=model.predict(test[cols])))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["symbol", "date", "score"])

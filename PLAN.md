@@ -165,6 +165,13 @@ then **intraday** (needs Angel One). Telegram was dropped.
 
 **First intraday result (59 days of Yahoo data, only 17 out-of-sample days):** the model called direction right 63% of the time vs 51% for random picks (IC 0.088), but **lost 2.1% after costs**. Ten ₹10k positions a day pay ~0.36% per round trip, which ate the gross profit. Fewer, larger positions reduce costs (brokerage is capped at ₹20 per order). Too little data to conclude: run `intraday-backfill` + `backtest-intraday` on the Mac before trusting intraday picks. **Intraday stays paper-only until the backtest on ~2 years is positive after costs.**
 
+### ✅ Continuous learning & VS Code (after Track B)
+
+- **More data:** training universe widened to the **Nifty 200** (trading stays Nifty 100) and daily history extended to **2005** — 834k daily rows (2.3× before); intraday summaries for all 200 stocks.
+- **Continuous training:** both models retrain after every close; every weekend they **self-tune** (random variations of model settings, and for long-term the blend with plain momentum, scored walk-forward out-of-sample; adopted only if IC improves by ≥ 0.003). All runs logged and charted on the Model page.
+- **VS Code:** one-click tasks and F5 launch; `start` runs web dashboard + monitor + training together.
+- **Fairer backtest:** trades the 100 most liquid of the 200 on each date (point-in-time proxy for index membership). Result 2012–2026: model 19.6%/yr, **momentum only 26.3%**, equal-weight 18.4%, Nifty 11.3% — the earlier 28% was mostly survivorship bias. Over the latest 3 years the model beats momentum (IC 0.061 vs 0.022, top-10 beat Nifty 61% vs 55%), so the weekly tuner decides the blend from recent out-of-sample evidence.
+
 ### Dropped
 
 - Telegram alerts (alerts are shown in the dashboard sidebar instead).

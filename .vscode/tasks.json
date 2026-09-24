@@ -1,0 +1,68 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. First-time setup",
+      "type": "shell",
+      "command": "python3.12 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e . && (test -f .env || cp .env.example .env) && .venv/bin/python -m stockpredictor init && .venv/bin/python -m stockpredictor sync-data",
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Start Stock Predictor (web dashboard + live monitor)",
+      "type": "shell",
+      "command": "caffeinate -i .venv/bin/python -m stockpredictor start",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "Web dashboard only",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor app",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Get latest data",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor sync-data",
+      "problemMatcher": []
+    },
+    {
+      "label": "Keep training now (retrain + self-tune)",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor improve --tune",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backtest long-term",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor backtest",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backtest intraday",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor backtest-intraday",
+      "problemMatcher": []
+    },
+    {
+      "label": "Angel One: check login",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor check-angel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Angel One: download intraday history (one-time)",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor intraday-backfill && .venv/bin/python -m stockpredictor improve --no-sync",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": ".venv/bin/python -m pytest -q",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -25,6 +25,7 @@ from stockpredictor.live.prices import IST, LivePrices, in_market_hours, now_ist
 from stockpredictor.models import longterm as M
 from stockpredictor.live import intraday_bars
 from stockpredictor.models import intraday as MI
+from stockpredictor.models import trainer as T
 from stockpredictor.paper import daily as D
 from stockpredictor.paper import engine as E
 from stockpredictor.paper import intraday as PI
@@ -287,6 +288,16 @@ class Monitor:
         waited_long = now.time() >= time(21, 0)
         if latest.date() < now.date() and not waited_long:
             return False   # today's data not published yet; try again in 15 minutes
+        # Keep learning: retrain on the newest data before today's decision.
+        try:
+            lt = T.retrain_longterm(ctx, self.conn)
+            if lt is not None:
+                self._model = lt
+            it = T.retrain_intraday(ctx, self.store_dir, self.conn)
+            if it is not None:
+                self._imodel = it
+        except Exception:
+            log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
         for r in results:
             buys, sells = ", ".join(r["buys"]) or "none", ", ".join(s for s, _ in r["sells"]) or "none"
@@ -296,31 +307,25 @@ class Monitor:
         return True
 
     def weekly_retrain(self, now: datetime) -> bool:
-        model = self.model()
-        age = (now.replace(tzinfo=None) - datetime.fromisoformat(model.trained_at)).days
-        if age < 6:
+        """Weekend self-tuning: try new model settings, keep them only if they test better."""
+        last = _setting(self.conn, "last_tune")
+        if last and (now.replace(tzinfo=None) - datetime.fromisoformat(last)).days < 6:
             return False
+        _set(self.conn, "last_tune", now.replace(tzinfo=None).isoformat(timespec="seconds"))
         ctx = self.ctx(reload=True)
-        labeled = M.add_labels(F.weekly_snapshots(ctx.feats), ctx.daily, ctx.indices)
-        self._model = M.LongTermModel.train(labeled)
-        self._model.save(M.MODEL_DIR)
-        alert(self.conn, "model", "info", None,
-              f"{now:%Y-%m-%d} model retrained on data up to {self._model.train_to}")
-        self.retrain_intraday(ctx, now)
+        lt = T.tune_longterm(ctx, self.conn)
+        self._model = None
+        msg = (f"{now:%Y-%m-%d} long-term tuning: prediction quality (IC) {lt['ic']:.3f}"
+               + (f", improved from {lt['previous_ic']:.3f} - new settings adopted"
+                  if lt["adopted"] else " - current settings kept"))
+        alert(self.conn, "model", "info", None, msg)
+        it = T.tune_intraday(ctx, self.store_dir, self.conn)
+        self._imodel = None
+        if it:
+            alert(self.conn, "model", "info", None,
+                  f"{now:%Y-%m-%d} intraday tuning: IC {it['ic']:.3f}"
+                  + (" - new settings adopted" if it["adopted"] else " - current settings kept"))
         return True
-
-    def retrain_intraday(self, ctx: E.MarketContext, now: datetime) -> None:
-        from stockpredictor.data import intraday as I
-        from stockpredictor.features import intraday as FI
-
-        feats = FI.build(I.load_summaries(self.store_dir), ctx.daily, ctx.feats,
-                         store.load_actions(self.store_dir))
-        if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
-            return
-        self._imodel = MI.IntradayModel.train(feats)
-        self._imodel.save()
-        alert(self.conn, "model", "info", None,
-              f"{now:%Y-%m-%d} intraday model retrained on {self._imodel.train_days} days")
 
 
 def run_forever(monitor: Monitor, interval: int = 60) -> None:

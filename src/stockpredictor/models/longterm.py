@@ -22,6 +22,7 @@ from stockpredictor.config import PROJECT_ROOT
 MODEL_DIR = PROJECT_ROOT / "models" / "longterm"
 HORIZON = 63            # trading days (~3 months)
 EMBARGO_DAYS = 100      # calendar days between train labels and test start
+MIN_TRAIN_ROWS = 5000
 NUM_ROUNDS = 400
 PARAMS = dict(
     objective="regression", learning_rate=0.03, num_leaves=31, min_data_in_leaf=200,
@@ -44,11 +45,33 @@ def add_labels(feats: pd.DataFrame, daily: pd.DataFrame, indices: pd.DataFrame,
     return out.drop(columns=["nifty_fwd"])
 
 
-def _fit(train: pd.DataFrame, cols: list[str]) -> "_BoosterWrapper":
+def blend(scores: pd.Series, feats: pd.DataFrame, mom_weight: float) -> pd.Series:
+    """Mix model scores with plain 12-month momentum, as per-date percentile ranks.
+    mom_weight 0 = model only, 1 = momentum only (the self-tuner picks the weight)."""
+    if not mom_weight:
+        return scores
+    date = feats["date"]
+    model_rank = scores.groupby(date).rank(pct=True)
+    mom_rank = feats["mom_12_1"].groupby(date).rank(pct=True).fillna(0.5)
+    return (1 - mom_weight) * model_rank + mom_weight * mom_rank
+
+
+def current_params() -> dict:
+    """Tuned settings if the weekly tuner saved any, else the defaults."""
+    path = MODEL_DIR / "params.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return {**PARAMS, "num_rounds": NUM_ROUNDS}
+
+
+def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> "_BoosterWrapper":
     import lightgbm as lgb
 
     data = lgb.Dataset(train[cols], train["target"], free_raw_data=True)
-    return _BoosterWrapper(lgb.train(PARAMS, data, num_boost_round=NUM_ROUNDS))
+    params = dict(params or current_params())
+    rounds = params.pop("num_rounds", NUM_ROUNDS)
+    params.pop("mom_weight", None)
+    return _BoosterWrapper(lgb.train(params, data, num_boost_round=rounds))
 
 
 @dataclass
@@ -60,15 +83,18 @@ class LongTermModel:
     metrics: dict = field(default_factory=dict)
 
     @classmethod
-    def train(cls, labeled_weekly: pd.DataFrame) -> "LongTermModel":
+    def train(cls, labeled_weekly: pd.DataFrame, params: dict | None = None) -> "LongTermModel":
         train = labeled_weekly.dropna(subset=["target"])
         cols = _model_columns(train)
-        return cls(model=_fit(train, cols), features=cols,
+        params = params or current_params()
+        return cls(model=_fit(train, cols, params), features=cols,
                    trained_at=datetime.now().isoformat(timespec="seconds"),
-                   train_to=f"{train['date'].max():%Y-%m-%d}")
+                   train_to=f"{train['date'].max():%Y-%m-%d}",
+                   metrics={"mom_weight": params.get("mom_weight", 0.0)})
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
-        return pd.Series(self.model.predict(feats[self.features]), index=feats.index)
+        raw = pd.Series(self.model.predict(feats[self.features]), index=feats.index)
+        return blend(raw, feats, self.metrics.get("mom_weight", 0.0))
 
     def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
         """Top positive and negative feature contributions per row, as readable text."""
@@ -118,7 +144,8 @@ def _model_columns(df: pd.DataFrame) -> list[str]:
 
 
 def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,
-                 start_year: int, end_year: int | None = None) -> pd.DataFrame:
+                 start_year: int, end_year: int | None = None,
+                 params: dict | None = None) -> pd.DataFrame:
     """Out-of-sample scores: for each year, train only on data that ended
     before that year (with an embargo so no label overlaps the test period)."""
     end_year = end_year or feats_daily["date"].dt.year.max()
@@ -129,10 +156,14 @@ def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,
         train = labeled_weekly[(labeled_weekly["date"] < test_start - pd.Timedelta(days=EMBARGO_DAYS))
                                ].dropna(subset=["target"])
         test = feats_daily[feats_daily["date"].dt.year == year]
-        if len(train) < 5000 or test.empty:
+        if len(train) < MIN_TRAIN_ROWS or test.empty:
             continue
-        model = _fit(train, cols)
-        out.append(test[["symbol", "date"]].assign(score=model.predict(test[cols])))
+        model = _fit(train, cols, params)
+        raw = pd.Series(model.predict(test[cols]), index=test.index)
+        score = blend(raw, test, (params or current_params()).get("mom_weight", 0.0))
+        out.append(test[["symbol", "date"]].assign(score=score.values))
+    if not out:
+        return pd.DataFrame(columns=["symbol", "date", "score"])
     return pd.concat(out, ignore_index=True)
 
 

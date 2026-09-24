@@ -191,14 +191,46 @@ def cmd_fundamentals_update(settings, args) -> None:
 
 
 def cmd_train(settings, args) -> None:
-    from stockpredictor.backtest import run as bt
-    from stockpredictor.models import longterm as M
+    from stockpredictor.models import trainer as T
+    from stockpredictor.paper.engine import MarketContext
 
-    _, _, _, labeled = bt.load_all(Path(args.dir))
-    model = M.LongTermModel.train(labeled)
-    model.save(M.MODEL_DIR)
-    print(f"Trained on data up to {model.train_to}; saved to {M.MODEL_DIR}")
+    ctx = MarketContext.load(Path(args.dir))
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        model = T.retrain_longterm(ctx, conn, force=True)
+    print(f"Long-term model trained on outcomes known up to {model.train_to}")
     print("Top features:", ", ".join(model.importance().head(8).index))
+
+
+def cmd_improve(settings, args) -> None:
+    """Get the newest data, retrain both models and (optionally) self-tune them."""
+    from stockpredictor import store
+    from stockpredictor.models import trainer as T
+    from stockpredictor.paper.engine import MarketContext
+
+    d = Path(args.dir)
+    if not args.no_sync:
+        store.sync(d)
+    ctx = MarketContext.load(d)
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        print("Retraining on the newest data...")
+        T.retrain_longterm(ctx, conn, force=True)
+        it = T.retrain_intraday(ctx, d, conn)
+        print("  long-term: done;", "intraday: done" if it else "intraday: up to date / not enough data")
+        if args.tune:
+            print(f"Self-tuning with {args.candidates} candidate settings each "
+                  "(walk-forward, can take several minutes)...")
+            lt = T.tune_longterm(ctx, conn, n_candidates=args.candidates)
+            print(f"  long-term: IC {lt['ic']:.3f} (was {lt['previous_ic']:.3f}), top-10 beat "
+                  f"Nifty {lt['top10_hit']:.0%} -> {'ADOPTED new settings' if lt['adopted'] else 'kept'}")
+            it = T.tune_intraday(ctx, d, conn, n_candidates=args.candidates)
+            if it:
+                print(f"  intraday:  IC {it['ic']:.3f} (was {it['previous_ic']:.3f}), direction "
+                      f"accuracy {it['direction_accuracy']:.0%} -> "
+                      f"{'ADOPTED new settings' if it['adopted'] else 'kept'}")
+            else:
+                print("  intraday:  not enough data to tune yet")
 
 
 def cmd_backtest(settings, args) -> None:
@@ -262,13 +294,63 @@ def cmd_run(settings, args) -> None:
         print("Stopped.")
 
 
-def cmd_app(settings) -> None:
+WEB_PORT = 8501
+
+
+def _web_server(port: int = WEB_PORT):
+    """Start the web dashboard (a local website) in the background."""
     import subprocess
 
-    app = Path(__file__).parent / "app" / "main.py"
-    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app),
-                    "--server.headless", "false", "--browser.gatherUsageStats", "false",
-                    "--client.toolbarMode", "minimal"])
+    page = Path(__file__).parent / "app" / "main.py"
+    return subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(page),
+                             "--server.headless", "true", "--server.port", str(port),
+                             "--browser.gatherUsageStats", "false",
+                             "--client.toolbarMode", "minimal"])
+
+
+def cmd_app(settings) -> None:
+    """Web dashboard only."""
+    import webbrowser
+
+    proc = _web_server()
+    url = f"http://localhost:{WEB_PORT}"
+    print(f"Web dashboard: {url}  (Ctrl+C to stop)")
+    webbrowser.open(url)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        print("Stopped.")
+
+
+def cmd_start(settings, args) -> None:
+    """Everything in one go: web dashboard + live monitor (+ continuous training)."""
+    import logging
+    import time
+    import webbrowser
+
+    from stockpredictor.live import monitor, prices
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    db.init_db(settings.db_path)
+    proc = _web_server()
+    url = f"http://localhost:{WEB_PORT}"
+    time.sleep(3)
+    print(f"\n  Web dashboard:  {url}")
+    print("  Open it in your browser, or in VS Code: Cmd+Shift+P -> 'Simple Browser: Show'")
+    print("  Live monitor and continuous training are running. Ctrl+C stops everything.\n")
+    if not args.no_browser:
+        webbrowser.open(url)
+    conn = db.connect(settings.db_path)
+    mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
+                          settings.paper_capital_longterm,
+                          capital_intraday=settings.paper_capital_intraday)
+    try:
+        monitor.run_forever(mon)
+    except KeyboardInterrupt:
+        print("Stopped.")
+    finally:
+        proc.terminate()
 
 
 def _intraday_features(d: Path):
@@ -374,7 +456,22 @@ def _daily_args(p):
     p.add_argument("--no-sync", action="store_true", help="Use the local data snapshot as is")
 
 
+def _improve_args(p):
+    _dir_arg(p)
+    p.add_argument("--tune", action="store_true", help="Also try new model settings")
+    p.add_argument("--candidates", type=int, default=5, help="Settings to try per model")
+    p.add_argument("--no-sync", action="store_true")
+
+
+def _start_args(p):
+    _dir_arg(p)
+    p.add_argument("--no-browser", action="store_true", help="Don't open a browser tab")
+
+
 ARG_COMMANDS = {
+    "start": (cmd_start, "Start everything: web dashboard + live monitor + training", _start_args),
+    "improve": (cmd_improve, "Sync data, retrain both models, optionally self-tune",
+                _improve_args),
     "train-intraday": (cmd_train_intraday, "Train the intraday model", _dir_arg),
     "backtest-intraday": (cmd_backtest_intraday, "Walk-forward backtest of the intraday model",
                           _dir_arg),
@@ -403,7 +500,7 @@ COMMANDS = {
     "tokens": (cmd_tokens, "Map stocks to Angel One instrument tokens"),
     "check-angel": (cmd_check_angel, "Test Angel One login and fetch one live price"),
     "status": (cmd_status, "Show configuration and database status"),
-    "app": (cmd_app, "Open the dashboard in your browser"),
+    "app": (cmd_app, "Open the web dashboard only"),
 }
 
 

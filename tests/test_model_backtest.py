@@ -86,7 +86,7 @@ def test_walk_forward_trains_only_on_past(labeled, monkeypatch):
     _, _, feats, lab = labeled
     seen = []
     real_fit = M._fit
-    monkeypatch.setattr(M, "_fit", lambda train, cols: (seen.append(train["date"].max()),
+    monkeypatch.setattr(M, "_fit", lambda train, cols, params=None: (seen.append(train["date"].max()),
                                                         real_fit(train, cols))[1])
     monkeypatch.setattr(M, "walk_forward", M.walk_forward)
     lab = pd.concat([lab] * 20)  # enough rows for the minimum training size

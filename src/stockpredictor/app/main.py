@@ -521,7 +521,7 @@ def page_model():
         meta = json.loads(path.read_text())
         st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on every week whose "
                    f"3-month outcome is known (up to {meta['train_to']}); today's picks use "
-                   "today's data. Retrains automatically every weekend.")
+                   "today's data. Retrains daily, self-tunes weekly.")
         model = M.LongTermModel.load(M.MODEL_DIR)
         from stockpredictor.features.labels import label
         imp = model.importance().head(15)
@@ -544,6 +544,7 @@ def page_model():
     if not bt.exists():
         st.caption("Run `python -m stockpredictor backtest` in the terminal (takes a few minutes).")
         model_intraday()
+        training_history()
         return
     r = json.loads(bt.read_text())
     st.caption(f"{r['period']} · out-of-sample: each year predicted by a model trained only on "
@@ -577,6 +578,51 @@ def page_model():
         with st.expander("Table view"):
             st.dataframe(cv.resample("YE").last().style.format("₹{:,.0f}"), width="stretch")
     model_intraday()
+    training_history()
+
+
+def training_history():
+    """Continuous-training log: every retrain and weekly self-tuning result."""
+    c = conn()
+    runs = pd.read_sql("SELECT horizon, version, train_from AS kind, train_to, metrics "
+                       "FROM model_runs ORDER BY id", c)
+    st.divider()
+    st.header("Continuous training")
+    st.caption("Models retrain after every close on the newest data. Each weekend they self-tune: "
+               "several settings are scored out-of-sample (each period predicted by a model "
+               "trained only on earlier data) and new settings are adopted only if they beat the "
+               "current ones. Prediction quality (IC) above 0 means better than random; "
+               "0.03–0.08 is typical for real market prediction.")
+    if runs.empty:
+        st.caption("No training runs logged yet — they start with the live monitor, or run "
+                   "`python -m stockpredictor improve --tune`.")
+        return
+    runs["m"] = runs["metrics"].map(json.loads)
+    tunes = runs[runs["kind"] == "tune"].copy()
+    if not tunes.empty:
+        tunes["date"] = pd.to_datetime(tunes["version"])
+        tunes["value"] = tunes["m"].map(lambda m: m.get("ic"))
+        tunes["series"] = tunes["horizon"].map({"longterm": "Long-term", "intraday": "Intraday"})
+        if len(tunes) >= 2:
+            st.caption("Prediction quality (IC) at each weekly tuning")
+            st.altair_chart(C.lines(tunes[["date", "series", "value"]], "date", "value", "series",
+                                    ".3f", "IC"), width="stretch")
+        table = pd.DataFrame([{
+            "When": r.version[:16].replace("T", " "), "Model": r.series,
+            "IC": r.m.get("ic"), "Before": r.m.get("previous_ic"),
+            "Result": "✅ new settings adopted" if r.m.get("adopted") else "kept current settings",
+            "Momentum blend": r.m.get("params", {}).get("mom_weight")} for r in tunes.itertuples()])
+        table["Momentum blend"] = pd.to_numeric(table["Momentum blend"], errors="coerce")
+        st.dataframe(table.iloc[::-1], hide_index=True, width="stretch", column_config={
+            "IC": st.column_config.NumberColumn(format="%.3f"),
+            "Before": st.column_config.NumberColumn(format="%.3f"),
+            "Momentum blend": st.column_config.NumberColumn(format="percent")})
+    retrains = runs[runs["kind"] == "retrain"]
+    if not retrains.empty:
+        last = retrains.groupby("horizon").tail(1)
+        st.caption("Last retrain: " + " · ".join(
+            f"{'Long-term' if r.horizon == 'longterm' else 'Intraday'} "
+            f"{r.version[:16].replace('T', ' ')} (data to {r.train_to})" for r in last.itertuples()))
 
 
 def model_intraday():
@@ -589,7 +635,7 @@ def model_intraday():
         return
     meta = json.loads(path.read_text())
     st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on {meta.get('train_days', '?')} "
-               f"days up to {meta['train_to']}. Retrains every weekend.")
+               f"days up to {meta['train_to']}. Retrains daily, self-tunes weekly.")
     from stockpredictor.features.labels import label
     imp = MI.IntradayModel.load().importance().head(12)
     imp = (imp / imp.sum()).rename("share").reset_index().rename(columns={"index": "feature"})

@@ -22,11 +22,21 @@ def load_all(store_dir: Path):
     return daily, indices, feats, labeled
 
 
+def point_in_time_universe(feats: pd.DataFrame, size: int = 100) -> pd.DataFrame:
+    """The `size` most-traded stocks on each date (by 20-day traded value): a stand-in for
+    index membership at that time, which reduces survivorship bias in backtests."""
+    rank = feats.groupby("date")["turnover_log"].rank(ascending=False, method="first")
+    return feats.loc[rank <= size, ["symbol", "date"]]
+
+
 def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
-        capital: float = 100_000, rebalances=("daily", "weekly"), cached=None) -> dict:
+        capital: float = 100_000, rebalances=("daily", "weekly"), cached=None,
+        universe_size: int = 100) -> dict:
     daily, indices, feats, labeled, scores = cached or (*load_all(store_dir), None)
     if scores is None:
         scores = M.walk_forward(labeled, feats, start_year)
+    # Trade only the most liquid `universe_size` stocks of each date (model still ranks all).
+    scores = scores.merge(point_in_time_universe(feats, universe_size), on=["symbol", "date"])
     close = daily.pivot(index="date", columns="symbol", values="close").sort_index()
 
     ic = M.information_coefficient(scores, labeled)
@@ -55,7 +65,8 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
                                      **P.trade_stats(res.trades, res.equity),
                                      "total_costs": res.total_costs}
     # Baseline without machine learning: plain 12-1 month momentum, same rules.
-    base = feats.loc[feats["date"] >= scores["date"].min(), ["symbol", "date", "mom_12_1"]]
+    base = feats.loc[feats["date"] >= scores["date"].min(), ["symbol", "date", "mom_12_1"]] \
+        .merge(point_in_time_universe(feats, universe_size), on=["symbol", "date"])
     res = P.simulate(base.rename(columns={"mom_12_1": "score"}).dropna(), close, rules,
                      capital, "weekly")
     curves["momentum_only"] = res.equity
@@ -67,13 +78,21 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
     nifty = indices[indices["symbol"] == F.MARKET_INDEX].set_index("date")["close"]
     nifty = nifty.reindex(dates).ffill().bfill()   # index can miss a day the stocks traded
     bench = {"nifty50": nifty / nifty.iloc[0] * capital,
-             "equal_weight_nifty100": P.equal_weight_benchmark(close, dates) * capital}
+             "equal_weight_nifty100": P.equal_weight_benchmark(
+                 close.where(_membership(feats, close, universe_size)), dates) * capital}
     for name, curve in bench.items():
         report["benchmarks"][name] = P.performance(curve)
     for name, curve in {**curves, **bench}.items():
         report["yearly"][name] = {str(k): v for k, v in P.yearly_returns(curve).items()}
     report["_curves"] = {k: v for k, v in {**curves, **bench}.items()}
     return report
+
+
+def _membership(feats, close, size) -> pd.DataFrame:
+    """Boolean date x symbol mask of the point-in-time universe."""
+    u = point_in_time_universe(feats, size).assign(v=True)
+    return u.pivot(index="date", columns="symbol", values="v").reindex(
+        index=close.index, columns=close.columns).fillna(False).astype(bool)
 
 
 def format_report(r: dict) -> str:
