@@ -84,6 +84,22 @@ class AngelDataClient:
             raise AngelOneError(f"LTP failed for {symbol}: {resp and resp.get('message')}")
         return float(resp["data"]["ltp"])
 
+    def ltp_many(self, tokens: dict[str, str]) -> dict[str, float]:
+        """Live prices for many stocks: {symbol: token} -> {symbol: ltp} (50 per request)."""
+        by_token = {t: s for s, t in tokens.items()}
+        out = {}
+        items = list(by_token)
+        for i in range(0, len(items), 50):
+            resp = self._require_login().getMarketData("LTP", {"NSE": items[i:i + 50]})
+            if not resp or not resp.get("status"):
+                raise AngelOneError(f"Market data failed: {resp and resp.get('message')}")
+            for row in resp["data"].get("fetched", []):
+                sym = by_token.get(str(row.get("symbolToken")))
+                if sym and row.get("ltp"):
+                    out[sym] = float(row["ltp"])
+            time.sleep(0.4)
+        return out
+
     def candles(self, token: str, interval: str,
                 start: datetime, end: datetime) -> list[tuple]:
         """Return [(ts, open, high, low, close, volume), ...] for one request window."""

@@ -176,6 +176,24 @@ CREATE TABLE IF NOT EXISTS alerts (
     UNIQUE (source, kind, symbol, message)
 );
 
+-- Latest live prices seen by the monitor
+CREATE TABLE IF NOT EXISTS live_prices (
+    symbol  TEXT PRIMARY KEY,
+    price   REAL NOT NULL,
+    ts      TEXT NOT NULL,
+    source  TEXT
+);
+
+-- Provisional intraday re-scoring of the long-term model
+CREATE TABLE IF NOT EXISTS live_scores (
+    symbol         TEXT PRIMARY KEY,
+    ts             TEXT NOT NULL,
+    score          REAL,
+    rank           INTEGER,
+    official_rank  INTEGER,
+    price          REAL
+);
+
 -- App settings editable from the UI
 CREATE TABLE IF NOT EXISTS app_settings (
     key    TEXT PRIMARY KEY,

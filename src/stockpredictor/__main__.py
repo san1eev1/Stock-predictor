@@ -226,6 +226,22 @@ def cmd_daily(settings, args) -> None:
         print("\nTop picks:", ", ".join(r["symbol"] for r in top))
 
 
+def cmd_run(settings, args) -> None:
+    import logging
+
+    from stockpredictor.live import monitor, prices
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    db.init_db(settings.db_path)
+    conn = db.connect(settings.db_path)
+    mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
+                          settings.paper_capital_longterm)
+    try:
+        monitor.run_forever(mon)
+    except KeyboardInterrupt:
+        print("Stopped.")
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -287,6 +303,7 @@ def _daily_args(p):
 
 
 ARG_COMMANDS = {
+    "run": (cmd_run, "Start the live monitor (keep running during market hours)", _dir_arg),
     "daily": (cmd_daily, "After-close job: sync, decide, paper-trade, evaluate", _daily_args),
     "train": (cmd_train, "Train the long-term model on all data", _dir_arg),
     "backtest": (cmd_backtest, "Walk-forward backtest of the long-term model", _backtest_args),
