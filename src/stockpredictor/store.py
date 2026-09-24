@@ -27,7 +27,7 @@ DATA_BRANCH = "market-data"
 DEFAULT_STORE_DIR = PROJECT_ROOT / "market-data"
 
 PRICE_COLS = ["symbol", "date", "open", "high", "low", "close", "adj_close", "volume", "source"]
-UNIVERSE_COLS = ["symbol", "name", "industry", "isin", "active"]
+UNIVERSE_COLS = ["symbol", "name", "industry", "isin", "active", "tradable"]
 ACTION_COLS = ["symbol", "date", "kind", "value"]
 PRICE_TABLES = {"daily": "daily_prices", "indices": "index_prices"}
 
@@ -75,10 +75,13 @@ def _read_csv(path: Path) -> list[dict]:
 
 def import_store(conn: sqlite3.Connection, store_dir: Path) -> None:
     """Load CSV files into the database (used by the GitHub Actions updater)."""
+    stocks = _read_csv(store_dir / "universe.csv")
+    for r in stocks:
+        if r.get("tradable") is None:      # files written before the Nifty 200 change
+            r["tradable"] = r["active"]
     conn.executemany(
-        """INSERT OR REPLACE INTO stocks (symbol, name, industry, isin, active)
-           VALUES (:symbol, :name, :industry, :isin, :active)""",
-        _read_csv(store_dir / "universe.csv"))
+        """INSERT OR REPLACE INTO stocks (symbol, name, industry, isin, active, tradable)
+           VALUES (:symbol, :name, :industry, :isin, :active, :tradable)""", stocks)
     conn.executemany(
         "INSERT OR REPLACE INTO corporate_actions VALUES (:symbol, :date, :kind, :value)",
         _read_csv(store_dir / "corporate_actions.csv"))
@@ -112,7 +115,17 @@ def load_indices(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
 
 
 def load_universe(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
-    return pd.read_csv(store_dir / "universe.csv")
+    uni = pd.read_csv(store_dir / "universe.csv")
+    if "tradable" not in uni:
+        uni["tradable"] = uni["active"]
+    uni["tradable"] = uni["tradable"].fillna(uni["active"]).astype(int)
+    return uni
+
+
+def tradable(universe: pd.DataFrame) -> list[str]:
+    """Stocks the app trades and shows (Nifty 100); training uses all active stocks."""
+    flag = universe["tradable"] if "tradable" in universe else universe["active"]
+    return sorted(universe.loc[(universe["active"] == 1) & (flag == 1), "symbol"])
 
 
 def load_actions(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:

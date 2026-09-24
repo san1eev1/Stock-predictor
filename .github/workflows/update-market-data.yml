@@ -9,7 +9,11 @@ on:
     inputs:
       start:
         description: "First date for stocks with no data yet (YYYY-MM-DD)"
-        default: "2010-01-01"
+        default: "2005-01-01"
+      extend_back:
+        description: "Also download history older than what is stored, back to start"
+        type: boolean
+        default: false
       intraday_period:
         description: "Yahoo 5-minute lookback for intraday summaries (max 60d)"
         default: "7d"
@@ -54,7 +58,8 @@ jobs:
           python -m stockpredictor init
           python -m stockpredictor import-store --dir market-data
           python -m stockpredictor universe || echo "::warning::Nifty 100 list download failed; using stored list"
-          python -m stockpredictor prices --start "${{ inputs.start || '2010-01-01' }}"
+          python -m stockpredictor prices --start "${{ inputs.start || '2005-01-01' }}" \
+            ${{ inputs.extend_back && '--extend-back' || '' }}
           python -m stockpredictor export-store --dir market-data
           python -m stockpredictor data-check | tail -1
           python -m stockpredictor intraday-collect --dir market-data --period "${{ inputs.intraday_period || '7d' }}" \

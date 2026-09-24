@@ -19,6 +19,7 @@ from datetime import datetime
 import pandas as pd
 
 from stockpredictor.backtest.portfolio import Position, Rules, decide
+from stockpredictor.store import tradable as store_tradable
 from stockpredictor.costs import DEFAULT_COSTS, DeliveryCosts
 from stockpredictor.data import news as N
 from stockpredictor.features import longterm as F
@@ -182,8 +183,8 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     #    live monitor did not fill them earlier in the day.
     fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules)
 
-    # 2. Score today's tradable stocks (current Nifty 100 members).
-    active = set(ctx.universe.loc[ctx.universe["active"] == 1, "symbol"])
+    # 2. Score today's tradable stocks (current Nifty 100 members; training uses Nifty 200).
+    active = set(store_tradable(ctx.universe))
     today = ctx.feats[(ctx.feats["date"] == date) & ctx.feats["symbol"].isin(active)].copy()
     if today.empty:
         return {"date": date, "fills": fills, "sells": [], "buys": [], "note": "no data for date"}

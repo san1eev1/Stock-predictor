@@ -226,6 +226,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
 # Columns added after a table was first released: (table, column, type).
 MIGRATIONS = [
     ("daily_prices", "adj_close", "REAL"),
+    ("stocks", "tradable", "INTEGER NOT NULL DEFAULT 1"),
     ("predictions", "nifty_entry", "REAL"),
     ("predictions", "base_rate", "REAL"),
     ("predictions", "evaluated_at", "TEXT"),

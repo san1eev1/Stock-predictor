@@ -185,7 +185,7 @@ class Monitor:
                   f"{day} no intraday model yet - run `train-intraday` (after intraday-backfill)")
             return
         ctx = self.ctx()
-        active = sorted(ctx.universe.loc[ctx.universe["active"] == 1, "symbol"])
+        active = store.tradable(ctx.universe)
         f30 = intraday_bars.first30(self.prices, active, now.date())
         if len(f30) < 0.8 * len(active):
             alert(self.conn, "paper-intraday", "info", None,
@@ -242,7 +242,7 @@ class Monitor:
     def live_scores(self, now: datetime) -> None:
         """Provisional scores: today's live prices appended as a temporary daily candle."""
         ctx = self.ctx()
-        active = sorted(ctx.universe.loc[ctx.universe["active"] == 1, "symbol"])
+        active = store.tradable(ctx.universe)
         live = self.prices.get(active)
         if not live:
             return

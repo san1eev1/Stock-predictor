@@ -17,7 +17,7 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-DEFAULT_START = date(2010, 1, 1)
+DEFAULT_START = date(2005, 1, 1)
 OVERLAP_DAYS = 5
 
 # Market context indices: our name -> Yahoo ticker. (Yahoo has no usable history
@@ -142,6 +142,29 @@ def update_stock(conn: sqlite3.Connection, symbol: str,
     return len(rows)
 
 
+def first_date(conn: sqlite3.Connection, table: str, symbol: str) -> date | None:
+    row = conn.execute(f"SELECT MIN(date) FROM {table} WHERE symbol = ?", (symbol,)).fetchone()
+    return date.fromisoformat(row[0]) if row and row[0] else None
+
+
+def extend_back(conn: sqlite3.Connection, symbol: str, start: date, table: str = "daily_prices",
+                ticker: str | None = None, downloader=download_history) -> int:
+    """Download history older than what is stored (e.g. 2005-2009). Returns rows added."""
+    first = first_date(conn, table, symbol)
+    if first is None or (first - start).days <= 10:
+        return 0
+    df = downloader(ticker or yahoo_ticker(symbol), start, first)
+    if df is None or df.empty:
+        return 0
+    rows = [r for r in history_to_rows(symbol, df) if r[1] < first.isoformat()]
+    _store(conn, table, rows)
+    if table == "daily_prices":
+        conn.executemany("INSERT OR REPLACE INTO corporate_actions (symbol, date, kind, value) "
+                         "VALUES (?, ?, ?, ?)", history_to_actions(symbol, df))
+    conn.commit()
+    return len(rows)
+
+
 def update_index(conn: sqlite3.Connection, name: str, ticker: str,
                  start: date = DEFAULT_START, downloader=download_history) -> int:
     last = last_date(conn, "index_prices", name)
@@ -155,14 +178,22 @@ def update_index(conn: sqlite3.Connection, name: str, ticker: str,
 
 
 def update_all(conn: sqlite3.Connection, symbols: list[str], start: date = DEFAULT_START,
-               downloader=download_history, pause: float = 0.3) -> dict[str, str]:
+               downloader=download_history, pause: float = 0.3,
+               extend: bool = False) -> dict[str, str]:
     """Update every stock and index; returns {name: 'N rows' | 'error: ...'}."""
     conn.execute(f"DELETE FROM index_prices WHERE symbol NOT IN ({','.join('?' * len(INDICES))})",
                  list(INDICES))
     results = {}
-    jobs = [(s, lambda s=s: update_stock(conn, s, start, downloader)) for s in symbols]
-    jobs += [(n, lambda n=n, t=t: update_index(conn, n, t, start, downloader))
-             for n, t in INDICES.items()]
+    def stock_job(s):
+        added = extend_back(conn, s, start, downloader=downloader) if extend else 0
+        return update_stock(conn, s, start, downloader) + added
+
+    def index_job(n, t):
+        added = extend_back(conn, n, start, "index_prices", t, downloader) if extend else 0
+        return update_index(conn, n, t, start, downloader) + added
+
+    jobs = [(s, lambda s=s: stock_job(s)) for s in symbols]
+    jobs += [(n, lambda n=n, t=t: index_job(n, t)) for n, t in INDICES.items()]
     for i, (name, job) in enumerate(jobs, 1):
         try:
             results[name] = f"{job()} rows"

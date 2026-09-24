@@ -17,10 +17,12 @@ def cmd_init(settings) -> None:
 
 
 def cmd_universe(settings) -> None:
-    stocks = universe.fetch_nifty100()
+    stocks = universe.fetch_universe()
+    db.init_db(settings.db_path)
     with db.connect(settings.db_path) as conn:
         universe.save_universe(conn, stocks)
-    print(f"Saved {len(stocks)} Nifty 100 stocks.")
+    n_trade = sum(s["tradable"] for s in stocks)
+    print(f"Saved {len(stocks)} stocks for training, {n_trade} tradable (Nifty 100).")
 
 
 def cmd_tokens(settings) -> None:
@@ -58,7 +60,8 @@ def cmd_prices(settings, args) -> None:
         if not symbols:
             print("No stocks yet — run `universe` first.")
             return
-        results = daily.update_all(conn, symbols, date.fromisoformat(args.start))
+        results = daily.update_all(conn, symbols, date.fromisoformat(args.start),
+                                   extend=args.extend_back)
     failed = {k: v for k, v in results.items() if v.startswith("error")}
     print(f"Done. {len(results) - len(failed)} updated, {len(failed)} failed.")
     for name, err in failed.items():
@@ -165,7 +168,7 @@ def cmd_news_update(settings, args) -> None:
 
     d = Path(args.dir)
     uni = store.load_universe(d)
-    rows, errors = news.fetch_all(uni[uni["active"] == 1])
+    rows, errors = news.fetch_all(uni[uni["symbol"].isin(store.tradable(uni))])
     new = news.append_news(d, rows)
     print(f"Fetched {len(rows)} headlines, {len(new)} new, {len(errors)} feed errors")
     for e in errors[:10]:
@@ -182,7 +185,7 @@ def cmd_fundamentals_update(settings, args) -> None:
 
     d = Path(args.dir)
     uni = store.load_universe(d)
-    rows, errors = fundamentals.fetch_snapshot(uni.loc[uni["active"] == 1, "symbol"].tolist())
+    rows, errors = fundamentals.fetch_snapshot(store.tradable(uni))
     fundamentals.append_snapshot(d, rows)
     print(f"Fundamentals snapshot: {len(rows)} stocks, {len(errors)} errors")
 
@@ -316,8 +319,8 @@ def cmd_status(settings) -> None:
     if settings.db_path.exists():
         db.init_db(settings.db_path)  # applies schema updates to older databases
         with db.connect(settings.db_path) as conn:
-            n = conn.execute("SELECT COUNT(*) FROM stocks WHERE active = 1").fetchone()[0]
-            print(f"Active stocks:   {n}")
+            n, t = conn.execute("SELECT COUNT(*), SUM(tradable) FROM stocks WHERE active = 1").fetchone()
+            print(f"Stocks:          {n} for training, {t or 0} tradable")
             for table in ("daily_prices", "index_prices"):
                 cnt, last = conn.execute(f"SELECT COUNT(*), MAX(date) FROM {table}").fetchone()
                 print(f"{table + ':':<17}{cnt:,} rows, latest {last or '-'}")
@@ -330,7 +333,9 @@ def _symbols_arg(p):
 
 def _prices_args(p):
     _symbols_arg(p)
-    p.add_argument("--start", default="2010-01-01", help="First date for new stocks (YYYY-MM-DD)")
+    p.add_argument("--start", default="2005-01-01", help="First date for new stocks (YYYY-MM-DD)")
+    p.add_argument("--extend-back", action="store_true",
+                   help="Also fetch history older than what is stored, back to --start")
 
 
 def _collect_args(p):

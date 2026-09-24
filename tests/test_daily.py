@@ -81,3 +81,17 @@ def test_migration_adds_adj_close_to_phase1_database(tmp_path):
     with db.connect(path) as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_prices)")}
     assert "adj_close" in cols
+
+
+def test_extend_back_adds_only_older_rows(tmp_path):
+    conn = make_db(tmp_path)
+    fake = FakeDownloader([frame(["2024-06-03", "2024-06-04"], [100.0, 101.0])])
+    daily.update_stock(conn, "ABC", date(2024, 6, 1), fake)
+    older = FakeDownloader([frame(["2024-01-02", "2024-01-03", "2024-06-03"], [90.0, 91.0, 555.0])])
+    older_calls = []
+    assert daily.extend_back(conn, "ABC", date(2024, 1, 1),
+                             downloader=lambda t, s, e: (older_calls.append((s, e)), older(t, s))[1]) == 2
+    closes = [r[0] for r in conn.execute("SELECT close FROM daily_prices ORDER BY date")]
+    assert closes == [90.0, 91.0, 100.0, 101.0]          # stored 2024-06-03 not overwritten
+    assert older_calls[0] == (date(2024, 1, 1), date(2024, 6, 3))
+    assert daily.extend_back(conn, "ABC", date(2024, 1, 1), downloader=older) == 0  # nothing older

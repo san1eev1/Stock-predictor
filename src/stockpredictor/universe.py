@@ -8,10 +8,12 @@ import sqlite3
 
 import requests
 
-NIFTY100_CSV_URLS = [
-    "https://archives.nseindia.com/content/indices/ind_nifty100list.csv",
-    "https://www.niftyindices.com/IndexConstituent/ind_nifty100list.csv",
+LIST_URLS = [
+    "https://archives.nseindia.com/content/indices/{name}.csv",
+    "https://www.niftyindices.com/IndexConstituent/{name}.csv",
 ]
+# Training universe (more stocks = more examples to learn from) and trading universe.
+TRAINING_LIST, TRADING_LIST = "ind_nifty200list", "ind_nifty100list"
 # NSE rejects requests without a browser-like User-Agent.
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 
@@ -32,19 +34,36 @@ def parse_constituents(csv_text: str) -> list[dict]:
     return rows
 
 
-def fetch_nifty100() -> list[dict]:
+def fetch_list(name: str, expected: int) -> list[dict]:
     errors = []
-    for url in NIFTY100_CSV_URLS:
+    for url in LIST_URLS:
+        url = url.format(name=name)
         try:
             resp = requests.get(url, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             stocks = parse_constituents(resp.text)
-            if len(stocks) >= 90:  # sanity check: Nifty 100 has 100 stocks
+            if len(stocks) >= expected * 0.9:
                 return stocks
             errors.append(f"{url}: only {len(stocks)} rows")
         except requests.RequestException as exc:
             errors.append(f"{url}: {exc}")
-    raise RuntimeError("Could not download Nifty 100 list:\n" + "\n".join(errors))
+    raise RuntimeError(f"Could not download {name}:\n" + "\n".join(errors))
+
+
+def fetch_nifty100() -> list[dict]:
+    return fetch_list(TRADING_LIST, 100)
+
+
+def fetch_universe() -> list[dict]:
+    """Nifty 200 for training, each stock flagged `tradable` if it is in the Nifty 100."""
+    trading = fetch_nifty100()
+    tradable = {s["symbol"] for s in trading}
+    try:
+        training = fetch_list(TRAINING_LIST, 200)
+    except RuntimeError:
+        training = trading          # fall back to Nifty 100 only
+    by_symbol = {s["symbol"]: s for s in training + trading}
+    return [{**s, "tradable": int(sym in tradable)} for sym, s in sorted(by_symbol.items())]
 
 
 def save_universe(conn: sqlite3.Connection, stocks: list[dict]) -> None:
@@ -56,14 +75,15 @@ def save_universe(conn: sqlite3.Connection, stocks: list[dict]) -> None:
     symbols = [s["symbol"] for s in stocks]
     if len(symbols) != len(set(symbols)):
         raise ValueError("duplicate symbols in constituents list")
-    conn.execute("UPDATE stocks SET active = 0")
+    stocks = [{"tradable": 1, **s} for s in stocks]
+    conn.execute("UPDATE stocks SET active = 0, tradable = 0")
     conn.executemany(
         """
-        INSERT INTO stocks (symbol, name, industry, isin, active, updated_at)
-        VALUES (:symbol, :name, :industry, :isin, 1, datetime('now'))
+        INSERT INTO stocks (symbol, name, industry, isin, active, tradable, updated_at)
+        VALUES (:symbol, :name, :industry, :isin, 1, :tradable, datetime('now'))
         ON CONFLICT(symbol) DO UPDATE SET
-            name = excluded.name, industry = excluded.industry,
-            isin = excluded.isin, active = 1, updated_at = excluded.updated_at
+            name = excluded.name, industry = excluded.industry, isin = excluded.isin,
+            active = 1, tradable = excluded.tradable, updated_at = excluded.updated_at
         """,
         stocks,
     )
