@@ -37,9 +37,11 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
         scores = M.walk_forward(labeled, feats, start_year)
     # Trade only the most liquid `universe_size` stocks of each date (model still ranks all).
     scores = scores.merge(point_in_time_universe(feats, universe_size), on=["symbol", "date"])
+    raw_scores = scores
+    scores = M.smooth_scores(scores, feats)          # the steadier score paper trading uses
     close = daily.pivot(index="date", columns="symbol", values="close").sort_index()
 
-    ic = M.information_coefficient(scores, labeled)
+    ic = M.information_coefficient(raw_scores, labeled)
     report = {
         "period": f"{scores['date'].min():%Y-%m-%d} to {scores['date'].max():%Y-%m-%d}",
         "rules": rules.__dict__, "capital": capital,
@@ -49,7 +51,7 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
     }
 
     # Top-10 vs bottom-10 average forward excess return (weekly, overlapping).
-    m = scores.merge(labeled[["symbol", "date", "fwd_excess"]], on=["symbol", "date"]).dropna()
+    m = raw_scores.merge(labeled[["symbol", "date", "fwd_excess"]], on=["symbol", "date"]).dropna()
     m["r"] = m.groupby("date")["score"].rank(ascending=False)
     n = m.groupby("date")["r"].transform("max")
     report["top10_fwd_excess"] = m.loc[m["r"] <= 10, "fwd_excess"].mean()
@@ -101,9 +103,9 @@ def format_report(r: dict) -> str:
              "",
              f"Prediction quality: IC {r['ic_mean']:.3f} (t={r['ic_t_stat']:.1f}), "
              f"positive in {r['ic_positive_share']:.0%} of weeks",
-             f"Top-10 picks beat Nifty over 3 months: {r['hit_rate_top10']:.0%} "
+             f"Top-10 picks beat Nifty over the next week: {r['hit_rate_top10']:.0%} "
              f"(all stocks: {r['base_rate_all']:.0%})",
-             f"Avg 3-month excess return: top-10 {pct(r['top10_fwd_excess'])}, "
+             f"Avg 1-week excess return: top-10 {pct(r['top10_fwd_excess'])}, "
              f"bottom-10 {pct(r['bottom10_fwd_excess'])}",
              "",
              f"{'':26}{'CAGR':>8}{'Vol':>8}{'Sharpe':>8}{'MaxDD':>8}"]

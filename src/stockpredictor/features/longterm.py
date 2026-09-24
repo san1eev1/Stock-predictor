@@ -14,8 +14,8 @@ MIN_HISTORY_DAYS = 200
 
 MARKET_INDEX = "NIFTY50"
 
-RANKED = ["ret_21", "ret_63", "ret_126", "mom_12_1", "dist_52w_high", "vol_63",
-          "rs_nifty_63", "rs_sector_63", "vol_ratio_20_120", "rsi_14"]
+RANKED = ["ret_5", "ret_10", "ret_21", "ret_63", "ret_126", "mom_12_1", "dist_52w_high", "vol_63",
+          "rs_nifty_63", "rs_sector_63", "vol_ratio_20_120", "rsi_14", "dist_ma20", "pos_5"]
 
 
 # --- Indicator helpers (per single-stock series) ------------------------------
@@ -50,9 +50,18 @@ def _stock_features(g: pd.DataFrame) -> pd.DataFrame:
     ret = px.pct_change()
     out = pd.DataFrame(index=g.index)
 
-    for n in (5, 21, 63, 126, 252):
+    for n in (1, 5, 10, 21, 63, 126, 252):
         out[f"ret_{n}"] = px / px.shift(n) - 1
     out["mom_12_1"] = px.shift(21) / px.shift(252) - 1   # 12-month momentum skipping last month
+
+    # Short-term (1-week horizon) signals: recent trend, stretch and range.
+    out["dist_ma10"] = px / px.rolling(10).mean() - 1
+    out["dist_ma20"] = px / px.rolling(20).mean() - 1
+    out["vol_5"] = ret.rolling(5).std() * np.sqrt(252)
+    out["range_5"] = ((g["high"] - g["low"]) / g["close"]).rolling(5).mean()
+    hi5, lo5 = g["high"].rolling(5).max(), g["low"].rolling(5).min()
+    out["pos_5"] = (g["close"] - lo5) / (hi5 - lo5).replace(0, np.nan)
+    out["up_days_10"] = (ret > 0).rolling(10).mean()
 
     ma50, ma200 = px.rolling(50).mean(), px.rolling(200).mean()
     out["dist_ma50"] = px / ma50 - 1
@@ -133,10 +142,11 @@ def _index_returns(indices: pd.DataFrame) -> pd.DataFrame:
     idx = indices.sort_values(["symbol", "date"]).copy()
     px = idx["adj_close"].fillna(idx["close"])
     grp = px.groupby(idx["symbol"])
+    idx["ret_5"] = px / grp.shift(5) - 1
     idx["ret_63"] = px / grp.shift(63) - 1
     idx["ret_126"] = px / grp.shift(126) - 1
     idx["ret_1"] = grp.pct_change()
-    return idx[["symbol", "date", "ret_1", "ret_63", "ret_126"]]
+    return idx[["symbol", "date", "ret_1", "ret_5", "ret_63", "ret_126"]]
 
 
 def market_regime(indices: pd.DataFrame) -> pd.DataFrame:
@@ -170,6 +180,7 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
     nifty = idx[idx["symbol"] == MARKET_INDEX].drop(columns="symbol").add_prefix("nifty_")
     feats = feats.merge(nifty, left_on="date", right_on="nifty_date", how="left")
     feats["rs_nifty_63"] = feats["ret_63"] - feats["nifty_ret_63"]
+    feats["rs_nifty_5"] = feats["ret_5"] - feats["nifty_ret_5"]
     feats["rs_nifty_126"] = feats["ret_126"] - feats["nifty_ret_126"]
     feats["beta_252"] = _rolling_beta(feats)
 

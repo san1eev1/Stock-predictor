@@ -38,7 +38,7 @@ def test_decisions_queue_then_fill_next_day(conn, ctx_model):
     assert E.holdings(conn) == {}                          # nothing filled yet
     r2 = E.run_decision(conn, ctx, model, dates[1], rules)
     assert sum(f.startswith("BUY") for f in r2["fills"]) == 5      # filled at next day's close
-    assert sum(f.startswith("SHORT") for f in r2["fills"]) == 5    # virtual short book too
+    assert not any(f.startswith("SHORT") for f in r2["fills"])     # long-term is buy-only
     pos = E.holdings(conn)
     assert len(pos) == 5
     prices = ctx.closes_on(dates[1])
@@ -80,17 +80,20 @@ def test_negative_news_blocks_buy(conn, ctx_model):
     assert first not in E.run_decision(conn, ctx2, model, date)["buys"]
 
 
-def test_short_book_profits_when_price_falls_and_stops_on_rise(conn, ctx_model):
+def test_trading_score_is_smoothed_and_saved(conn, ctx_model):
     ctx, model = ctx_model
-    dates = sorted(ctx.feats["date"].unique())[-60:]
-    E.run_decision(conn, ctx, model, dates[0], Rules(n_hold=3, exit_rank=6, stop_loss=0.1))
-    E.run_decision(conn, ctx, model, dates[1], Rules(n_hold=3, exit_rank=6, stop_loss=0.1))
-    shorts = E.holdings(conn, E.SHORT_HORIZON)
-    assert len(shorts) == 3
-    sym, pos = next(iter(shorts.items()))
-    down = {sym: pos.entry_price * 0.9}
-    v = E.value(conn, down, E.SHORT_HORIZON)
-    assert v["pnl"] > 0                                       # price fell: short gains
-    up = {s: p.entry_price * 1.2 for s, p in shorts.items()}
-    sells, _ = E.decide(shorts, pd.Series(dtype=float), up, Rules(stop_loss=0.1), False, side="short")
-    assert {s for s, r in sells if r == "stop-loss"} == set(shorts)
+    day = sorted(ctx.feats["date"].unique())[-1]
+    syms = ctx.feats.loc[ctx.feats["date"] == day, "symbol"]
+    ts = M.trading_scores(model, ctx.feats, day, set(syms))
+    assert set(ts.index) == set(syms) and ts.between(0, 1).all()   # blended percentile ranks
+    E.run_decision(conn, ctx, model, day)
+    ranks = [r[0] for r in conn.execute("SELECT rank FROM lt_scores ORDER BY rank")]
+    assert ranks == list(range(1, len(syms) + 1))
+
+
+def test_short_side_stop_loss_rule(conn, ctx_model):
+    """decide() still supports a short side (used by the rules), stop on a price rise."""
+    shorts = {"A": E.Position(10, 100.0, pd.Timestamp("2026-01-01"))}
+    sells, _ = E.decide(shorts, pd.Series(dtype=float), {"A": 120.0}, Rules(stop_loss=0.1), False,
+                        side="short")
+    assert sells == [("A", "stop-loss")]

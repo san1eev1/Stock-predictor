@@ -193,6 +193,14 @@ CREATE TABLE IF NOT EXISTS shadow_predictions (
     UNIQUE (variant, date, symbol)
 );
 
+-- Latest long-term trading score and rank per stock (for "sell now" signals)
+CREATE TABLE IF NOT EXISTS lt_scores (
+    date    TEXT NOT NULL,
+    symbol  TEXT PRIMARY KEY,
+    score   REAL,
+    rank    INTEGER
+);
+
 -- Latest live prices seen by the monitor
 CREATE TABLE IF NOT EXISTS live_prices (
     symbol  TEXT PRIMARY KEY,
@@ -247,6 +255,8 @@ MIGRATIONS = [
     ("predictions", "nifty_entry", "REAL"),
     ("predictions", "base_rate", "REAL"),
     ("predictions", "evaluated_at", "TEXT"),
+    ("predictions", "horizon_days", "INTEGER"),
+    ("shadow_predictions", "horizon_days", "INTEGER"),
     ("paper_trades", "reason", "TEXT"),
     ("paper_trades", "exit_reason", "TEXT"),
     ("paper_trades", "stop_loss", "REAL"),

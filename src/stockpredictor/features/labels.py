@@ -1,7 +1,11 @@
 """Plain-English names for model features (used to explain picks in the app)."""
 
 LABELS = {
-    "ret_5": "1-week return", "ret_21": "1-month return", "ret_63": "3-month return",
+    "ret_1": "yesterday's return", "ret_5": "1-week return", "ret_10": "2-week return",
+    "dist_ma10": "distance from 10-day average", "dist_ma20": "distance from 20-day average",
+    "vol_5": "1-week volatility", "range_5": "1-week daily range",
+    "pos_5": "position in 1-week range", "up_days_10": "share of up days (2 weeks)",
+    "rs_nifty_5": "1-week strength vs Nifty", "ret_21": "1-month return", "ret_63": "3-month return",
     "ret_126": "6-month return", "ret_252": "1-year return",
     "mom_12_1": "12-month momentum", "dist_ma50": "distance from 50-day average",
     "dist_ma200": "distance from 200-day average", "ma50_over_ma200": "50 vs 200-day trend",

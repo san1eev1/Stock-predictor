@@ -85,7 +85,7 @@ def paper_feedback(ctx, conn, labeled: pd.DataFrame) -> pd.DataFrame:
     if conn is None:
         return labeled
     judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
-                         "AND correct IS NOT NULL", conn)
+                         "AND correct IS NOT NULL AND horizon_days = ?", conn, params=(M.HORIZON,))
     if judged.empty:
         return labeled
     judged["date"] = pd.to_datetime(judged["date"])
@@ -118,7 +118,8 @@ def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | N
     """Daily retrain on all history + judged paper predictions (once per day)."""
     if not force and (M.MODEL_DIR / "meta.json").exists():
         meta = json.loads((M.MODEL_DIR / "meta.json").read_text())
-        if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d"):
+        if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d") \
+                and meta.get("horizon", 63) == M.HORIZON:
             return None
     labeled = paper_feedback(ctx, conn, longterm_labeled(ctx))
     model = M.LongTermModel.train(labeled)
@@ -162,7 +163,7 @@ def live_selection(conn) -> dict | None:
     """Switch the long-term strategy blend to the variant that wins the live paper race."""
     from stockpredictor.paper import engine as E
 
-    race = E.strategy_race(conn)
+    race = E.strategy_race(conn, horizon_days=M.HORIZON)
     if race.empty or race["days"].min() < LIVE_MIN_DAYS:
         return None
     params = M.current_params()

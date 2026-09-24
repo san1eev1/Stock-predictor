@@ -67,18 +67,20 @@ There are **three ways** to run it each day. Pick one.
 | every minute | Stop-loss / target checks (paper) · stop-loss alerts (your portfolio) | 🔔 Alerts |
 | every 15 min | New news, live re-ranking of long-term picks | Long-term picks → *Live ranking* |
 | **15:15** | Intraday square-off and scoring | Accuracy → Intraday |
-| **17:15+** | Data update → **retrain** → **long-term 10 buy + 10 sell** → paper orders → light self-tuning | **Long-term picks** |
+| **17:15+** | Data update → **retrain** → **next week's 10 buy + 10 sell** → paper orders → light self-tuning | **Long-term picks** |
 | weekend | Full self-tuning of both models | Model → *Continuous training* |
 
 ## What to look at in the dashboard
 
-1. **Long-term picks** — 10 buy candidates (likely to beat Nifty over 3 months) and 10 sell
-   candidates (likely to lag: avoid, or consider selling if you hold them).
+1. **Long-term picks** — 10 buy candidates (expected to beat Nifty **next week**) and 10 sell
+   candidates (expected to fall behind next week), plus **Sell now** for holdings the model
+   expects to fall.
 2. **Intraday picks** — 10 buy + 10 sell for today, entry / stop-loss / target and live result.
-3. **Paper trading** — Long-term *Buy book* and *Sell book* (virtual shorts), Intraday *Buy trades*
-   and *Sell trades*, each in its own table with P&L after costs.
+3. **Paper trading — Long-term** (buy-only) and **Paper trading — Intraday** (10 buy + 10 sell
+   trades a day, separate sections), each with P&L after costs.
 4. **My portfolio** — enter your real Groww trades (➕ Add a trade); live P&L and stop-loss alerts.
-5. **Accuracy** — how often picks were right vs random picks; the live strategy race.
+5. **Accuracy** — how often picks were right (long-term judged after 1 week, intraday same day)
+   vs random picks; the live strategy race.
 6. **Model** — what the model relies on, backtests, and every retrain / tuning run.
 
 ## Weekly (optional, 5 minutes)

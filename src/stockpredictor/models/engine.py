@@ -18,7 +18,8 @@ import pandas as pd
 MAX_ROUNDS = 1500
 PATIENCE = 50
 HOLDOUT = 0.15
-ENGINE_KEYS = ("num_rounds", "early_stopping", "n_seeds", "rank_objective", "top_features")
+ENGINE_KEYS = ("num_rounds", "early_stopping", "n_seeds", "rank_objective", "top_features",
+               "horizon")
 RANK_BINS = 10          # relevance levels for the ranking objective
 
 
@@ -103,6 +104,7 @@ def fit(train: pd.DataFrame, cols: list[str], params: dict, weights: np.ndarray 
     import lightgbm as lgb
 
     params = dict(params)
+    params.pop("horizon", None)
     top_k = int(params.pop("top_features", 0) or 0)
     if top_k and top_k < len(cols):
         cols = select_features(train, cols, params, weights, top_k)

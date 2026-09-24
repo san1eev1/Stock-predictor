@@ -63,7 +63,7 @@ class MarketContext:
         return float(n["close"].iloc[-1])
 
 
-FEATURE_CACHE_VERSION = 1
+FEATURE_CACHE_VERSION = 2
 
 
 def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:
@@ -238,7 +238,6 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     # 1. Orders from the previous decision are filled at today's close if the
     #    live monitor did not fill them earlier in the day.
     fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules)
-    fills += fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules, horizon=SHORT_HORIZON)
 
     # 2. Score today's tradable stocks (current Nifty 100 members; training uses Nifty 200).
     active = set(store_tradable(ctx.universe))
@@ -247,7 +246,9 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
         return {"date": date, "fills": fills, "sells": [], "buys": [], "note": "no data for date"}
     today["score"] = model.score(today).values
     today["confidence"] = today["score"].rank(pct=True)
-    scores = today.set_index("symbol")["score"]
+    # Trades use the steadier trading score (20-day average + momentum) to limit costs.
+    scores = M.trading_scores(model, ctx.feats, date, active)
+    save_trading_scores(conn, date, scores)
 
     # 3. News overlay: strongly negative headlines up to this evening.
     summary = N.news_summary(ctx.news, date + pd.Timedelta(hours=18))
@@ -264,17 +265,13 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     sells, buys = decide(holdings(conn), scores, prices, rules, rebalance,
                          negative_news=negative, severe_news=severe)
     queue_orders(conn, sells, buys, f"{date:%Y-%m-%d} 18:00")
-    # Virtual short book: the 10 sell candidates, same rules mirrored.
-    ensure_account(conn, cash_capital(conn), SHORT_HORIZON)
-    covers, shorts = decide(holdings(conn, SHORT_HORIZON), -scores, prices, rules, rebalance,
-                            side="short")
-    queue_orders(conn, covers, shorts, f"{date:%Y-%m-%d} 18:00", SHORT_HORIZON)
+    shorts, covers = [], []           # long-term paper trading is buy-only
     if rebalance:
         _set_setting(conn, "lt_last_rebalance", f"{date:%Y-%m-%d}")
     _set_setting(conn, "lt_last_decision", f"{date:%Y-%m-%d}")
 
     v = value(conn, prices)
-    for h in (HORIZON, SHORT_HORIZON):
+    for h in (HORIZON,):
         vh = value(conn, prices, h)
         conn.execute("INSERT OR REPLACE INTO paper_equity VALUES (?, ?, ?, ?, ?)",
                      (h, f"{date:%Y-%m-%d}", vh["cash"], vh["holdings"], vh["equity"]))
@@ -302,8 +299,17 @@ def save_predictions(conn, today: pd.DataFrame, model: M.LongTermModel,
                      int(idx) + 1, float(r["close"]), json.dumps(why), model.train_to, nifty))
     conn.executemany(
         "INSERT OR REPLACE INTO predictions (horizon, date, symbol, direction, confidence, rank, "
-        "entry_price, reasons, model_version, nifty_entry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        rows)
+        "entry_price, reasons, model_version, nifty_entry, horizon_days) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [r + (M.HORIZON,) for r in rows])
+    conn.commit()
+
+
+def save_trading_scores(conn, date: pd.Timestamp, scores: pd.Series) -> None:
+    """Today's trading rank of every tradable stock (used for 'sell now' signals)."""
+    rank = scores.rank(ascending=False, method="first")
+    conn.execute("DELETE FROM lt_scores")
+    conn.executemany("INSERT INTO lt_scores VALUES (?, ?, ?, ?)",
+                     [(f"{date:%Y-%m-%d}", s, float(v), int(rank[s])) for s, v in scores.items()])
     conn.commit()
 
 
@@ -319,15 +325,17 @@ def save_shadow(conn, today: pd.DataFrame, model: M.LongTermModel, date: pd.Time
             rows += [(name, f"{date:%Y-%m-%d}", r.symbol, direction, float(r.close), nifty)
                      for r in part.itertuples()]
     conn.executemany("INSERT OR REPLACE INTO shadow_predictions (variant, date, symbol, direction, "
-                     "entry_price, nifty_entry) VALUES (?, ?, ?, ?, ?, ?)", rows)
+                     "entry_price, nifty_entry, horizon_days) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     [r + (M.HORIZON,) for r in rows])
     conn.commit()
 
 
 # --- Evaluation & accuracy ----------------------------------------------------------
 
 def evaluate_predictions(conn: sqlite3.Connection, ctx: MarketContext,
-                         horizon_days: int = M.HORIZON) -> int:
-    """Update running excess return; mark correct/incorrect once 3 months have passed."""
+                         horizon_days: int | None = None) -> int:
+    """Update running excess return; mark correct/incorrect once each prediction's own
+    horizon (1 week now; 3 months for predictions made before the change) has passed."""
     n = _evaluate(conn, ctx, horizon_days, "predictions", "horizon = 'longterm'")
     _evaluate(conn, ctx, horizon_days, "shadow_predictions", "1 = 1")   # live strategy race
     return n
@@ -344,8 +352,10 @@ def _evaluate(conn, ctx, horizon_days: int, table: str, where: str) -> int:
         if d not in dates or p["symbol"] not in close:
             continue
         i = dates.get_loc(d)
-        j = min(i + horizon_days, len(dates) - 1)
-        matured = i + horizon_days <= len(dates) - 1
+        h = horizon_days or (p["horizon_days"] if "horizon_days" in p.keys() and p["horizon_days"]
+                             else 63)
+        j = min(i + h, len(dates) - 1)
+        matured = i + h <= len(dates) - 1
         px = close[p["symbol"]].iloc[: j + 1].dropna()
         if px.empty:
             continue
@@ -367,10 +377,13 @@ def _evaluate(conn, ctx, horizon_days: int, table: str, where: str) -> int:
     return done
 
 
-def strategy_race(conn: sqlite3.Connection, last_days: int = 60) -> pd.DataFrame:
+def strategy_race(conn: sqlite3.Connection, last_days: int = 60,
+                  horizon_days: int | None = None) -> pd.DataFrame:
     """Live accuracy of each strategy variant over its most recent judged prediction days."""
-    df = pd.read_sql("SELECT variant, date, direction, correct, base_rate, actual_return "
-                     "FROM shadow_predictions WHERE correct IS NOT NULL", conn)
+    df = pd.read_sql("SELECT variant, date, direction, correct, base_rate, actual_return, "
+                     "horizon_days FROM shadow_predictions WHERE correct IS NOT NULL", conn)
+    if horizon_days is not None:
+        df = df[df["horizon_days"].fillna(63) == horizon_days]
     cols = ["variant", "days", "predictions", "accuracy", "random", "avg_excess_up"]
     if df.empty:
         return pd.DataFrame(columns=cols)

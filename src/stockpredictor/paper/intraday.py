@@ -208,3 +208,36 @@ def value(conn, prices: dict[str, float]) -> dict:
     eq = acct["cash"] + held
     return {"capital": acct["capital"], "cash": acct["cash"], "holdings": held, "equity": eq,
             "pnl": eq - acct["capital"], "positions": len(trades)}
+
+
+def preview(ctx: E.MarketContext, store_dir: Path) -> tuple[pd.DataFrame, pd.Timestamp] | None:
+    """The 10 buy / 10 sell picks the model would have made on the latest completed day,
+    with how they actually did (9:45 -> 15:15). Trains a model first if there is none."""
+    from stockpredictor import store
+    from stockpredictor.models import trainer as T
+
+    feats = T.intraday_feats(ctx, store_dir)
+    if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
+        return None
+    day = feats["date"].max()
+    # Honest preview: a model trained only on days before the preview day.
+    model = MI.IntradayModel.train(feats[feats["date"] < day], {**MI.current_params(), "n_seeds": 1})
+    if not (MI.MODEL_DIR / "model.txt").exists():
+        MI.IntradayModel.train(feats).save()          # first real model for live picks
+    t = feats[(feats["date"] == day) & feats["symbol"].isin(store.tradable(ctx.universe))].copy()
+    t["score"] = model.score(t).values
+    t = t.sort_values("score", ascending=False)
+    pct = t["score"].rank(pct=True)
+    longs = t.head(N_CANDIDATES).assign(side="long", confidence=pct)
+    shorts = t.tail(N_CANDIDATES).iloc[::-1].assign(side="short", confidence=1 - pct)
+    picks = pd.concat([longs, shorts])
+    why = model.explain(picks)
+    picks["reasons"] = [w if side == "long" else
+                        [x for x in w if x.startswith("-")] + [x for x in w if x.startswith("+")]
+                        for w, side in zip(why, picks["side"])]
+    sign = picks["side"].map({"long": 1, "short": -1})
+    picks["move"] = sign * (picks["px_1515"] / picks["c30"] - 1)
+    up_share = float((t["px_1515"] > t["c30"]).mean())      # random-pick baseline for the day
+    picks["baseline"] = picks["side"].map({"long": up_share, "short": 1 - up_share})
+    return picks[["symbol", "side", "confidence", "c30", "px_1515", "move", "reasons",
+                  "baseline"]], day

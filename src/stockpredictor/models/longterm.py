@@ -22,8 +22,8 @@ from stockpredictor.models.engine import Ensemble
 from stockpredictor.config import PROJECT_ROOT
 
 MODEL_DIR = PROJECT_ROOT / "models" / "longterm"
-HORIZON = 63            # trading days (~3 months)
-EMBARGO_DAYS = 100      # calendar days between train labels and test start
+HORIZON = 5             # trading days: predict the next week
+EMBARGO_DAYS = 14       # calendar days between train labels and test start (> horizon)
 MIN_TRAIN_ROWS = 5000
 NUM_ROUNDS = 400
 PARAMS = dict(
@@ -64,11 +64,47 @@ TRAINING_DEFAULTS = {"mom_weight": 0.0, "recency_half_life": 0.0, "tail_weight":
 SNAPSHOT_STEP = 5       # use every 5th trading day, counted back from the newest day
 
 
+# How the paper portfolio turns weekly predictions into trades. Trading on the raw weekly
+# signal churns too much (costs ate everything in the backtest); averaging each stock's
+# score over 20 days and blending in 12-month momentum kept the edge after costs.
+TRADE_SMOOTH_DAYS = 20
+TRADE_MOM_WEIGHT = 0.5
+
+
+def trading_scores(model: "LongTermModel", feats: pd.DataFrame, date: pd.Timestamp,
+                   symbols, smooth_days: int = TRADE_SMOOTH_DAYS,
+                   mom_weight: float = TRADE_MOM_WEIGHT) -> pd.Series:
+    """Steadier score used for paper trading: 20-day average of the weekly prediction,
+    blended with momentum. Index = symbol."""
+    days = sorted(d for d in feats["date"].unique() if d <= date)[-smooth_days:]
+    rows = feats[feats["date"].isin(days) & feats["symbol"].isin(symbols)]
+    raw = pd.Series(model.model.predict(rows[model.features].astype(np.float32)), index=rows.index)
+    avg = raw.groupby(rows["symbol"]).mean()
+    today = feats[(feats["date"] == date) & feats["symbol"].isin(avg.index)].set_index("symbol")
+    avg = avg.reindex(today.index)
+    frame = today.reset_index()[["symbol", "date", "mom_12_1"]]
+    blended = blend(pd.Series(avg.values, index=frame.index), frame, mom_weight)
+    return pd.Series(blended.values, index=today.index)
+
+
+def smooth_scores(scores: pd.DataFrame, feats: pd.DataFrame, smooth_days: int = TRADE_SMOOTH_DAYS,
+                  mom_weight: float = TRADE_MOM_WEIGHT) -> pd.DataFrame:
+    """Backtest version of trading_scores for a whole symbol/date/score table."""
+    s = scores.sort_values(["symbol", "date"]).copy()
+    s["score"] = s.groupby("symbol")["score"].transform(
+        lambda x: x.rolling(smooth_days, min_periods=1).mean())
+    s = s.merge(feats[["symbol", "date", "mom_12_1"]], on=["symbol", "date"], how="left")
+    s["score"] = blend(s["score"], s, mom_weight).values
+    return s[["symbol", "date", "score"]]
+
+
 def current_params() -> dict:
     """Tuned settings if the weekly tuner saved any, else the defaults."""
     path = MODEL_DIR / "params.json"
-    saved = json.loads(path.read_text()) if path.exists() else {**PARAMS, "num_rounds": NUM_ROUNDS}
-    return {**TRAINING_DEFAULTS, **saved}
+    saved = json.loads(path.read_text()) if path.exists() else {}
+    if saved.get("horizon") != HORIZON:      # settings tuned for another horizon don't apply
+        saved = {}
+    return {**TRAINING_DEFAULTS, **PARAMS, "num_rounds": NUM_ROUNDS, **saved, "horizon": HORIZON}
 
 
 def training_snapshots(feats: pd.DataFrame, step: int = SNAPSHOT_STEP) -> pd.DataFrame:
@@ -98,7 +134,7 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {**TRAINING_DEFAULTS, **(params or current_params())}
     weights = sample_weights(train, params)
-    for key in ("mom_weight", "recency_half_life", "tail_weight", "wf_seeds"):
+    for key in ("mom_weight", "recency_half_life", "tail_weight", "wf_seeds", "horizon"):
         params.pop(key, None)
     return engine.fit(train, cols, params, weights, gap_days=EMBARGO_DAYS,
                       default_rounds=NUM_ROUNDS)
@@ -148,7 +184,7 @@ class LongTermModel:
         self.model.save(path)
         (path / "meta.json").write_text(json.dumps({
             "features": self.features, "trained_at": self.trained_at,
-            "train_to": self.train_to, "metrics": self.metrics}, indent=2))
+            "train_to": self.train_to, "metrics": self.metrics, "horizon": HORIZON}, indent=2))
 
     @classmethod
     def load(cls, path: Path) -> "LongTermModel":

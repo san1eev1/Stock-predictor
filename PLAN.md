@@ -185,6 +185,14 @@ then **intraday** (needs Angel One). Telegram was dropped.
 - ML engine measured out-of-sample (last 3 years): regression beats LambdaRank (IC 0.071 vs 0.040); using all 51 features beats pruning to 35/25/15; seed-to-seed noise is about ±0.004 IC, so the tuner now needs a gain of ≥ 0.01 before switching (ranking objective and feature pruning are in its search space in case the market changes).
 - Easy daily running: autostart at 09:00 on weekdays (launchd, stops after 21:30), double-click `Start Stock Predictor.command`, one-shot `today` command, and DAILY_GUIDE.md.
 
+### ✅ 1-week horizon (long-term)
+
+- Long-term now predicts the **next 5 trading days** and is judged after one week (fast feedback for continuous learning). Short-term features added (1/10-day returns, distance from 10/20-day averages, 1-week volatility and range, position in 1-week range, share of up days, 1-week strength vs Nifty).
+- Out-of-sample (last 3 years): IC 0.048 (t≈7.5), top-10 beat Nifty next week ~55%, avg +0.64%/week. Momentum blends lower 1-week accuracy; denser (daily) training rows did not help.
+- Trading the raw weekly signal churned ~500 trades/yr and **lost 5.6%/yr after costs**. Paper trading therefore uses a **trading score** = 20-day average of the weekly prediction blended 50% with 12-month momentum, exit below rank 50, 15% stop-loss: **+20.1%/yr, Sharpe 0.95** (2015–2026, costs included) vs Nifty 9.0%, equal-weight 15.6%, momentum-only 20.7% (Sharpe 0.83).
+- Long-term paper trading is buy-only; "sell" = exit holdings the model expects to fall (*Sell now* list for paper and real holdings). Intraday keeps 10 buy + 10 short a day.
+- Pages generate picks automatically when none exist; intraday shows an honest (out-of-sample) preview of the latest day until live picks start.
+
 ### Dropped
 
 - Telegram alerts (alerts are shown in the dashboard sidebar instead).

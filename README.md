@@ -2,7 +2,7 @@
 
 Personal AI stock predictor for the Nifty 100, with two tracks, both complete:
 
-- **Long-term:** weekly-rebalanced picks (top 10 expected to beat Nifty over 3 months)
+- **Long-term:** 1-week predictions (10 buy / 10 sell candidates, judged after a week); buy-only paper portfolio
 - **Intraday:** at 9:45, 5 longs and 5 shorts from the first 30 minutes, squared off at 15:15
 
 Both have live monitoring, paper trading, accuracy tracking, your real portfolio and a local
@@ -61,7 +61,7 @@ How the long-term model keeps learning:
 
 | When | What it learns from |
 |---|---|
-| **Every day after the close** | Retrains on all history (every 5th trading day since 2005, shifting daily so the newest known 3-month outcome is always included) **plus its own judged paper predictions** — wrong ones weigh 2×, right ones 1.5× |
+| **Every day after the close** | Retrains on all history (every 5th trading day since 2005, shifting daily so the newest known 1-week outcome is always included) **plus its own judged predictions** — wrong ones weigh 2×, right ones 1.5× |
 | **Every day (live race)** | Three variants — AI model, 50/50 blend with momentum, momentum only — each make paper predictions. After 20+ judged days, the system switches to the variant with the best **live** accuracy if it leads by 5+ points |
 | **Every weekday evening** | Light self-tuning (2 new settings per model) |
 | **Every weekend** | Full self-tuning: tries new model settings, recency weighting (favour recent years) and focus on extreme winners/losers, scored out-of-sample; keeps changes only if they test better |
@@ -80,11 +80,10 @@ the day's Angel One intraday data.
 
 ## Dashboard pages
 
-- **Long-term picks** — 10 buy and 10 sell candidates with confidence, reasons, news mood, P/E, ROE; live provisional ranking
+- **Long-term picks** — 10 buy and 10 sell candidates for the next week, *Sell now* for your holdings, reasons, news, P/E, ROE
 - **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live move and result (🧪 = paper-traded)
-- **Paper trading** — long-term *Buy book* (10 buy candidates) and *Sell book* (10 sell
-  candidates as virtual shorts); intraday *Buy trades* and *Sell trades* (10 + 10 a day) — each in
-  its own table with P&L after costs
+- **Paper trading — Long-term** — buy-only ₹1 lakh portfolio (steady version of the weekly signal)
+- **Paper trading — Intraday** — 10 buy trades and 10 sell (short) trades a day, separate sections
 - **My portfolio** — add your Groww trades; live P&L, stop-loss alerts, allocation (Long-term / Intraday tabs)
 - **Accuracy** — long-term picks judged after 3 months vs Nifty; intraday picks at 15:15; both vs random picks
 - **Model** — what each model relies on, backtest results, retrain button

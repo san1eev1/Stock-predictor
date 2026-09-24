@@ -125,20 +125,13 @@ def page_picks():
     if need_data():
         return
     c, m = conn(), ctx()
-    last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'longterm'").fetchone()[0]
-    if not last:
-        st.info("No predictions yet. Click below (or let the live monitor run after 5:15 PM).")
-        if st.button("Run today's decision now", type="primary"):
-            with st.spinner("Scoring stocks…"):
-                D.run_daily(c, m, SETTINGS.paper_capital_longterm)
-            st.rerun()
-        return
-    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'longterm' AND date = ?",
-                        c, params=(last,))
+    last = ensure_longterm_picks(c, m)
+    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'longterm' AND date = ? "
+                        "AND horizon_days = ?", c, params=(last, M.HORIZON))
     summary = N.news_summary(m.news, pd.Timestamp(now_ist())).set_index("symbol")
     fund = FUND.load_latest(STORE).set_index("symbol")
-    st.caption(f"Official decision of **{pd.Timestamp(last):%d %b %Y}** (after close). "
-               "Top = most likely to beat Nifty over 3 months; bottom = most likely to lag.")
+    st.caption(f"Predictions for the **next week** (5 trading days), made after the close of "
+               f"**{pd.Timestamp(last):%d %b %Y}**. Each is judged after one week against Nifty 50.")
 
     def table(direction):
         p = preds[preds["direction"] == direction].sort_values("confidence", ascending=False)
@@ -161,12 +154,12 @@ def page_picks():
             "Price": st.column_config.NumberColumn(format="₹%.2f"),
             "Signals (↑ raised score, ↓ lowered it)": st.column_config.TextColumn(width="large")})
 
-    st.subheader("▲ 10 Buy candidates")
-    st.caption("Most likely to beat Nifty 50 over the next 3 months.")
+    st.subheader("▲ 10 Buy candidates — expected to rise more than Nifty next week")
     table("up")
-    st.subheader("▼ 10 Sell candidates")
-    st.caption("Most likely to lag Nifty 50 — avoid, or consider selling if you hold them.")
+    st.subheader("▼ 10 Sell candidates — expected to fall behind Nifty next week")
+    st.caption("Sell these if you hold them, or avoid buying them.")
     table("down")
+    sell_now(c, preds)
     live_block(c)
 
     st.subheader("📰 Latest headlines for picks")
@@ -179,6 +172,48 @@ def page_picks():
         st.markdown(f"{mood} **{h.symbol}** — [{h.title}]({h.url}) "
                     f"<span style='opacity:.6'>· {h.source} · {h.published:%d %b %H:%M}</span>",
                     unsafe_allow_html=True)
+
+
+def ensure_longterm_picks(c, m) -> str:
+    """Make sure 1-week predictions exist for the latest data day (runs the model if not)."""
+    latest = f"{m.feats['date'].max():%Y-%m-%d}"
+    have = c.execute("SELECT COUNT(*) FROM predictions WHERE horizon = 'longterm' AND date = ? "
+                     "AND horizon_days = ?", (latest, M.HORIZON)).fetchone()[0]
+    if not have:
+        with st.spinner("Making this week's predictions (first time after an update can take "
+                        "~30 s while the model trains)…"):
+            E.ensure_account(c, SETTINGS.paper_capital_longterm)
+            model = D.load_or_train(m)
+            rules, mode = D.get_rules(c)
+            E.run_decision(c, m, model, pd.Timestamp(latest), rules, mode)
+    return latest
+
+
+def sell_now(c, preds: pd.DataFrame):
+    """Holdings (paper and yours) that the model now expects to fall."""
+    st.subheader("🔔 Sell now — holdings the model expects to fall")
+    ranks = dict(c.execute("SELECT symbol, rank FROM lt_scores").fetchall())
+    n = len(ranks) or 100
+    rules, _ = D.get_rules(c)
+    weak = set(preds.loc[preds["direction"] == "down", "symbol"])
+    rows = []
+    held = [("Paper", s) for s in E.holdings(c)]
+    real = R.holdings(c, "longterm")
+    if not real.empty:
+        held += [("My portfolio", s) for s in real.loc[real["qty"] > 0, "symbol"]]
+    for who, sym in held:
+        r = ranks.get(sym)
+        reasons = []
+        if sym in weak:
+            reasons.append("in this week's 10 sell candidates")
+        if r is not None and r > rules.exit_rank:
+            reasons.append(f"trading rank {r} of {n} (below {rules.exit_rank})")
+        if reasons:
+            rows.append({"Where": who, "Stock": sym, "Why": "; ".join(reasons)})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    else:
+        st.caption("None of your paper or real long-term holdings is flagged — nothing to sell.")
 
 
 @st.fragment(run_every=REFRESH)
@@ -199,47 +234,53 @@ def live_block(c=None):
         column_config={"Live price": st.column_config.NumberColumn(format="₹%.2f")})
 
 
-def page_paper():
-    st.title("Paper trading")
-    tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
-    with tab_id:
-        paper_intraday()
-    with tab_lt:
-        if need_data():
-            return
-        paper_longterm()
+def page_paper_longterm():
+    st.title("Paper trading — Long-term")
+    st.caption("Buy-only virtual portfolio (₹1 lakh). It buys the stocks with the strongest "
+               "sustained buy signal and sells a holding when the model expects it to fall "
+               "(rank drops below the exit rank), on a stop-loss, or on severe bad news. "
+               "Decisions after the close, orders filled at the next market price.")
+    if need_data():
+        return
+    paper_longterm()
+
+
+def page_paper_intraday():
+    st.title("Paper trading — Intraday")
+    st.caption("Every trading day at 9:46: buys the 10 stocks expected to rise and short-sells the "
+               "10 expected to fall, with a stop-loss and target, all closed by 15:15.")
+    paper_intraday()
 
 
 @st.fragment(run_every=REFRESH)
 def paper_longterm():
     c = conn()
     E.ensure_account(c, SETTINGS.paper_capital_longterm)
-    E.ensure_account(c, SETTINGS.paper_capital_longterm, E.SHORT_HORIZON)
     prices = current_prices(c)
-    vb, vs = E.value(c, prices), E.value(c, prices, E.SHORT_HORIZON)
-    k = st.columns(3)
-    k[0].metric("Buy book", rupees(vb["equity"]), C.money(vb["pnl"]))
-    k[1].metric("Sell book (virtual shorts)", rupees(vs["equity"]), C.money(vs["pnl"]))
-    k[2].metric("Both books", rupees(vb["equity"] + vs["equity"]), C.money(vb["pnl"] + vs["pnl"]))
-    st.caption("Each book starts with the same paper capital. The sell book short-sells the 10 sell "
-               "candidates on paper to measure how good the sell signals are — in real life you "
-               "would act on them by avoiding or selling those stocks.")
-    paper_book(c, E.HORIZON, "▲ Buy book — 10 buy candidates", prices)
-    paper_book(c, E.SHORT_HORIZON, "▼ Sell book — 10 sell candidates (virtual short)", prices)
-    eq = pd.read_sql("SELECT horizon, date, equity FROM paper_equity WHERE horizon IN (?, ?) "
-                     "ORDER BY date", c, params=(E.HORIZON, E.SHORT_HORIZON))
-    if eq["date"].nunique() >= 2:
+    v = E.value(c, prices)
+    k = st.columns(4)
+    k[0].metric("Capital", rupees(v["capital"]))
+    k[1].metric("Current value", rupees(v["equity"]), C.money(v["pnl"]))
+    k[2].metric("Cash", rupees(v["cash"]))
+    k[3].metric("Holdings", f"{v['positions']}")
+    with st.expander("Why can these differ from this week's 10 buy candidates?"):
+        st.write("The buy candidates are the model's best guesses for **next week**. Trading on "
+                 "them directly would change most holdings every week, and in the backtest the "
+                 "charges ate all the profit. The paper portfolio therefore buys the stocks whose "
+                 "weekly prediction has been strong **over the last 20 days** (blended with "
+                 "12-month momentum) and holds them until they fall out of the top half. In the "
+                 "2015-2026 backtest this earned ~20% a year after costs vs ~9% for Nifty 50.")
+    paper_book(c, E.HORIZON, "Holdings", prices)
+    eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = ? ORDER BY date",
+                     c, params=(E.HORIZON,))
+    if len(eq) >= 2:
         st.subheader("Value over time vs Nifty 50")
         m = ctx()
         eq["date"] = pd.to_datetime(eq["date"])
-        eq["series"] = eq["horizon"].map({E.HORIZON: "Buy book", E.SHORT_HORIZON: "Sell book"})
         nifty = m.indices[m.indices["symbol"] == "NIFTY50"].set_index("date")["close"]
-        dates = sorted(eq["date"].unique())
-        n = nifty.reindex(dates).ffill().bfill()
-        start = eq[eq["horizon"] == E.HORIZON]["equity"].iloc[0]
-        df = pd.concat([eq.assign(value=eq["equity"]),
-                        pd.DataFrame({"date": dates, "series": "Nifty 50",
-                                      "value": (n / n.iloc[0] * start).values})])
+        n = nifty.reindex(eq["date"]).ffill().bfill().values
+        df = pd.concat([eq.assign(series="Buy book", value=eq["equity"]),
+                        eq.assign(series="Nifty 50", value=n / n[0] * eq["equity"].iloc[0])])
         st.altair_chart(C.lines(df[["date", "series", "value"]], "date", "value", "series",
                                 ",.0f", "Value (₹)"), width="stretch")
 
@@ -248,9 +289,6 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
     rules, _ = D.get_rules(c)
     sign = E.book_sign(h)
     st.subheader(title)
-    v = E.value(c, prices, h)
-    st.caption(f"Value {rupees(v['equity'])} · P&L {C.money(v['pnl'])} · cash {rupees(v['cash'])} · "
-               f"{v['positions']} positions")
     pos = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'open'", c, params=(h,))
     if pos.empty:
         st.caption("No open positions yet — orders fill at the next market price after a decision.")
@@ -303,15 +341,45 @@ def page_intraday():
                "paper-traded (change in Settings).")
     if not enabled:
         st.warning("Intraday is switched off in Settings.")
-    if not (MI.MODEL_DIR / "model.txt").exists():
-        st.info("No intraday model yet. In the terminal: `python -m stockpredictor intraday-backfill`"
-                " (Angel One), then `python -m stockpredictor train-intraday`.")
+
     last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'intraday'").fetchone()[0]
     if not last:
-        st.caption("No intraday picks yet — they appear at 9:46 on trading days while the live "
-                   "monitor runs.")
+        intraday_preview()
         return
     intraday_live(last)
+
+
+def intraday_preview():
+    m = ctx()
+    if m is None:
+        return
+    with st.spinner("Preparing a preview from the latest trading day…"):
+        res = PI.preview(m, STORE)
+    if res is None:
+        st.info("Not enough intraday history yet (needs 40 trading days). Run the task "
+                "'Angel One: download intraday history (one-time)'.")
+        return
+    picks, day = res
+    st.info(f"Live picks appear at **9:46 AM** on trading days while the program runs. Meanwhile, "
+            f"this is what the model would have picked on **{day:%d %b %Y}** (trained only on earlier "
+            f"days) and how it turned out.")
+    for side, title in (("long", "▲ 10 Buy — expected to rise 9:45 → 15:15"),
+                        ("short", "▼ 10 Sell — expected to fall 9:45 → 15:15")):
+        p = picks[picks["side"] == side].copy()
+        right = (p["move"] > 0).mean()
+        st.markdown(f"**{title}** · {right:.0%} moved the predicted way "
+                    f"(random picks that day: {p['baseline'].iloc[0]:.0%})")
+        p["Result"] = ["✅" if x > 0 else "❌" for x in p["move"]]
+        p["Why"] = [reason_text(r) for r in p["reasons"]]
+        st.dataframe(p[["symbol", "confidence", "c30", "px_1515", "move", "Result", "Why"]].rename(
+            columns={"symbol": "Stock", "confidence": "Confidence", "c30": "Price 9:45",
+                     "px_1515": "Price 15:15", "move": "Move (in our favour)",
+                     "Why": "Signals (↑ raised score, ↓ lowered it)"}),
+            hide_index=True, width="stretch", column_config={
+                "Confidence": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+                "Price 9:45": st.column_config.NumberColumn(format="₹%.2f"),
+                "Price 15:15": st.column_config.NumberColumn(format="₹%.2f"),
+                "Move (in our favour)": st.column_config.NumberColumn(format="percent")})
 
 
 @st.fragment(run_every=REFRESH)
@@ -483,9 +551,9 @@ def page_accuracy():
 
 
 ACCURACY_TEXT = {
-    "longterm": ("A long-term prediction is judged after 3 months: a top pick is ✅ if it beat "
+    "longterm": ("A long-term prediction is judged after 1 week: a buy pick is ✅ if it beat "
                  "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.",
-                 "First results appear ~3 months after the first prediction.", "vs Nifty"),
+                 "First results appear one week after the first prediction.", "vs Nifty"),
     "intraday": ("An intraday pick is judged at 15:15 the same day: a long is ✅ if the price rose "
                  "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 100 "
                  "stocks that moved that way.", "Results appear after the first trading day.",
@@ -550,7 +618,7 @@ def page_model():
     if path.exists():
         meta = json.loads(path.read_text())
         st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on every week whose "
-                   f"3-month outcome is known (up to {meta['train_to']}); today's picks use "
+                   f"1-week outcome is known (up to {meta['train_to']}); today's picks use "
                    "today's data. Retrains daily, self-tunes weekly.")
         model = M.LongTermModel.load(M.MODEL_DIR)
         from stockpredictor.features.labels import label
@@ -659,7 +727,7 @@ def training_history():
 def strategy_race():
     st.subheader("🏁 Live strategy race")
     st.caption("Every day three variants also make paper predictions: the AI model, a 50/50 "
-               "blend with plain momentum, and momentum only. Each is judged after 3 months like "
+               "blend with plain momentum, and momentum only. Each is judged after 1 week like "
                "the real picks. Once every variant has 20+ judged days, the system switches to "
                "the one with the best live accuracy if it leads by 5+ points.")
     c = conn()
@@ -670,7 +738,7 @@ def strategy_race():
     if race.empty:
         msg = (f"Race started {started[0]}; {started[1]} prediction days so far. "
                if started[0] else "The race starts with the first daily decision. ")
-        st.info(msg + f"First results ~3 months later. Currently using: **{now_using}**.")
+        st.info(msg + f"First results one week later. Currently using: **{now_using}**.")
         return
     race["Using now"] = ["✅" if v == now_using else "" for v in race["variant"]]
     st.dataframe(race.rename(columns={
@@ -779,10 +847,8 @@ def page_settings():
     st.subheader("Paper account")
     cap = st.number_input("Starting capital ₹", 10_000, 10_000_000,
                           int(SETTINGS.paper_capital_longterm), step=10_000)
-    which = st.selectbox("Account", ["longterm", "longterm_short", "intraday"],
-                         format_func={"longterm": "Long-term buy book",
-                                      "longterm_short": "Long-term sell book (virtual shorts)",
-                                      "intraday": "Intraday"}.get)
+    which = st.selectbox("Account", ["longterm", "intraday"],
+                         format_func={"longterm": "Long-term (buy-only)", "intraday": "Intraday"}.get)
     if st.button("Reset paper account", help="Deletes this account's paper trades and starts again"):
         for t in ("paper_trades", "paper_orders", "paper_equity", "paper_accounts"):
             c.execute(f"DELETE FROM {t} WHERE horizon = ?", (which,))
@@ -797,7 +863,8 @@ def page_settings():
 
 pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
          st.Page(page_intraday, title="Intraday picks", icon="⚡"),
-         st.Page(page_paper, title="Paper trading", icon="🧪"),
+         st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
+         st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),
          st.Page(page_model, title="Model", icon="🧠"),
