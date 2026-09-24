@@ -22,9 +22,30 @@ CREATE TABLE IF NOT EXISTS daily_prices (
     symbol  TEXT NOT NULL,
     date    TEXT NOT NULL,                   -- YYYY-MM-DD
     open    REAL, high REAL, low REAL, close REAL,
+    adj_close REAL,                          -- also dividend-adjusted
     volume  INTEGER,
     source  TEXT,
     PRIMARY KEY (symbol, date)
+);
+
+-- Daily candles for market context indices (NIFTY50, INDIAVIX, sectors)
+CREATE TABLE IF NOT EXISTS index_prices (
+    symbol  TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    open    REAL, high REAL, low REAL, close REAL,
+    adj_close REAL,
+    volume  INTEGER,
+    source  TEXT,
+    PRIMARY KEY (symbol, date)
+);
+
+-- Splits / bonuses (value = share multiplier, e.g. 2.0 for 1:1 bonus) and dividends
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    symbol  TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    kind    TEXT NOT NULL CHECK (kind IN ('split', 'dividend')),
+    value   REAL NOT NULL,
+    PRIMARY KEY (symbol, date, kind)
 );
 
 -- Intraday OHLCV candles (1-min / 5-min ...)
@@ -133,6 +154,20 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after a table was first released: (table, column, type).
+MIGRATIONS = [
+    ("daily_prices", "adj_close", "REAL"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, col_type in MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+
 def init_db(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)

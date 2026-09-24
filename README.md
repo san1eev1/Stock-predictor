@@ -33,11 +33,17 @@ open -e .env        # fill in values when your Angel One account is active
 ```bash
 python -m stockpredictor init         # create the local database
 python -m stockpredictor universe     # download Nifty 100 list from NSE
-python -m stockpredictor status       # show configuration
+python -m stockpredictor prices       # daily prices since 2010 for Nifty 100 + indices (~5-10 min first time)
+python -m stockpredictor data-check   # coverage / gaps report
+python -m stockpredictor status       # show configuration and row counts
 # after Angel One keys are in .env:
 python -m stockpredictor tokens       # map stocks to Angel One tokens
 python -m stockpredictor check-angel  # test login + one live price
+python -m stockpredictor prices-intraday --interval FIVE_MINUTE --days 365
 ```
+
+Run `prices` again any time (e.g. daily after 4 PM) — it only downloads what is new.
+Try a single stock first with `--symbols RELIANCE`.
 
 ## Tests
 
@@ -53,6 +59,9 @@ src/stockpredictor/
   db.py              SQLite schema
   universe.py        Nifty 100 constituents
   data/angelone.py   Angel One SmartAPI client (data only)
+  data/daily.py      daily prices, indices, splits (Yahoo Finance)
+  data/intraday.py   intraday candles (Angel One)
+  data/quality.py    data coverage report
   __main__.py        command line
 tests/
 data/                local database (git-ignored)

@@ -101,7 +101,7 @@ Python · Angel One SmartAPI · yfinance · SQLite · pandas · TA-Lib · LightG
 ## 9. Build phases
 
 1. **Setup** — project structure, database, config, Angel One connection. ✅
-2. **Data pipeline** — Nifty 100 daily + intraday history, split/bonus handling.
+2. **Data pipeline** — Nifty 100 daily + intraday history, split/bonus handling. ✅ (intraday download ready, runs once Angel One is active)
 3. **Features** — candle patterns, indicators, first-30-min signals, market context.
 4. **Intraday model + backtest** — walk-forward, with costs. *Proves whether there is a real edge.*
 5. **News pipeline** — fetch + FinBERT sentiment, added as features.

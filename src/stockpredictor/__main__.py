@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date, timedelta
 
 from stockpredictor import db, universe
 from stockpredictor.config import load_settings
@@ -47,6 +48,54 @@ def cmd_check_angel(settings) -> None:
     print(f"Login OK. {row['symbol']} LTP: {client.ltp(row['symbol'], row['angel_token'])}")
 
 
+def cmd_prices(settings, args) -> None:
+    from stockpredictor.data import daily
+
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        symbols = args.symbols or universe.active_symbols(conn)
+        if not symbols:
+            print("No stocks yet — run `universe` first.")
+            return
+        results = daily.update_all(conn, symbols, date.fromisoformat(args.start))
+    failed = {k: v for k, v in results.items() if v.startswith("error")}
+    print(f"Done. {len(results) - len(failed)} updated, {len(failed)} failed.")
+    for name, err in failed.items():
+        print(f"  {name}: {err}")
+
+
+def cmd_prices_intraday(settings, args) -> None:
+    from stockpredictor.data import angelone, intraday
+
+    db.init_db(settings.db_path)
+    client = angelone.AngelDataClient(settings.angel)
+    start = date.today() - timedelta(days=args.days)
+    with db.connect(settings.db_path) as conn:
+        rows = conn.execute(
+            "SELECT symbol, angel_token FROM stocks WHERE active = 1 "
+            "AND angel_token IS NOT NULL ORDER BY symbol").fetchall()
+        if args.symbols:
+            rows = [r for r in rows if r["symbol"] in args.symbols]
+        if not rows:
+            print("No stocks with Angel One tokens — run `tokens` first.")
+            return
+        for i, r in enumerate(rows, 1):
+            try:
+                n = intraday.update_symbol(conn, client, r["symbol"], r["angel_token"],
+                                           args.interval, start)
+                print(f"[{i}/{len(rows)}] {r['symbol']}: {n} candles", flush=True)
+            except Exception as exc:
+                print(f"[{i}/{len(rows)}] {r['symbol']}: error: {exc}", flush=True)
+
+
+def cmd_data_check(settings, args) -> None:
+    from stockpredictor.data import quality
+
+    with db.connect(settings.db_path) as conn:
+        symbols = args.symbols or universe.active_symbols(conn)
+        print(quality.format_report(quality.daily_report(conn, symbols)))
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -54,10 +103,40 @@ def cmd_status(settings) -> None:
     print(f"Paper capital:   intraday ₹{settings.paper_capital_intraday:,.0f}, "
           f"long-term ₹{settings.paper_capital_longterm:,.0f}")
     if settings.db_path.exists():
+        db.init_db(settings.db_path)  # applies schema updates to older databases
         with db.connect(settings.db_path) as conn:
             n = conn.execute("SELECT COUNT(*) FROM stocks WHERE active = 1").fetchone()[0]
-        print(f"Active stocks:   {n}")
+            print(f"Active stocks:   {n}")
+            for table in ("daily_prices", "index_prices", "intraday_prices"):
+                cnt, last = conn.execute(
+                    f"SELECT COUNT(*), MAX({'ts' if table == 'intraday_prices' else 'date'}) "
+                    f"FROM {table}").fetchone()
+                print(f"{table + ':':<17}{cnt:,} rows, latest {last or '-'}")
 
+
+# Commands that take extra arguments: name -> (handler, help, argument setup)
+def _symbols_arg(p):
+    p.add_argument("--symbols", nargs="+", help="Only these NSE symbols (default: all Nifty 100)")
+
+
+def _prices_args(p):
+    _symbols_arg(p)
+    p.add_argument("--start", default="2010-01-01", help="First date for new stocks (YYYY-MM-DD)")
+
+
+def _intraday_args(p):
+    _symbols_arg(p)
+    p.add_argument("--interval", default="FIVE_MINUTE",
+                   help="ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ... (default FIVE_MINUTE)")
+    p.add_argument("--days", type=int, default=365, help="How many days back (default 365)")
+
+
+ARG_COMMANDS = {
+    "prices": (cmd_prices, "Download/update daily prices for stocks and indices", _prices_args),
+    "prices-intraday": (cmd_prices_intraday, "Download intraday candles from Angel One",
+                        _intraday_args),
+    "data-check": (cmd_data_check, "Report data coverage and gaps", _symbols_arg),
+}
 
 COMMANDS = {
     "init": (cmd_init, "Create the local SQLite database"),
@@ -73,8 +152,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name, (_, help_text) in COMMANDS.items():
         sub.add_parser(name, help=help_text)
+    for name, (_, help_text, setup) in ARG_COMMANDS.items():
+        setup(sub.add_parser(name, help=help_text))
     args = parser.parse_args(argv)
-    COMMANDS[args.command][0](load_settings())
+    if args.command in ARG_COMMANDS:
+        ARG_COMMANDS[args.command][0](load_settings(), args)
+    else:
+        COMMANDS[args.command][0](load_settings())
     return 0
 
 
