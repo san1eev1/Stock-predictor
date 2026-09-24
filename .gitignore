@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Local data (database, downloaded files, models)
+/data/*
+!/data/.gitkeep
+/models/
+/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store

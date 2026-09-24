@@ -1,0 +1,10 @@
+# Phase 1
+python-dotenv>=1.0
+requests>=2.31
+pyotp>=2.9
+smartapi-python>=1.4
+logzero>=1.7
+websocket-client>=1.6
+
+# Dev
+pytest>=8.0
