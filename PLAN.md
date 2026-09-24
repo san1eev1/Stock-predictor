@@ -100,17 +100,89 @@ Python · Angel One SmartAPI · yfinance · SQLite · pandas · TA-Lib · LightG
 
 ## 9. Build phases
 
-1. **Setup** — project structure, database, config, Angel One connection. ✅
-2. **Data pipeline** — Nifty 100 daily + intraday history, split/bonus handling. ✅ (intraday download ready, runs once Angel One is active)
-3. **Features** — candle patterns, indicators, first-30-min signals, market context.
-4. **Intraday model + backtest** — walk-forward, with costs. *Proves whether there is a real edge.*
-5. **News pipeline** — fetch + FinBERT sentiment, added as features.
-6. **Long-term model + backtest.**
-7. **Paper trading engine + accuracy tracking.**
-8. **Streamlit UI** — all pages.
-9. **Scheduler** — daily / weekly jobs, holiday calendar, catch-up.
-10. **Portfolio page** — manual entry of real trades.
-11. **Telegram alerts** — last step.
+Order: **long-term first** (needs only free daily data, available now),
+then **intraday** (needs Angel One), **Telegram last**.
+
+### ✅ Done
+
+| # | Phase | Delivered |
+|---|---|---|
+| 1 | Setup | Project structure, SQLite database, `.env` config, Angel One data-only client, CLI |
+| 2 | Data pipeline | Daily prices since 2010 for Nifty 100 + 12 indices, split/bonus handling, incremental updates, data-check report, intraday downloader (ready for Angel One) |
+
+### Track A — Long-term (build now)
+
+**Phase 3 — Long-term features**
+- Trend & momentum: 1 / 3 / 6 / 12-month returns, distance from 50 / 200-day averages, distance from 52-week high/low
+- Relative strength vs Nifty 50 and vs the stock's sector index
+- Volatility & risk: 3 / 6-month volatility, max drawdown, beta
+- Volume & liquidity trends (delivery-style accumulation proxies)
+- Weekly-chart candle patterns and indicators (TA-Lib: RSI, MACD, ADX, Bollinger)
+- Market regime: Nifty above/below 200-day average, India VIX level
+- Features stored per stock per week; strictly no future data
+- *Done when:* feature table builds for all stocks since 2010 and passes look-ahead tests
+
+**Phase 4 — Fundamentals & news**
+- Free fundamentals: quarterly results (revenue, profit, EPS growth), P/E, P/B, ROE, debt/equity — from yfinance / NSE filings, only as of the date they were public
+- News: Google News RSS, ET / Moneycontrol RSS, NSE corporate announcements, GDELT history
+- FinBERT sentiment (local, free) → per-stock sentiment score, news count, results / event flags
+- Daily news collection starts here so history builds up for intraday later
+- *Done when:* fundamentals + sentiment columns join the feature table; news fetch runs daily
+
+**Phase 5 — Long-term model + backtest**
+- Target: rank of each stock's next **3-month return vs Nifty 50** (1-month as secondary)
+- LightGBM ranker, walk-forward: train on past years, predict next period, roll forward
+- Portfolio rules (defaults, editable): hold **top 10, equal weight**; rebalance weekly; exit when a stock drops out of the top 30 or hits its stop-loss (buffer avoids churn)
+- Delivery costs included: STT, exchange charges, stamp duty, DP charges, GST, slippage
+- Compare against Nifty 50 buy-and-hold and equal-weight Nifty 100
+- Report: CAGR, return vs Nifty, Sharpe, max drawdown, hit rate, turnover
+- *Done when:* backtest report exists and we decide honestly whether the model beats the benchmarks
+
+**Phase 6 — Long-term paper trading + accuracy**
+- ₹1,00,000 virtual portfolio following the weekly picks (buy / hold / exit)
+- Records every trade with costs; realized & unrealized P&L
+- Accuracy: % of picks beating Nifty, % profitable, accuracy by confidence, rolling trend, vs random-pick baseline
+- *Done when:* a weekly run produces picks and updates the paper portfolio + accuracy tables
+
+**Phase 7 — Streamlit app (long-term pages)**
+- Long-term Picks (buy / hold / exit with reasons and news)
+- Paper Trading — Long-term (prediction vs reality table, P&L chart)
+- Accuracy page, Model page (backtest, feature importance, last retrain), Settings
+- *Done when:* `streamlit run` shows all long-term pages from real data
+
+**Phase 8 — My Portfolio (real trades)**
+- Manual entry / edit / delete of Groww trades, separate Long-term and Intraday tabs
+- Invested amount, current value, realized / unrealized P&L, allocation chart
+- *Done when:* entered trades show correct P&L at latest prices
+
+**Phase 9 — Scheduler (long-term)**
+- Daily after 4 PM: update prices + news
+- Weekly: long-term picks, paper portfolio update, model retraining
+- NSE holiday calendar; missed runs caught up when the laptop is opened
+- *Done when:* jobs run on their own for a week without manual steps
+
+➡️ **Long-term paper trading starts here** and runs while Track B is built.
+
+### Track B — Intraday (after Angel One is active)
+
+**Phase 10 — Intraday data & features**
+- 5-min / 1-min history from Angel One (`prices-intraday`)
+- Intraday candle patterns, first-30-min behaviour (9:15–9:45 return, volume surge, range), VWAP position, gap from previous close, opening-range breakout
+- Market context at 9:45: Nifty / sector moves, VIX, GIFT Nifty gap, overnight news sentiment
+
+**Phase 11 — Intraday model + backtest**
+- Target: return from 9:45 to 3:15; LightGBM ranker → top 5 up / top 5 down
+- Intraday costs (brokerage, STT, charges, slippage), ATR stop-loss / target, "skip today" threshold
+- Walk-forward backtest vs random baseline — *proves whether an intraday edge exists*
+
+**Phase 12 — Intraday paper trading, app pages, scheduler jobs**
+- ₹1,00,000 intraday paper account; 9:45 AM picks job and 3:20 PM results job
+- Intraday Picks page, Intraday Paper Trading tab, intraday accuracy
+
+### Final
+
+**Phase 13 — Telegram alerts**
+- Weekly long-term picks and daily 9:45 intraday picks, plus end-of-day P&L summary
 
 Then: **paper trade for 2–3 months** before trusting real money to the picks.
 
