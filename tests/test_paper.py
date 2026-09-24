@@ -37,7 +37,8 @@ def test_decisions_queue_then_fill_next_day(conn, ctx_model):
     assert r1["rebalance"] and len(r1["buys"]) == 5 and r1["fills"] == []
     assert E.holdings(conn) == {}                          # nothing filled yet
     r2 = E.run_decision(conn, ctx, model, dates[1], rules)
-    assert len(r2["fills"]) == 5                           # filled at next day's close
+    assert sum(f.startswith("BUY") for f in r2["fills"]) == 5      # filled at next day's close
+    assert sum(f.startswith("SHORT") for f in r2["fills"]) == 5    # virtual short book too
     pos = E.holdings(conn)
     assert len(pos) == 5
     prices = ctx.closes_on(dates[1])
@@ -77,3 +78,19 @@ def test_negative_news_blocks_buy(conn, ctx_model):
                         for t in ("fraud probe", "auditor resigns")])
     ctx2 = E.MarketContext(ctx.daily, ctx.indices, ctx.universe, ctx.feats, bad)
     assert first not in E.run_decision(conn, ctx2, model, date)["buys"]
+
+
+def test_short_book_profits_when_price_falls_and_stops_on_rise(conn, ctx_model):
+    ctx, model = ctx_model
+    dates = sorted(ctx.feats["date"].unique())[-60:]
+    E.run_decision(conn, ctx, model, dates[0], Rules(n_hold=3, exit_rank=6, stop_loss=0.1))
+    E.run_decision(conn, ctx, model, dates[1], Rules(n_hold=3, exit_rank=6, stop_loss=0.1))
+    shorts = E.holdings(conn, E.SHORT_HORIZON)
+    assert len(shorts) == 3
+    sym, pos = next(iter(shorts.items()))
+    down = {sym: pos.entry_price * 0.9}
+    v = E.value(conn, down, E.SHORT_HORIZON)
+    assert v["pnl"] > 0                                       # price fell: short gains
+    up = {s: p.entry_price * 1.2 for s, p in shorts.items()}
+    sells, _ = E.decide(shorts, pd.Series(dtype=float), up, Rules(stop_loss=0.1), False, side="short")
+    assert {s for s, r in sells if r == "stop-loss"} == set(shorts)

@@ -13,7 +13,34 @@
       "command": "caffeinate -i .venv/bin/python -m stockpredictor start",
       "isBackground": true,
       "problemMatcher": [],
-      "group": { "kind": "build", "isDefault": true }
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "3. Quick daily run (no need to keep it open)",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor today",
+      "problemMatcher": []
+    },
+    {
+      "label": "Autostart: ON (09:00 Mon-Fri, stops itself at night)",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor autostart",
+      "problemMatcher": []
+    },
+    {
+      "label": "Autostart: OFF",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor autostart --off",
+      "problemMatcher": []
+    },
+    {
+      "label": "Autostart: show today's log",
+      "type": "shell",
+      "command": "tail -n 60 logs/daily.log",
+      "problemMatcher": []
     },
     {
       "label": "Web dashboard only",

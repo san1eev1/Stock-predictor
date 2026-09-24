@@ -1,0 +1,101 @@
+# Daily guide — how to run the Stock Predictor
+
+Everything runs on your Mac from VS Code. The dashboard is a **web page on your own Mac**
+(`http://localhost:8501`): nothing to install, nothing sent anywhere.
+
+There are **three ways** to run it each day. Pick one.
+
+| Way | Best if | What you do |
+|---|---|---|
+| **A. Autostart** (recommended) | Your Mac is usually on during the day | Turn it on once; it starts by itself every weekday at 9:00 |
+| **B. Press F5** | You open VS Code every morning | Press F5 before 9:15, leave it running |
+| **C. Quick daily run** | You can't leave the Mac on | Run one task once a day, any time after 5:15 PM |
+
+---
+
+## First time only (about 10 minutes)
+
+1. **Terminal** (Spotlight → "Terminal"): `brew install python@3.12 libomp git`
+2. **VS Code** → *File → Open Folder…* → **Stock-predictor**.
+3. Accept **"Install the recommended Python extension"** if asked.
+4. **Terminal → New Terminal**, then: `git pull`
+5. `Cmd+Shift+P` → **Tasks: Run Task** → **1. First-time setup**
+   (creates `.venv`, installs everything, downloads the data — wait for it to finish).
+6. `Cmd+Shift+P` → **Python: Select Interpreter** → choose the one with **`.venv`**.
+7. Angel One: open `.env`, fill the four `ANGEL_...` values, save, then run the task
+   **Angel One: check login**. You should see `Login OK`.
+
+---
+
+## A. Autostart (set once, then nothing to do)
+
+1. `Cmd+Shift+P` → **Tasks: Run Task** → **Autostart: ON (09:00 Mon-Fri, stops itself at night)**.
+2. Keep the MacBook **plugged in with the lid open** on trading days
+   (System Settings → Battery → Options → *Prevent automatic sleeping on power adapter* helps).
+3. Each weekday at 9:00 it starts in the background (or as soon as the Mac wakes), runs all day,
+   makes the after-close decision, learns, and stops after 21:30.
+4. To look at results: run **Web dashboard only** (or `python -m stockpredictor app`) any time.
+5. Check it worked: task **Autostart: show today's log**. Turn off: **Autostart: OFF**.
+
+## B. Press F5 each morning
+
+1. Open VS Code with the Stock-predictor folder **before 9:15 AM**.
+2. Press **F5** → choose **▶ Start Stock Predictor** (first time only it asks).
+   Alternatively double-click **`Start Stock Predictor.command`** in Finder.
+3. The dashboard opens in your browser. Leave VS Code running until ~6 PM.
+4. `Ctrl+C` in the terminal to stop.
+
+## C. Quick daily run (Mac doesn't need to stay on)
+
+1. Any time **after 5:15 PM** on a trading day: `Cmd+Shift+P` → **Tasks: Run Task** →
+   **3. Quick daily run**.
+2. It downloads the day's data, retrains on it and on judged paper trades, makes the long-term
+   decision, updates paper trading, and prints the **10 buy + 10 sell** candidates.
+3. If you run it between 9:46 and 10:15 AM it also makes the intraday picks.
+4. Limits: no minute-by-minute stop-losses or intraday square-off while the Mac is off, and
+   missed days are caught up next time (up to 30 days).
+
+---
+
+## What happens during a trading day (A and B)
+
+| Time (IST) | What the program does | Where to see it |
+|---|---|---|
+| 9:15 | Starts watching live prices (Angel One real-time) | sidebar: *Live monitor 🟢* |
+| 9:20 | Fills last night's long-term paper orders at market prices | Paper trading → Long-term |
+| **9:46** | **Intraday: 10 buy + 10 sell candidates**, paper-trades all 20 | **Intraday picks** |
+| every minute | Stop-loss / target checks (paper) · stop-loss alerts (your portfolio) | 🔔 Alerts |
+| every 15 min | New news, live re-ranking of long-term picks | Long-term picks → *Live ranking* |
+| **15:15** | Intraday square-off and scoring | Accuracy → Intraday |
+| **17:15+** | Data update → **retrain** → **long-term 10 buy + 10 sell** → paper orders → light self-tuning | **Long-term picks** |
+| weekend | Full self-tuning of both models | Model → *Continuous training* |
+
+## What to look at in the dashboard
+
+1. **Long-term picks** — 10 buy candidates (likely to beat Nifty over 3 months) and 10 sell
+   candidates (likely to lag: avoid, or consider selling if you hold them).
+2. **Intraday picks** — 10 buy + 10 sell for today, entry / stop-loss / target and live result.
+3. **Paper trading** — Long-term *Buy book* and *Sell book* (virtual shorts), Intraday *Buy trades*
+   and *Sell trades*, each in its own table with P&L after costs.
+4. **My portfolio** — enter your real Groww trades (➕ Add a trade); live P&L and stop-loss alerts.
+5. **Accuracy** — how often picks were right vs random picks; the live strategy race.
+6. **Model** — what the model relies on, backtests, and every retrain / tuning run.
+
+## Weekly (optional, 5 minutes)
+
+- `git pull` in the VS Code terminal to get improvements, then
+  `.venv/bin/pip install -e .`
+- Task **Keep training now (retrain + self-tune)** if you want an extra tuning round.
+- Glance at **Accuracy** and **Model → Continuous training** to see whether accuracy is improving.
+
+## If something goes wrong
+
+| Problem | Fix |
+|---|---|
+| `command not found: python` | Run `source .venv/bin/activate` first, or use the VS Code tasks |
+| Dashboard shows old dates | Task **Get latest data** |
+| `Angel One: login FAILED` | Check the 4 values in `.env`; the TOTP secret is the text, not the 6-digit code |
+| Sidebar says *Live monitor ⚪* | It isn't running — press F5 or check the autostart log |
+| Anything else | Copy the last lines of the terminal (or `logs/daily.log`) and ask |
+
+> Paper trading only. Nothing places real orders. Predictions are probabilities, not guarantees.

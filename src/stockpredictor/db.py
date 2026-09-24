@@ -91,10 +91,10 @@ CREATE TABLE IF NOT EXISTS predictions (
     UNIQUE (horizon, date, symbol)
 );
 
--- Paper trades generated from predictions
+-- Paper trades generated from predictions (horizon: longterm, longterm_short, intraday)
 CREATE TABLE IF NOT EXISTS paper_trades (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    horizon        TEXT NOT NULL CHECK (horizon IN ('intraday', 'longterm')),
+    horizon        TEXT NOT NULL,
     prediction_id  INTEGER REFERENCES predictions(id),
     symbol         TEXT NOT NULL,
     side           TEXT NOT NULL CHECK (side IN ('long', 'short')),
@@ -254,7 +254,26 @@ MIGRATIONS = [
 ]
 
 
+def _relax_paper_trades(conn: sqlite3.Connection) -> None:
+    """Older databases only allowed two paper books; rebuild the table without that limit."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'paper_trades'").fetchone()
+    if row is None or "CHECK (horizon IN" not in row[0]:
+        return
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(paper_trades)")]
+    conn.execute("ALTER TABLE paper_trades RENAME TO paper_trades_old")
+    create = SCHEMA[SCHEMA.index("CREATE TABLE IF NOT EXISTS paper_trades"):]
+    conn.execute(create[:create.index(");") + 2])
+    for col, typ in [("reason", "TEXT"), ("exit_reason", "TEXT"), ("stop_loss", "REAL"),
+                     ("target", "REAL")]:
+        if col not in {r["name"] for r in conn.execute("PRAGMA table_info(paper_trades)")}:
+            conn.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} {typ}")
+    names = ", ".join(cols)
+    conn.execute(f"INSERT INTO paper_trades ({names}) SELECT {names} FROM paper_trades_old")
+    conn.execute("DROP TABLE paper_trades_old")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
+    _relax_paper_trades(conn)
     for table, column, col_type in MIGRATIONS:
         cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:

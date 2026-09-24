@@ -91,7 +91,7 @@ class Monitor:
         return self._imodel
 
     def watched_symbols(self) -> set[str]:
-        syms = set(E.holdings(self.conn))
+        syms = set(E.holdings(self.conn)) | set(E.holdings(self.conn, E.SHORT_HORIZON))
         syms |= {t["symbol"] for t in PI.open_trades(self.conn)}
         syms |= {r[0] for r in self.conn.execute(
             "SELECT symbol FROM paper_orders WHERE status = 'pending'")}
@@ -148,17 +148,24 @@ class Monitor:
 
         rules, _ = D.get_rules(self.conn)
         if now.time() >= FIRST_FILL:
-            for line in E.fill_pending(self.conn, prices, stamp, rules):
-                alert(self.conn, "paper-longterm", "fill", line.split()[1], f"{stamp} {line}")
+            for h in (E.HORIZON, E.SHORT_HORIZON):
+                for line in E.fill_pending(self.conn, prices, stamp, rules, horizon=h):
+                    alert(self.conn, f"paper-{h}", "fill", line.split()[1], f"{stamp} {line}")
 
-        # Paper stop-loss: sell immediately at the live price.
-        for sym, pos in E.holdings(self.conn).items():
-            p = prices.get(sym)
-            if p is not None and p <= pos.entry_price * (1 - rules.stop_loss):
-                E.queue_orders(self.conn, [(sym, "stop-loss")], [], stamp)
-                E.fill_pending(self.conn, {sym: p}, stamp, rules)
-                alert(self.conn, "paper-longterm", "stop-loss", sym,
-                      f"{now:%Y-%m-%d} paper stop-loss: sold {sym} at {p:.2f}")
+        # Paper stop-loss (buy book: price falls; virtual short book: price rises).
+        for h, side in ((E.HORIZON, "long"), (E.SHORT_HORIZON, "short")):
+            for sym, pos in E.holdings(self.conn, h).items():
+                p = prices.get(sym)
+                if p is None:
+                    continue
+                hit = p <= pos.entry_price * (1 - rules.stop_loss) if side == "long" \
+                    else p >= pos.entry_price * (1 + rules.stop_loss)
+                if hit:
+                    E.queue_orders(self.conn, [(sym, "stop-loss")], [], stamp, h)
+                    E.fill_pending(self.conn, {sym: p}, stamp, rules, horizon=h)
+                    alert(self.conn, f"paper-{h}", "stop-loss", sym,
+                          f"{now:%Y-%m-%d} paper stop-loss ({'buy' if side == 'long' else 'sell'} "
+                          f"book): closed {sym} at {p:.2f}")
 
         # Intraday paper: stop-loss / target exits.
         for line in PI.check_exits(self.conn, prices, stamp):
@@ -382,11 +389,15 @@ class Monitor:
         return True
 
 
-def run_forever(monitor: Monitor, interval: int = 60) -> None:
+def run_forever(monitor: Monitor, interval: int = 60, until: time | None = None) -> None:
     import time as _time
 
     log.info("Live monitor started (Ctrl+C to stop)")
     while True:
+        if until is not None and monitor.clock().time() >= until \
+                and _setting(monitor.conn, "lt_after_close_day") == f"{monitor.clock():%Y-%m-%d}":
+            log.info("Day's work done and it is past %s - stopping.", until.strftime("%H:%M"))
+            return
         started = _time.monotonic()
         try:
             done = monitor.tick()

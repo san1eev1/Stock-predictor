@@ -6,7 +6,6 @@
 !/data/.gitkeep
 /models/
 /logs/
-
 # Python
 __pycache__/
 *.py[cod]
@@ -14,7 +13,6 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
-
 # macOS
 .DS_Store
 /market-data/

@@ -179,6 +179,12 @@ then **intraday** (needs Angel One). Telegram was dropped.
 - Weekly tuning also covers recency weighting and tail (extreme-outcome) weighting.
 - Angel One: login check at start, background 2-year intraday backfill, daily after-close top-up.
 
+### ✅ Paper books, efficiency and easy daily running
+
+- Paper trading on all 10 buy + 10 sell candidates: long-term *Buy book* + *Sell book* (virtual shorts, same rules mirrored); intraday 10 long + 10 short per day; separate tables.
+- ML engine measured out-of-sample (last 3 years): regression beats LambdaRank (IC 0.071 vs 0.040); using all 51 features beats pruning to 35/25/15; seed-to-seed noise is about ±0.004 IC, so the tuner now needs a gain of ≥ 0.01 before switching (ranking objective and feature pruning are in its search space in case the market changes).
+- Easy daily running: autostart at 09:00 on weekdays (launchd, stops after 21:30), double-click `Start Stock Predictor.command`, one-shot `today` command, and DAILY_GUIDE.md.
+
 ### Dropped
 
 - Telegram alerts (alerts are shown in the dashboard sidebar instead).

@@ -34,7 +34,8 @@ class Position:
 def decide(holdings: dict[str, Position], scores: pd.Series, prices: dict[str, float],
            rules: Rules, rebalance: bool, blocked: set[str] = frozenset(),
            negative_news: set[str] = frozenset(),
-           severe_news: set[str] = frozenset()) -> tuple[list[tuple[str, str]], list[str]]:
+           severe_news: set[str] = frozenset(),
+           side: str = "long") -> tuple[list[tuple[str, str]], list[str]]:
     """Return (sells [(symbol, reason)], buys [symbols in priority order]).
 
     negative_news: never buy these. severe_news: also sell them if held.
@@ -43,7 +44,10 @@ def decide(holdings: dict[str, Position], scores: pd.Series, prices: dict[str, f
     sells = []
     for sym, pos in holdings.items():
         price = prices.get(sym)
-        if price is not None and price <= pos.entry_price * (1 - rules.stop_loss):
+        stopped = price is not None and (
+            price <= pos.entry_price * (1 - rules.stop_loss) if side == "long"
+            else price >= pos.entry_price * (1 + rules.stop_loss))
+        if stopped:
             sells.append((sym, "stop-loss"))
         elif rules.news_exit and sym in severe_news:
             sells.append((sym, "negative news"))

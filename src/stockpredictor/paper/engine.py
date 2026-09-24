@@ -27,6 +27,11 @@ from stockpredictor.features import longterm as F
 from stockpredictor.models import longterm as M
 
 HORIZON = "longterm"
+SHORT_HORIZON = "longterm_short"     # virtual short book for the 10 sell candidates
+
+
+def book_sign(horizon: str) -> int:
+    return -1 if horizon.endswith("_short") else 1
 N_PICKS = 10    # predictions saved per side (up / down) each day
 # Strategy variants raced live on paper: momentum share of the score.
 SHADOW_VARIANTS = {"AI model": 0.0, "50/50 blend": 0.5, "Momentum only": 1.0}
@@ -101,6 +106,12 @@ def ensure_account(conn: sqlite3.Connection, capital: float, horizon: str = HORI
     conn.commit()
 
 
+def cash_capital(conn: sqlite3.Connection) -> float:
+    """The short book starts with the same capital as the long-term buy book."""
+    row = conn.execute("SELECT capital FROM paper_accounts WHERE horizon = ?", (HORIZON,)).fetchone()
+    return row[0] if row else 100_000
+
+
 def cash(conn: sqlite3.Connection, horizon: str = HORIZON) -> float:
     return conn.execute("SELECT cash FROM paper_accounts WHERE horizon = ?", (horizon,)).fetchone()[0]
 
@@ -113,7 +124,9 @@ def holdings(conn: sqlite3.Connection, horizon: str = HORIZON) -> dict[str, Posi
 
 def value(conn: sqlite3.Connection, prices: dict[str, float], horizon: str = HORIZON) -> dict:
     pos = holdings(conn, horizon)
-    hv = sum(p.qty * prices.get(s, p.entry_price) for s, p in pos.items())
+    sign = book_sign(horizon)
+    hv = sum(p.qty * p.entry_price + sign * (prices.get(s, p.entry_price) - p.entry_price) * p.qty
+             for s, p in pos.items())
     c = cash(conn, horizon)
     capital = conn.execute("SELECT capital FROM paper_accounts WHERE horizon = ?",
                            (horizon,)).fetchone()[0]
@@ -136,7 +149,13 @@ def queue_orders(conn, sells: list[tuple[str, str]], buys: list[str], when: str,
 
 def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules(),
                  costs: DeliveryCosts = DEFAULT_COSTS, horizon: str = HORIZON) -> list[str]:
-    """Fill queued orders at `prices` (sells first so their cash funds buys)."""
+    """Fill queued orders at `prices` (exits first so their cash funds new positions).
+
+    Order side 'buy' opens a position and 'sell' closes it; in the short book that means
+    open = short sale, close = buy back (cover).
+    """
+    sign = book_sign(horizon)
+    open_word, close_word = ("BUY ", "SELL") if sign > 0 else ("SHORT", "COVER")
     log = []
     orders = conn.execute(
         "SELECT * FROM paper_orders WHERE horizon = ? AND status = 'pending' "
@@ -151,15 +170,14 @@ def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules
             if pos is None:
                 _set_order(conn, o["id"], "cancelled", when, None)
                 continue
-            proceeds = pos["qty"] * price
-            c = costs.cost("sell", proceeds)
+            gross = sign * (price - pos["entry_price"]) * pos["qty"]
+            c = costs.cost("sell" if sign > 0 else "buy", pos["qty"] * price)
             conn.execute(
                 "UPDATE paper_trades SET exit_time = ?, exit_price = ?, costs = costs + ?, "
                 "pnl = ? , status = 'closed', exit_reason = ? WHERE id = ?",
-                (when, price, c, (price - pos["entry_price"]) * pos["qty"] - pos["costs"] - c,
-                 o["reason"], pos["id"]))
-            _add_cash(conn, horizon, proceeds - c)
-            log.append(f"SELL {sym} {pos['qty']} @ {price:.2f} ({o['reason']})")
+                (when, price, c, gross - pos["costs"] - c, o["reason"], pos["id"]))
+            _add_cash(conn, horizon, pos["qty"] * pos["entry_price"] + gross - c)
+            log.append(f"{close_word} {sym} {pos['qty']} @ {price:.2f} ({o['reason']})")
         else:
             n_open = conn.execute("SELECT COUNT(*) FROM paper_trades WHERE horizon = ? "
                                   "AND status = 'open'", (horizon,)).fetchone()[0]
@@ -171,13 +189,13 @@ def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules
             if qty <= 0:
                 _set_order(conn, o["id"], "cancelled", when, None)
                 continue
-            c = costs.cost("buy", qty * price)
+            c = costs.cost("buy" if sign > 0 else "sell", qty * price)
             conn.execute(
                 "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, "
-                "costs, status, reason) VALUES (?, ?, 'long', ?, ?, ?, ?, 'open', ?)",
-                (horizon, sym, qty, when, price, c, o["reason"]))
+                "costs, status, reason) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+                (horizon, sym, "long" if sign > 0 else "short", qty, when, price, c, o["reason"]))
             _add_cash(conn, horizon, -(qty * price + c))
-            log.append(f"BUY  {sym} {qty} @ {price:.2f}")
+            log.append(f"{open_word} {sym} {qty} @ {price:.2f}")
         _set_order(conn, o["id"], "filled", when, price)
     conn.commit()
     return log
@@ -220,6 +238,7 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     # 1. Orders from the previous decision are filled at today's close if the
     #    live monitor did not fill them earlier in the day.
     fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules)
+    fills += fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules, horizon=SHORT_HORIZON)
 
     # 2. Score today's tradable stocks (current Nifty 100 members; training uses Nifty 200).
     active = set(store_tradable(ctx.universe))
@@ -245,15 +264,23 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     sells, buys = decide(holdings(conn), scores, prices, rules, rebalance,
                          negative_news=negative, severe_news=severe)
     queue_orders(conn, sells, buys, f"{date:%Y-%m-%d} 18:00")
+    # Virtual short book: the 10 sell candidates, same rules mirrored.
+    ensure_account(conn, cash_capital(conn), SHORT_HORIZON)
+    covers, shorts = decide(holdings(conn, SHORT_HORIZON), -scores, prices, rules, rebalance,
+                            side="short")
+    queue_orders(conn, covers, shorts, f"{date:%Y-%m-%d} 18:00", SHORT_HORIZON)
     if rebalance:
         _set_setting(conn, "lt_last_rebalance", f"{date:%Y-%m-%d}")
     _set_setting(conn, "lt_last_decision", f"{date:%Y-%m-%d}")
 
     v = value(conn, prices)
-    conn.execute("INSERT OR REPLACE INTO paper_equity VALUES (?, ?, ?, ?, ?)",
-                 (HORIZON, f"{date:%Y-%m-%d}", v["cash"], v["holdings"], v["equity"]))
+    for h in (HORIZON, SHORT_HORIZON):
+        vh = value(conn, prices, h)
+        conn.execute("INSERT OR REPLACE INTO paper_equity VALUES (?, ?, ?, ?, ?)",
+                     (h, f"{date:%Y-%m-%d}", vh["cash"], vh["holdings"], vh["equity"]))
     conn.commit()
     return {"date": date, "fills": fills, "sells": sells, "buys": buys,
+            "shorts": shorts, "covers": covers,
             "rebalance": rebalance, "negative_news": sorted(negative), "value": v}
 
 

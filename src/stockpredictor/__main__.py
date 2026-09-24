@@ -386,8 +386,12 @@ def cmd_start(settings, args) -> None:
     mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
                           settings.paper_capital_longterm,
                           capital_intraday=settings.paper_capital_intraday)
+    until = None
+    if args.until:
+        from datetime import time as _t
+        until = _t(*map(int, args.until.split(":")))
     try:
-        monitor.run_forever(mon)
+        monitor.run_forever(mon, until=until)
     except KeyboardInterrupt:
         print("Stopped.")
     finally:
@@ -507,9 +511,99 @@ def _improve_args(p):
 def _start_args(p):
     _dir_arg(p)
     p.add_argument("--no-browser", action="store_true", help="Don't open a browser tab")
+    p.add_argument("--until", help="Stop after this time (HH:MM, IST) once the day's "
+                                   "after-close work is done, e.g. 21:30")
+
+
+def cmd_today(settings, args) -> None:
+    """One-shot daily run for when the monitor can't stay on: sync, learn, decide, show picks."""
+    import logging
+
+    from stockpredictor.live import monitor, prices
+    from stockpredictor.live.prices import in_market_hours, now_ist
+    from stockpredictor.paper import engine as E
+
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+    db.init_db(settings.db_path)
+    conn = db.connect(settings.db_path)
+    mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
+                          settings.paper_capital_longterm,
+                          capital_intraday=settings.paper_capital_intraday)
+    now = now_ist()
+    print("1/3 Getting the latest data...")
+    mon.sync(Path(args.dir))
+    ctx = mon.ctx(reload=True)
+    if in_market_hours(now) and monitor.INTRADAY_PICKS <= now.time() <= monitor.INTRADAY_LATEST:
+        print("    Market is open: making today's intraday picks...")
+        mon.intraday_picks_job(now)
+    print("2/3 Learning from the newest data and paper results, then deciding...")
+    from stockpredictor.models import trainer as T
+    from stockpredictor.paper import daily as D
+    T.retrain_longterm(ctx, conn)
+    T.retrain_intraday(ctx, Path(args.dir), conn)
+    mon._model = None
+    D.run_daily(conn, ctx, settings.paper_capital_longterm, mon.model())
+    print("3/3 Today's long-term picks\n")
+    last = conn.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'longterm'").fetchone()[0]
+    for direction, title in (("up", "▲ 10 BUY candidates"), ("down", "▼ 10 SELL candidates")):
+        rows = conn.execute("SELECT symbol, confidence, entry_price FROM predictions WHERE horizon = "
+                            "'longterm' AND date = ? AND direction = ? ORDER BY confidence DESC",
+                            (last, direction)).fetchall()
+        print(f"  {title} ({last})")
+        for i, r in enumerate(rows, 1):
+            print(f"   {i:2}. {r['symbol']:<12} confidence {r['confidence']:.0%}   Rs {r['entry_price']:,.2f}")
+        print()
+    for h, name in ((E.HORIZON, "Buy book"), (E.SHORT_HORIZON, "Sell book")):
+        v = E.value(conn, ctx.closes_on(ctx.daily["date"].max()), h)
+        print(f"  Paper {name}: Rs {v['equity']:,.0f} (P&L Rs {v['pnl']:+,.0f}), {v['positions']} positions")
+    print("\nOpen the dashboard for details: python -m stockpredictor app")
+
+
+def cmd_autostart(settings, args) -> None:
+    """Start automatically at 09:00 on weekdays (macOS launchd); stops by itself at night."""
+    import plistlib
+    import subprocess
+
+    from stockpredictor.config import PROJECT_ROOT
+
+    label = "com.stockpredictor.daily"
+    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    if args.off:
+        subprocess.run(["launchctl", "unload", str(plist)], check=False)
+        plist.unlink(missing_ok=True)
+        print("Autostart turned off.")
+        return
+    logs = PROJECT_ROOT / "logs"
+    logs.mkdir(exist_ok=True)
+    python = PROJECT_ROOT / ".venv" / "bin" / "python"
+    spec = {
+        "Label": label,
+        "ProgramArguments": ["/usr/bin/caffeinate", "-i", str(python), "-m", "stockpredictor",
+                             "start", "--no-browser", "--until", "21:30"],
+        "WorkingDirectory": str(PROJECT_ROOT),
+        "StartCalendarInterval": [{"Weekday": d, "Hour": 9, "Minute": 0} for d in range(1, 6)],
+        "StandardOutPath": str(logs / "daily.log"),
+        "StandardErrorPath": str(logs / "daily.log"),
+    }
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    with open(plist, "wb") as f:
+        plistlib.dump(spec, f)
+    subprocess.run(["launchctl", "unload", str(plist)], check=False, capture_output=True)
+    subprocess.run(["launchctl", "load", str(plist)], check=True)
+    print("Autostart on: Mon-Fri at 09:00 (or when the Mac wakes, if it was asleep).")
+    print("It runs in the background and stops after 21:30 once the day's work is done.")
+    print(f"Log: {logs / 'daily.log'}  ·  Dashboard: python -m stockpredictor app")
+    print("Turn off with: python -m stockpredictor autostart --off")
+
+
+def _autostart_args(p):
+    p.add_argument("--off", action="store_true", help="Turn autostart off")
 
 
 ARG_COMMANDS = {
+    "today": (cmd_today, "One-shot daily run: sync, learn, decide, print picks", _dir_arg),
+    "autostart": (cmd_autostart, "Start automatically at 09:00 on weekdays (macOS)",
+                  _autostart_args),
     "start": (cmd_start, "Start everything: web dashboard + live monitor + training", _start_args),
     "improve": (cmd_improve, "Sync data, retrain both models, optionally self-tune",
                 _improve_args),

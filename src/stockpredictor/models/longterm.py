@@ -60,7 +60,7 @@ def blend(scores: pd.Series, feats: pd.DataFrame, mom_weight: float) -> pd.Serie
 
 # Settings that shape the training data rather than LightGBM itself (tuned weekly).
 TRAINING_DEFAULTS = {"mom_weight": 0.0, "recency_half_life": 0.0, "tail_weight": 0.0,
-                     "early_stopping": True, "n_seeds": 3}
+                     "early_stopping": True, "n_seeds": 3, "wf_seeds": 1}
 SNAPSHOT_STEP = 5       # use every 5th trading day, counted back from the newest day
 
 
@@ -98,7 +98,7 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {**TRAINING_DEFAULTS, **(params or current_params())}
     weights = sample_weights(train, params)
-    for key in ("mom_weight", "recency_half_life", "tail_weight"):
+    for key in ("mom_weight", "recency_half_life", "tail_weight", "wf_seeds"):
         params.pop(key, None)
     return engine.fit(train, cols, params, weights, gap_days=EMBARGO_DAYS,
                       default_rounds=NUM_ROUNDS)
@@ -140,7 +140,7 @@ class LongTermModel:
         return reasons
 
     def importance(self) -> pd.Series:
-        imp = self.model.feature_importance()
+        imp = self.model.feature_importance(self.features)
         return pd.Series(imp, index=self.features).sort_values(ascending=False)
 
     def save(self, path: Path) -> None:
@@ -178,7 +178,8 @@ def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,
         test = feats_daily[feats_daily["date"].dt.year == year]
         if len(train) < MIN_TRAIN_ROWS or test.empty:
             continue
-        model = _fit(train, cols, {**(params or current_params()), "n_seeds": 1})
+        p = params or current_params()
+        model = _fit(train, cols, {**p, "n_seeds": p.get("wf_seeds", 1)})
         raw = pd.Series(model.predict(test[cols].astype(np.float32)), index=test.index)
         score = blend(raw, test, (params or current_params()).get("mom_weight", 0.0))
         out.append(test[["symbol", "date"]].assign(score=score.values))

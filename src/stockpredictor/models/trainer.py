@@ -30,9 +30,12 @@ GRID = {
     "num_rounds": [200, 300, 400, 600],
 }
 LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
-                 "recency_half_life": [0.0, 3.0, 5.0, 10.0], "tail_weight": [0.0, 1.0, 2.0]}
+                 "recency_half_life": [0.0, 3.0, 5.0, 10.0], "tail_weight": [0.0, 1.0, 2.0],
+                 "rank_objective": [False, True], "top_features": [0, 25, 35]}
 FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
-MARGIN = 0.003          # IC improvement needed to switch settings
+# IC gain needed to switch settings. Re-running the same settings with another random
+# seed moves IC by about +/-0.004, so smaller "gains" are noise.
+MARGIN = 0.01
 
 
 def log_run(conn: sqlite3.Connection | None, horizon: str, kind: str, train_to: str,

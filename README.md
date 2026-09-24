@@ -11,6 +11,9 @@ dashboard. See [PLAN.md](PLAN.md).
 > Market data only — this project never places orders. You trade manually on Groww.
 > Runs on your Mac at zero cost; market data and news are collected free by GitHub Actions.
 
+> 📘 **Step-by-step daily instructions: [DAILY_GUIDE.md](DAILY_GUIDE.md)**
+> (autostart at 9:00, press F5, or a one-shot quick daily run).
+
 ## Run it from VS Code (no app to install)
 
 Everything runs from VS Code. The dashboard is a **local web page** at
@@ -79,7 +82,9 @@ the day's Angel One intraday data.
 
 - **Long-term picks** — 10 buy and 10 sell candidates with confidence, reasons, news mood, P/E, ROE; live provisional ranking
 - **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live move and result (🧪 = paper-traded)
-- **Paper trading** — Rs 1 lakh each for long-term and intraday: holdings, orders, value, closed trades
+- **Paper trading** — long-term *Buy book* (10 buy candidates) and *Sell book* (10 sell
+  candidates as virtual shorts); intraday *Buy trades* and *Sell trades* (10 + 10 a day) — each in
+  its own table with P&L after costs
 - **My portfolio** — add your Groww trades; live P&L, stop-loss alerts, allocation (Long-term / Intraday tabs)
 - **Accuracy** — long-term picks judged after 3 months vs Nifty; intraday picks at 15:15; both vs random picks
 - **Model** — what each model relies on, backtest results, retrain button

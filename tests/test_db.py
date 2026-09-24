@@ -31,3 +31,22 @@ def test_save_universe_marks_removed_stocks_inactive(tmp_path):
                                        "industry": "IT", "isin": "INE009A01021"}])
         assert universe.active_symbols(conn) == ["INFY"]
         assert conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0] == 2
+
+
+def test_old_paper_trades_table_is_rebuilt_keeping_rows(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as c:
+        c.execute("""CREATE TABLE paper_trades (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            horizon TEXT NOT NULL CHECK (horizon IN ('intraday', 'longterm')), prediction_id INTEGER,
+            symbol TEXT NOT NULL, side TEXT NOT NULL, qty INTEGER NOT NULL, entry_time TEXT NOT NULL,
+            entry_price REAL NOT NULL, exit_time TEXT, exit_price REAL, costs REAL, pnl REAL,
+            status TEXT NOT NULL DEFAULT 'open')""")
+        c.execute("INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price) "
+                  "VALUES ('longterm', 'TCS', 'long', 1, '2026-01-01', 100)")
+    db.init_db(path)
+    with db.connect(path) as c:
+        c.execute("INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price) "
+                  "VALUES ('longterm_short', 'ITC', 'short', 1, '2026-01-01', 100)")
+        assert c.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0] == 2
+        assert "stop_loss" in {r["name"] for r in c.execute("PRAGMA table_info(paper_trades)")}

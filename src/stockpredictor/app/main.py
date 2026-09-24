@@ -214,67 +214,82 @@ def page_paper():
 def paper_longterm():
     c = conn()
     E.ensure_account(c, SETTINGS.paper_capital_longterm)
+    E.ensure_account(c, SETTINGS.paper_capital_longterm, E.SHORT_HORIZON)
     prices = current_prices(c)
-    v = E.value(c, prices)
-    k = st.columns(4)
-    k[0].metric("Capital", rupees(v["capital"]))
-    k[1].metric("Current value", rupees(v["equity"]), C.money(v["pnl"]))
-    k[2].metric("Cash", rupees(v["cash"]))
-    k[3].metric("Positions", f"{v['positions']}")
-
-    pos = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'longterm' AND status = 'open'", c)
-    rules, mode = D.get_rules(c)
-    st.subheader("Holdings")
-    if pos.empty:
-        st.caption("No open positions yet.")
-    else:
-        pos["Live price"] = pos["symbol"].map(prices)
-        pos["Value"] = pos["qty"] * pos["Live price"]
-        pos["P&L"] = (pos["Live price"] - pos["entry_price"]) * pos["qty"] - pos["costs"]
-        pos["P&L %"] = pos["Live price"] / pos["entry_price"] - 1
-        pos["Stop-loss"] = pos["entry_price"] * (1 - rules.stop_loss)
-        pos["Held since"] = pd.to_datetime(pos["entry_time"]).dt.strftime("%d %b %Y")
-        st.dataframe(pos[["symbol", "qty", "entry_price", "Live price", "Value", "P&L", "P&L %",
-                          "Stop-loss", "Held since"]].rename(
-            columns={"symbol": "Stock", "qty": "Qty", "entry_price": "Buy price"}),
-            hide_index=True, width="stretch", column_config={
-                c_: st.column_config.NumberColumn(format="₹%.2f")
-                for c_ in ["Buy price", "Live price", "Value", "P&L", "Stop-loss"]} | {
-                "P&L %": st.column_config.NumberColumn(format="percent")})
-
-    pending = pd.read_sql("SELECT created, symbol, side, reason FROM paper_orders "
-                          "WHERE horizon = 'longterm' AND status = 'pending'", c)
-    if not pending.empty:
-        st.caption("Queued orders (fill at the next market price):")
-        st.dataframe(pending, hide_index=True, width="stretch")
-
-    eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'longterm' ORDER BY date", c)
-    if len(eq) >= 2:
+    vb, vs = E.value(c, prices), E.value(c, prices, E.SHORT_HORIZON)
+    k = st.columns(3)
+    k[0].metric("Buy book", rupees(vb["equity"]), C.money(vb["pnl"]))
+    k[1].metric("Sell book (virtual shorts)", rupees(vs["equity"]), C.money(vs["pnl"]))
+    k[2].metric("Both books", rupees(vb["equity"] + vs["equity"]), C.money(vb["pnl"] + vs["pnl"]))
+    st.caption("Each book starts with the same paper capital. The sell book short-sells the 10 sell "
+               "candidates on paper to measure how good the sell signals are — in real life you "
+               "would act on them by avoiding or selling those stocks.")
+    paper_book(c, E.HORIZON, "▲ Buy book — 10 buy candidates", prices)
+    paper_book(c, E.SHORT_HORIZON, "▼ Sell book — 10 sell candidates (virtual short)", prices)
+    eq = pd.read_sql("SELECT horizon, date, equity FROM paper_equity WHERE horizon IN (?, ?) "
+                     "ORDER BY date", c, params=(E.HORIZON, E.SHORT_HORIZON))
+    if eq["date"].nunique() >= 2:
         st.subheader("Value over time vs Nifty 50")
         m = ctx()
         eq["date"] = pd.to_datetime(eq["date"])
+        eq["series"] = eq["horizon"].map({E.HORIZON: "Buy book", E.SHORT_HORIZON: "Sell book"})
         nifty = m.indices[m.indices["symbol"] == "NIFTY50"].set_index("date")["close"]
-        n = nifty.reindex(eq["date"]).ffill().bfill().values
-        df = pd.concat([eq.assign(series="Model", value=eq["equity"]),
-                        eq.assign(series="Nifty 50", value=n / n[0] * eq["equity"].iloc[0])])
-        st.altair_chart(C.lines(df, "date", "value", "series", ",.0f", "Value (₹)"),
-                        width="stretch")
+        dates = sorted(eq["date"].unique())
+        n = nifty.reindex(dates).ffill().bfill()
+        start = eq[eq["horizon"] == E.HORIZON]["equity"].iloc[0]
+        df = pd.concat([eq.assign(value=eq["equity"]),
+                        pd.DataFrame({"date": dates, "series": "Nifty 50",
+                                      "value": (n / n.iloc[0] * start).values})])
+        st.altair_chart(C.lines(df[["date", "series", "value"]], "date", "value", "series",
+                                ",.0f", "Value (₹)"), width="stretch")
 
-    st.subheader("Closed trades — prediction vs reality")
-    closed = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'longterm' "
-                         "AND status = 'closed' ORDER BY exit_time DESC", c)
-    if closed.empty:
-        st.caption("No closed trades yet.")
+
+def paper_book(c, h: str, title: str, prices: dict[str, float]):
+    rules, _ = D.get_rules(c)
+    sign = E.book_sign(h)
+    st.subheader(title)
+    v = E.value(c, prices, h)
+    st.caption(f"Value {rupees(v['equity'])} · P&L {C.money(v['pnl'])} · cash {rupees(v['cash'])} · "
+               f"{v['positions']} positions")
+    pos = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'open'", c, params=(h,))
+    if pos.empty:
+        st.caption("No open positions yet — orders fill at the next market price after a decision.")
     else:
-        closed["Return"] = closed["exit_price"] / closed["entry_price"] - 1
-        closed["Result"] = ["✅ profit" if p > 0 else "❌ loss" for p in closed["pnl"]]
-        st.dataframe(closed[["symbol", "entry_time", "entry_price", "exit_time", "exit_price",
-                             "Return", "pnl", "exit_reason", "Result"]].rename(columns={
-            "symbol": "Stock", "entry_time": "Bought", "entry_price": "Buy", "exit_time": "Sold",
-            "exit_price": "Sell", "pnl": "P&L (after costs)", "exit_reason": "Why sold"}),
+        pos["Live price"] = pos["symbol"].map(prices).fillna(pos["entry_price"])
+        pos["P&L"] = sign * (pos["Live price"] - pos["entry_price"]) * pos["qty"] - pos["costs"]
+        pos["P&L %"] = sign * (pos["Live price"] / pos["entry_price"] - 1)
+        pos["Stop-loss"] = pos["entry_price"] * (1 - sign * rules.stop_loss)
+        pos["Since"] = pd.to_datetime(pos["entry_time"]).dt.strftime("%d %b %Y")
+        entry = "Buy price" if sign > 0 else "Short price"
+        st.dataframe(pos[["symbol", "qty", "entry_price", "Live price", "P&L", "P&L %",
+                          "Stop-loss", "Since"]].rename(
+            columns={"symbol": "Stock", "qty": "Qty", "entry_price": entry}),
             hide_index=True, width="stretch", column_config={
-                "Return": st.column_config.NumberColumn(format="percent"),
-                "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
+                c_: st.column_config.NumberColumn(format="₹%.2f")
+                for c_ in [entry, "Live price", "P&L", "Stop-loss"]} | {
+                "P&L %": st.column_config.NumberColumn(format="percent")})
+    pending = pd.read_sql("SELECT created, symbol, side, reason FROM paper_orders "
+                          "WHERE horizon = ? AND status = 'pending'", c, params=(h,))
+    if not pending.empty:
+        if sign < 0:
+            pending["side"] = pending["side"].map({"buy": "short", "sell": "cover"})
+        st.caption("Queued orders (fill at the next market price):")
+        st.dataframe(pending, hide_index=True, width="stretch")
+    closed = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'closed' "
+                         "ORDER BY exit_time DESC", c, params=(h,))
+    with st.expander(f"Closed trades ({len(closed)})"):
+        if closed.empty:
+            st.caption("None yet.")
+        else:
+            closed["Return"] = sign * (closed["exit_price"] / closed["entry_price"] - 1)
+            closed["Result"] = ["✅ profit" if p > 0 else "❌ loss" for p in closed["pnl"]]
+            st.dataframe(closed[["symbol", "entry_time", "entry_price", "exit_time", "exit_price",
+                                 "Return", "pnl", "exit_reason", "Result"]].rename(columns={
+                "symbol": "Stock", "entry_time": "Opened", "entry_price": "Entry",
+                "exit_time": "Closed", "exit_price": "Exit", "pnl": "P&L (after costs)",
+                "exit_reason": "Why closed"}), hide_index=True, width="stretch", column_config={
+                    "Return": st.column_config.NumberColumn(format="percent"),
+                    "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
 
 
 def page_intraday():
@@ -340,7 +355,8 @@ def intraday_live(day: str):
 def paper_intraday():
     c = conn()
     E.ensure_account(c, SETTINGS.paper_capital_intraday, PI.HORIZON)
-    v = PI.value(c, live_prices(c))
+    live = live_prices(c)
+    v = PI.value(c, live)
     k = st.columns(4)
     k[0].metric("Capital", rupees(v["capital"]))
     k[1].metric("Current value", rupees(v["equity"]), C.money(v["pnl"]))
@@ -349,43 +365,41 @@ def paper_intraday():
     trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'intraday' "
                          "ORDER BY entry_time DESC, id", c)
     if trades.empty:
-        st.caption("No intraday paper trades yet.")
+        st.caption("No intraday paper trades yet — they open at 9:46 on trading days.")
         return
-    live = live_prices(c)
-    open_ = trades[trades["status"] == "open"].copy()
-    if not open_.empty:
-        st.subheader("Open now")
-        sign = open_["side"].map({"long": 1, "short": -1})
-        open_["Live"] = open_["symbol"].map(live).fillna(open_["entry_price"])
-        open_["P&L"] = sign * (open_["Live"] - open_["entry_price"]) * open_["qty"] - open_["costs"]
-        st.dataframe(open_[["symbol", "side", "qty", "entry_price", "Live", "stop_loss", "target",
-                            "P&L"]].rename(columns={"symbol": "Stock", "side": "Side", "qty": "Qty",
-                                                    "entry_price": "Entry", "stop_loss": "Stop-loss",
-                                                    "target": "Target"}),
-                     hide_index=True, width="stretch", column_config={
-                         k_: st.column_config.NumberColumn(format="₹%.2f")
-                         for k_ in ["Entry", "Live", "Stop-loss", "Target", "P&L"]})
+    trades["Day"] = trades["entry_time"].str[:10]
+    trades["sign"] = trades["side"].map({"long": 1, "short": -1})
+    for side, title in (("long", "▲ Buy trades — 10 buy candidates"),
+                        ("short", "▼ Sell trades — 10 sell candidates (short)")):
+        t = trades[trades["side"] == side].copy()
+        st.subheader(title)
+        if t.empty:
+            st.caption("None yet.")
+            continue
+        closed = t[t["status"] == "closed"]
+        if not closed.empty:
+            by_day = closed.groupby("Day")["pnl"].sum()
+            st.caption(f"{len(closed)} closed trades · won {(closed['pnl'] > 0).mean():.0%} · "
+                       f"profitable days {(by_day > 0).mean():.0%} · total P&L {C.money(closed['pnl'].sum())}")
+        t["Live/Exit"] = [live.get(s_, e) if st_ == "open" else x
+                          for s_, e, x, st_ in zip(t["symbol"], t["entry_price"], t["exit_price"], t["status"])]
+        t["P&L"] = [p if st_ == "closed" else sg * (lv - e) * q - cst
+                    for p, st_, sg, lv, e, q, cst in zip(t["pnl"], t["status"], t["sign"], t["Live/Exit"],
+                                                        t["entry_price"], t["qty"], t["costs"])]
+        t["Status"] = ["⏳ open" if x == "open" else ("✅ " if p > 0 else "❌ ") + (r or "")
+                       for x, p, r in zip(t["status"], t["P&L"], t["exit_reason"])]
+        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Live/Exit", "stop_loss", "target",
+                        "P&L", "Status"]].rename(columns={
+            "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45", "stop_loss": "Stop-loss",
+            "target": "Target", "P&L": "P&L (after costs)"}), hide_index=True, width="stretch",
+            column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
+                           for k_ in ["Entry 9:45", "Live/Exit", "Stop-loss", "Target", "P&L (after costs)"]})
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'intraday' ORDER BY date", c)
     if len(eq) >= 2:
         st.subheader("Value over time")
         eq["date"] = pd.to_datetime(eq["date"])
         st.altair_chart(C.lines(eq.assign(series="Model", value=eq["equity"]), "date", "value",
                                 "series", ",.0f", "Value (₹)"), width="stretch")
-    closed = trades[trades["status"] == "closed"].copy()
-    if not closed.empty:
-        st.subheader("Closed trades")
-        closed["Day"] = closed["entry_time"].str[:10]
-        daily_pnl = closed.groupby("Day")["pnl"].sum()
-        st.caption(f"{len(daily_pnl)} trading days · profitable days {(daily_pnl > 0).mean():.0%} · "
-                   f"trades won {(closed['pnl'] > 0).mean():.0%} · total P&L {C.money(closed['pnl'].sum())}")
-        closed["Result"] = ["✅ profit" if x > 0 else "❌ loss" for x in closed["pnl"]]
-        st.dataframe(closed[["Day", "symbol", "side", "entry_price", "exit_price", "exit_reason",
-                             "pnl", "Result"]].rename(columns={
-            "symbol": "Stock", "side": "Side", "entry_price": "Entry", "exit_price": "Exit",
-            "exit_reason": "Exit reason", "pnl": "P&L (after costs)"}),
-            hide_index=True, width="stretch", column_config={
-                k_: st.column_config.NumberColumn(format="₹%.2f")
-                for k_ in ["Entry", "Exit", "P&L (after costs)"]})
 
 
 def page_portfolio():
@@ -731,8 +745,8 @@ def page_settings():
     with st.form("irules"):
         cols = st.columns(3)
         on = cols[0].checkbox("Intraday picks enabled", ienabled)
-        nl = cols[1].number_input("Longs", 0, 10, irules.n_long)
-        ns = cols[2].number_input("Shorts", 0, 10, irules.n_short)
+        nl = cols[1].number_input("Buy trades per day", 0, 10, irules.n_long)
+        ns = cols[2].number_input("Sell (short) trades per day", 0, 10, irules.n_short)
         cols = st.columns(3)
         levels = list(BI.I.LEVELS)
         isl = cols[0].selectbox("Stop-loss %", levels, index=levels.index(BI.snap(irules.stop_loss)))
@@ -742,7 +756,8 @@ def page_settings():
         skip = cols[2].selectbox("Skip weak days", [0.0, 0.3, 0.5], index=[0.0, 0.3, 0.5].index(
             irules.skip_quantile) if irules.skip_quantile in (0.0, 0.3, 0.5) else 0,
             help="Skip days whose signal is weaker than this share of the last 60 days")
-        st.caption("Fewer, larger positions cost less as a share: brokerage is capped at ₹20 an order.")
+        st.caption("10 + 10 trades of ~₹5,000 each: charges are ~0.35% per round trip. Fewer, larger "
+                   "positions cost less as a share (brokerage is capped at ₹20 an order).")
         if st.form_submit_button("Save intraday rules", type="primary"):
             for k_, v_ in {"id_enabled": int(on), "id_n_long": nl, "id_n_short": ns,
                            "id_stop_loss": isl, "id_target": itp, "id_skip_q": skip}.items():
@@ -764,8 +779,10 @@ def page_settings():
     st.subheader("Paper account")
     cap = st.number_input("Starting capital ₹", 10_000, 10_000_000,
                           int(SETTINGS.paper_capital_longterm), step=10_000)
-    which = st.selectbox("Account", ["longterm", "intraday"],
-                         format_func={"longterm": "Long-term", "intraday": "Intraday"}.get)
+    which = st.selectbox("Account", ["longterm", "longterm_short", "intraday"],
+                         format_func={"longterm": "Long-term buy book",
+                                      "longterm_short": "Long-term sell book (virtual shorts)",
+                                      "intraday": "Intraday"}.get)
     if st.button("Reset paper account", help="Deletes this account's paper trades and starts again"):
         for t in ("paper_trades", "paper_orders", "paper_equity", "paper_accounts"):
             c.execute(f"DELETE FROM {t} WHERE horizon = ?", (which,))

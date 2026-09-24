@@ -69,7 +69,7 @@ class IntradayModel:
         return out
 
     def importance(self) -> pd.Series:
-        imp = self.model.feature_importance()
+        imp = self.model.feature_importance(self.features)
         return pd.Series(imp, index=self.features).sort_values(ascending=False)
 
     def save(self, path: Path = MODEL_DIR) -> None:

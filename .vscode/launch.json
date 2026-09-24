@@ -2,21 +2,36 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "▶ Start Stock Predictor (web dashboard + live monitor)",
+      "name": "\u25b6 Start Stock Predictor (web dashboard + live monitor)",
       "type": "debugpy",
       "request": "launch",
       "module": "stockpredictor",
-      "args": ["start"],
+      "args": [
+        "start"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
+    },
+    {
+      "name": "Quick daily run (today)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "stockpredictor",
+      "args": [
+        "today"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     },
     {
       "name": "Web dashboard only",
       "type": "debugpy",
       "request": "launch",
       "module": "stockpredictor",
-      "args": ["app"],
+      "args": [
+        "app"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     },
@@ -25,7 +40,10 @@
       "type": "debugpy",
       "request": "launch",
       "module": "stockpredictor",
-      "args": ["improve", "--tune"],
+      "args": [
+        "improve",
+        "--tune"
+      ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     }

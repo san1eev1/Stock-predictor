@@ -15,6 +15,8 @@ SERIES = {
     "Momentum only": ("#eda100", "#c98500"),
     "Long-term": ("#2a78d6", "#3987e5"),
     "Intraday": ("#eb6834", "#d95926"),
+    "Buy book": ("#2a78d6", "#3987e5"),
+    "Sell book": ("#1baf7a", "#199e70"),
 }
 SINGLE = ("#2a78d6", "#3987e5")
 GOOD, CRITICAL = "#0ca30c", "#d03b3b"
