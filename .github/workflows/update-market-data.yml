@@ -54,6 +54,10 @@ jobs:
           python -m stockpredictor prices --start "${{ inputs.start || '2010-01-01' }}"
           python -m stockpredictor export-store --dir market-data
           python -m stockpredictor data-check | tail -1
+          # Fundamentals snapshot once a week (Fridays) or on manual runs.
+          if [ "$(date -u +%u)" = "5" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python -m stockpredictor fundamentals-update --dir market-data || echo "::warning::fundamentals failed"
+          fi
 
       - name: Commit and push
         working-directory: market-data

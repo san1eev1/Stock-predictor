@@ -1,0 +1,2 @@
+# GitHub Actions news job: FinBERT sentiment (CPU-only torch is installed separately)
+transformers>=4.44

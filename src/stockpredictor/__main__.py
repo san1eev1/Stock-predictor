@@ -143,6 +143,34 @@ def cmd_features(settings, args) -> None:
             print(f"  {c:<22}{row[c]:.4f}")
 
 
+def cmd_news_update(settings, args) -> None:
+    from stockpredictor import store
+    from stockpredictor.data import news
+
+    d = Path(args.dir)
+    uni = store.load_universe(d)
+    rows, errors = news.fetch_all(uni[uni["active"] == 1])
+    new = news.append_news(d, rows)
+    print(f"Fetched {len(rows)} headlines, {len(new)} new, {len(errors)} feed errors")
+    for e in errors[:10]:
+        print("  ", e)
+    if not args.no_score:
+        from stockpredictor.nlp.sentiment import FinBertScorer
+
+        print(f"Scored {news.score_missing(d, FinBertScorer())} headlines with FinBERT")
+
+
+def cmd_fundamentals_update(settings, args) -> None:
+    from stockpredictor import store
+    from stockpredictor.data import fundamentals
+
+    d = Path(args.dir)
+    uni = store.load_universe(d)
+    rows, errors = fundamentals.fetch_snapshot(uni.loc[uni["active"] == 1, "symbol"].tolist())
+    fundamentals.append_snapshot(d, rows)
+    print(f"Fundamentals snapshot: {len(rows)} stocks, {len(errors)} errors")
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -188,7 +216,14 @@ def _features_args(p):
     p.add_argument("--symbol", help="Show the latest feature values for one stock")
 
 
+def _news_args(p):
+    _dir_arg(p)
+    p.add_argument("--no-score", action="store_true", help="Skip FinBERT scoring")
+
+
 ARG_COMMANDS = {
+    "news-update": (cmd_news_update, "Fetch company news and score sentiment", _news_args),
+    "fundamentals-update": (cmd_fundamentals_update, "Save a fundamentals snapshot", _dir_arg),
     "features": (cmd_features, "Build long-term features and show a summary", _features_args),
     "sync-data": (cmd_sync_data, "Fetch the latest market data from git (for training)",
                   _dir_arg),
