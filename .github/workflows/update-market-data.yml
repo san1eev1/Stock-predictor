@@ -1,0 +1,68 @@
+# Daily market data update. Runs free on GitHub Actions and commits CSV files
+# to the `market-data` branch, so the Mac never has to store or download history.
+name: Update market data
+
+on:
+  schedule:
+    - cron: "0 11 * * 1-5"   # 16:30 IST, Mon-Fri (after market close)
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First date for stocks with no data yet (YYYY-MM-DD)"
+        default: "2010-01-01"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout market-data branch (or start it)
+        run: |
+          if git ls-remote --exit-code --heads origin market-data >/dev/null; then
+            git clone --depth 1 --branch market-data \
+              "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" market-data
+          else
+            mkdir market-data && cd market-data && git init -q -b market-data
+            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements-data.txt && pip install -e . --no-deps
+
+      - name: Update data
+        env:
+          DB_PATH: /tmp/work.db
+        run: |
+          python -m stockpredictor init
+          python -m stockpredictor import-store --dir market-data
+          python -m stockpredictor universe || echo "::warning::Nifty 100 list download failed; using stored list"
+          python -m stockpredictor prices --start "${{ inputs.start || '2010-01-01' }}"
+          python -m stockpredictor export-store --dir market-data
+          python -m stockpredictor data-check | tail -1
+
+      - name: Commit and push
+        working-directory: market-data
+        run: |
+          git config user.name "market-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes"; exit 0
+          fi
+          git commit -q -m "Market data $(date -u +%Y-%m-%d)"
+          git push -q origin HEAD:market-data

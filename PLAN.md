@@ -28,7 +28,10 @@ Everything runs **locally on my laptop** and costs **₹0** (no paid APIs, no cl
 | Real capital | To be set later in Settings |
 | News analysis | Free, local (FinBERT) |
 | Alerts | Telegram bot (free) |
-| Runs on | My laptop (catches up on missed data if opened late) |
+| Runs on | My laptop for training, live monitoring and the app (catches up if opened late) |
+| Data storage | Market data on git (`market-data` branch), updated daily by free GitHub Actions; Mac keeps only a shallow snapshot |
+| Long-term decisions | Official buy / hold / exit **daily after close**; live monitoring all day; emergency exits on stop-loss or strongly negative news |
+| Live tracking | Paper **and** real (Groww, manual) portfolios monitored live with stop-loss alerts |
 | Cost | ₹0 |
 
 ## 3. Data sources (all free)
@@ -87,7 +90,22 @@ Rules:
 6. **Model:** backtest results, feature importance, last retrain date.
 7. **Settings:** capital amounts, stop-loss %, confidence threshold, Telegram setup.
 
-## 7. Automation
+## 7. Automation & live design
+
+**Long-term — live monitoring, disciplined decisions**
+
+| Layer | Frequency | What it does |
+|---|---|---|
+| Live monitor | Every 1 min (market hours) | Live prices, paper + real portfolio P&L, stop-loss / target hit → immediate exit alert |
+| Live scores | Every 15 min | Re-score all Nifty 100 on live prices; rank movement shown as *provisional* |
+| News watch | Every 15 min | New headlines → FinBERT; strongly negative news on a held stock → review / exit alert |
+| Official decisions | Daily after close | Final buy / hold / exit on complete data; paper portfolio trades on these |
+| Data update | Daily 16:30 IST | GitHub Actions updates the `market-data` branch |
+| Retraining | Weekly | Model learns from the newest data |
+
+Live prices: Yahoo Finance (may lag a few minutes) until Angel One is active, then Angel One real-time feed.
+
+**Intraday**
 
 - **9:45 AM (market days):** fetch data + news → intraday picks → save → Telegram alert.
 - **3:20 PM:** record actual results → update paper P&L and accuracy.
@@ -109,18 +127,10 @@ then **intraday** (needs Angel One), **Telegram last**.
 |---|---|---|
 | 1 | Setup | Project structure, SQLite database, `.env` config, Angel One data-only client, CLI |
 | 2 | Data pipeline | Daily prices since 2010 for Nifty 100 + 12 indices, split/bonus handling, incremental updates, data-check report, intraday downloader (ready for Angel One) |
+| 2b | Git data store | CSV store on `market-data` branch, daily GitHub Actions updater, shallow `sync-data` on the Mac |
+| 3 | Long-term features | 51 features: momentum, trend, 52-week range, volatility/drawdown, RSI/MACD/ADX/Bollinger, volume, beta, relative strength vs Nifty & sector, weekly candles, market regime, cross-sectional ranks; look-ahead tests |
 
 ### Track A — Long-term (build now)
-
-**Phase 3 — Long-term features**
-- Trend & momentum: 1 / 3 / 6 / 12-month returns, distance from 50 / 200-day averages, distance from 52-week high/low
-- Relative strength vs Nifty 50 and vs the stock's sector index
-- Volatility & risk: 3 / 6-month volatility, max drawdown, beta
-- Volume & liquidity trends (delivery-style accumulation proxies)
-- Weekly-chart candle patterns and indicators (TA-Lib: RSI, MACD, ADX, Bollinger)
-- Market regime: Nifty above/below 200-day average, India VIX level
-- Features stored per stock per week; strictly no future data
-- *Done when:* feature table builds for all stocks since 2010 and passes look-ahead tests
 
 **Phase 4 — Fundamentals & news**
 - Free fundamentals: quarterly results (revenue, profit, EPS growth), P/E, P/B, ROE, debt/equity — from yfinance / NSE filings, only as of the date they were public
@@ -132,32 +142,37 @@ then **intraday** (needs Angel One), **Telegram last**.
 **Phase 5 — Long-term model + backtest**
 - Target: rank of each stock's next **3-month return vs Nifty 50** (1-month as secondary)
 - LightGBM ranker, walk-forward: train on past years, predict next period, roll forward
-- Portfolio rules (defaults, editable): hold **top 10, equal weight**; rebalance weekly; exit when a stock drops out of the top 30 or hits its stop-loss (buffer avoids churn)
+- Portfolio rules (defaults, editable): hold **top 10, equal weight**; decisions daily after close; exit when a stock drops out of the top 30, hits its stop-loss, or gets strongly negative news (buffer avoids churn)
+- Compare daily vs weekly decision frequency after costs
 - Delivery costs included: STT, exchange charges, stamp duty, DP charges, GST, slippage
 - Compare against Nifty 50 buy-and-hold and equal-weight Nifty 100
 - Report: CAGR, return vs Nifty, Sharpe, max drawdown, hit rate, turnover
 - *Done when:* backtest report exists and we decide honestly whether the model beats the benchmarks
 
 **Phase 6 — Long-term paper trading + accuracy**
-- ₹1,00,000 virtual portfolio following the weekly picks (buy / hold / exit)
+- ₹1,00,000 virtual portfolio following the daily decisions (buy / hold / exit)
+- Live valuation during market hours; emergency exits at live prices
 - Records every trade with costs; realized & unrealized P&L
 - Accuracy: % of picks beating Nifty, % profitable, accuracy by confidence, rolling trend, vs random-pick baseline
-- *Done when:* a weekly run produces picks and updates the paper portfolio + accuracy tables
+- *Done when:* a daily run produces decisions and updates the paper portfolio + accuracy tables
 
 **Phase 7 — Streamlit app (long-term pages)**
 - Long-term Picks (buy / hold / exit with reasons and news)
 - Paper Trading — Long-term (prediction vs reality table, P&L chart)
 - Accuracy page, Model page (backtest, feature importance, last retrain), Settings
+- Auto-refresh every minute in market hours; live scores with ↑↓ rank movement (provisional)
 - *Done when:* `streamlit run` shows all long-term pages from real data
 
 **Phase 8 — My Portfolio (real trades)**
 - Manual entry / edit / delete of Groww trades, separate Long-term and Intraday tabs
 - Invested amount, current value, realized / unrealized P&L, allocation chart
+- Live prices and stop-loss alerts for real holdings
 - *Done when:* entered trades show correct P&L at latest prices
 
-**Phase 9 — Scheduler (long-term)**
-- Daily after 4 PM: update prices + news
-- Weekly: long-term picks, paper portfolio update, model retraining
+**Phase 9 — Scheduler & live monitor (long-term)**
+- Market hours: 1-min live prices / stop-loss checks, 15-min live scores + news watch
+- Daily after close: sync data, official decisions, paper portfolio update
+- Weekly: model retraining
 - NSE holiday calendar; missed runs caught up when the laptop is opened
 - *Done when:* jobs run on their own for a week without manual steps
 

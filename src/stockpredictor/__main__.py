@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 from stockpredictor import db, universe
 from stockpredictor.config import load_settings
@@ -96,6 +97,52 @@ def cmd_data_check(settings, args) -> None:
         print(quality.format_report(quality.daily_report(conn, symbols)))
 
 
+def cmd_export_store(settings, args) -> None:
+    from stockpredictor import store
+
+    with db.connect(settings.db_path) as conn:
+        store.export_store(conn, Path(args.dir))
+    print(f"Exported market data to {args.dir}")
+
+
+def cmd_import_store(settings, args) -> None:
+    from stockpredictor import store
+
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        store.import_store(conn, Path(args.dir))
+    print(f"Imported market data from {args.dir}")
+
+
+def cmd_sync_data(settings, args) -> None:
+    from stockpredictor import store
+
+    store.sync(Path(args.dir))
+    daily = store.load_daily(Path(args.dir))
+    print(f"Synced {daily['symbol'].nunique()} stocks, {len(daily):,} daily rows, "
+          f"latest {daily['date'].max():%Y-%m-%d}")
+
+
+def cmd_features(settings, args) -> None:
+    from stockpredictor import store
+    from stockpredictor.features import longterm
+
+    d = Path(args.dir)
+    feats = longterm.build_features(store.load_daily(d), store.load_indices(d),
+                                    store.load_universe(d))
+    cols = longterm.feature_columns(feats)
+    print(f"{feats['symbol'].nunique()} stocks, {len(feats):,} rows, {len(cols)} features, "
+          f"{feats['date'].min():%Y-%m-%d} to {feats['date'].max():%Y-%m-%d}")
+    print(f"Weekly training rows: {len(longterm.weekly_snapshots(feats)):,}")
+    coverage = feats[cols].notna().mean().sort_values()
+    print("Lowest coverage:", ", ".join(f"{c} {v:.0%}" for c, v in coverage.head(5).items()))
+    if args.symbol:
+        row = longterm.latest(feats).set_index("symbol").loc[args.symbol]
+        print(f"\nLatest features for {args.symbol} ({row['date']:%Y-%m-%d}):")
+        for c in cols:
+            print(f"  {c:<22}{row[c]:.4f}")
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -131,7 +178,22 @@ def _intraday_args(p):
     p.add_argument("--days", type=int, default=365, help="How many days back (default 365)")
 
 
+def _dir_arg(p):
+    from stockpredictor.store import DEFAULT_STORE_DIR
+    p.add_argument("--dir", default=str(DEFAULT_STORE_DIR), help="Market data folder")
+
+
+def _features_args(p):
+    _dir_arg(p)
+    p.add_argument("--symbol", help="Show the latest feature values for one stock")
+
+
 ARG_COMMANDS = {
+    "features": (cmd_features, "Build long-term features and show a summary", _features_args),
+    "sync-data": (cmd_sync_data, "Fetch the latest market data from git (for training)",
+                  _dir_arg),
+    "export-store": (cmd_export_store, "Write database market data to CSV files", _dir_arg),
+    "import-store": (cmd_import_store, "Load CSV market data into the database", _dir_arg),
     "prices": (cmd_prices, "Download/update daily prices for stocks and indices", _prices_args),
     "prices-intraday": (cmd_prices_intraday, "Download intraday candles from Angel One",
                         _intraday_args),

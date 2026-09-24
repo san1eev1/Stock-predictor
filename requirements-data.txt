@@ -1,0 +1,5 @@
+# Minimal dependencies for the GitHub Actions data updater
+python-dotenv>=1.0
+requests>=2.31
+pandas>=2.1
+yfinance>=0.2.54

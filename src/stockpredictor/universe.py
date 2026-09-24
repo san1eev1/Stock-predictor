@@ -8,7 +8,10 @@ import sqlite3
 
 import requests
 
-NIFTY100_CSV_URL = "https://archives.nseindia.com/content/indices/ind_nifty100list.csv"
+NIFTY100_CSV_URLS = [
+    "https://archives.nseindia.com/content/indices/ind_nifty100list.csv",
+    "https://www.niftyindices.com/IndexConstituent/ind_nifty100list.csv",
+]
 # NSE rejects requests without a browser-like User-Agent.
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 
@@ -30,9 +33,18 @@ def parse_constituents(csv_text: str) -> list[dict]:
 
 
 def fetch_nifty100() -> list[dict]:
-    resp = requests.get(NIFTY100_CSV_URL, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    return parse_constituents(resp.text)
+    errors = []
+    for url in NIFTY100_CSV_URLS:
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            stocks = parse_constituents(resp.text)
+            if len(stocks) >= 90:  # sanity check: Nifty 100 has 100 stocks
+                return stocks
+            errors.append(f"{url}: only {len(stocks)} rows")
+        except requests.RequestException as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Could not download Nifty 100 list:\n" + "\n".join(errors))
 
 
 def save_universe(conn: sqlite3.Connection, stocks: list[dict]) -> None:

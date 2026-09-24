@@ -28,22 +28,36 @@ cp .env.example .env
 open -e .env        # fill in values when your Angel One account is active
 ```
 
-## Commands
+## How data works
+
+Market data is **not downloaded on the Mac**. A free GitHub Actions job
+(`.github/workflows/update-market-data.yml`) runs every weekday at 16:30 IST,
+downloads prices for the Nifty 100 and indices, and commits compact CSV files to the
+`market-data` branch. The Mac fetches only the latest snapshot (no history) for training:
 
 ```bash
-python -m stockpredictor init         # create the local database
-python -m stockpredictor universe     # download Nifty 100 list from NSE
-python -m stockpredictor prices       # daily prices since 2010 for Nifty 100 + indices (~5-10 min first time)
-python -m stockpredictor data-check   # coverage / gaps report
-python -m stockpredictor status       # show configuration and row counts
-# after Angel One keys are in .env:
-python -m stockpredictor tokens       # map stocks to Angel One tokens
-python -m stockpredictor check-angel  # test login + one live price
-python -m stockpredictor prices-intraday --interval FIVE_MINUTE --days 365
+python -m stockpredictor sync-data    # shallow fetch of market-data branch (~tens of MB)
+python -m stockpredictor features     # build long-term features in memory (~10 s)
+python -m stockpredictor features --symbol RELIANCE   # latest values for one stock
 ```
 
-Run `prices` again any time (e.g. daily after 4 PM) — it only downloads what is new.
-Try a single stock first with `--symbols RELIANCE`.
+The local SQLite database only holds app state (predictions, paper trades, your portfolio).
+
+First-time data load: GitHub → **Actions** → *Update market data* → **Run workflow**.
+
+## Other commands
+
+```bash
+python -m stockpredictor init         # create the local app database
+python -m stockpredictor status       # show configuration
+# after Angel One keys are in .env:
+python -m stockpredictor universe     # Nifty 100 list into the local database
+python -m stockpredictor tokens       # map stocks to Angel One tokens
+python -m stockpredictor check-angel  # test login + one live price
+```
+
+Used by the GitHub Action (can also be run locally): `universe`, `prices`, `data-check`,
+`import-store`, `export-store`.
 
 ## Tests
 
@@ -62,7 +76,10 @@ src/stockpredictor/
   data/daily.py      daily prices, indices, splits (Yahoo Finance)
   data/intraday.py   intraday candles (Angel One)
   data/quality.py    data coverage report
+  store.py           git CSV market-data store + sync
+  features/longterm.py  long-term features (momentum, trend, risk, RS, weekly candles, regime)
   __main__.py        command line
 tests/
-data/                local database (git-ignored)
+data/                local app database (git-ignored)
+market-data/         synced data snapshot (git-ignored, from the market-data branch)
 ```
