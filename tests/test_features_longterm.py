@@ -23,7 +23,7 @@ def synthetic(n_days=600, symbols=("AAA", "BBB", "CCC"), seed=0):
     indices = pd.concat([candles("NIFTY50", 0.0003, 0.01), candles("NIFTYIT", 0.0004, 0.015),
                          candles("INDIAVIX", 0, 0.05)], ignore_index=True)
     universe = pd.DataFrame({"symbol": list(symbols),
-                             "industry": ["Banks", "Banks", "Unknown"]})
+                             "industry": (["Banks", "Banks", "Unknown"] * len(symbols))[:len(symbols)]})
     return daily, indices, universe
 
 

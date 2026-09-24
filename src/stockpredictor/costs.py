@@ -1,0 +1,41 @@
+"""Approximate Indian equity delivery (CNC) trading costs.
+
+Rates change over time; these defaults approximate a discount broker such
+as Groww. They are editable so paper P&L can match your contract notes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class DeliveryCosts:
+    brokerage_pct: float = 0.001        # 0.1% ...
+    brokerage_min: float = 5.0          # ... min Rs 5
+    brokerage_max: float = 20.0         # ... max Rs 20 per order
+    stt_pct: float = 0.001              # 0.1% on buy and sell
+    exchange_pct: float = 0.0000297     # NSE transaction charge
+    sebi_pct: float = 0.000001          # Rs 10 per crore
+    stamp_buy_pct: float = 0.00015      # 0.015% on buy
+    gst_pct: float = 0.18               # on brokerage + exchange + SEBI
+    dp_per_sell: float = 20.0           # depository charge per scrip sold
+    slippage_pct: float = 0.0005        # 0.05% execution slippage
+
+    def cost(self, side: str, value: float) -> float:
+        """Total charges in rupees for one order of `value` rupees."""
+        if value <= 0:
+            return 0.0
+        brokerage = min(self.brokerage_max, max(self.brokerage_min, value * self.brokerage_pct))
+        exchange, sebi = value * self.exchange_pct, value * self.sebi_pct
+        total = (brokerage + value * self.stt_pct + exchange + sebi
+                 + self.gst_pct * (brokerage + exchange + sebi)
+                 + value * self.slippage_pct)
+        if side == "buy":
+            total += value * self.stamp_buy_pct
+        else:
+            total += self.dp_per_sell
+        return round(total, 2)
+
+
+DEFAULT_COSTS = DeliveryCosts()

@@ -171,6 +171,28 @@ def cmd_fundamentals_update(settings, args) -> None:
     print(f"Fundamentals snapshot: {len(rows)} stocks, {len(errors)} errors")
 
 
+def cmd_train(settings, args) -> None:
+    from stockpredictor.backtest import run as bt
+    from stockpredictor.models import longterm as M
+
+    _, _, _, labeled = bt.load_all(Path(args.dir))
+    model = M.LongTermModel.train(labeled)
+    model.save(M.MODEL_DIR)
+    print(f"Trained on data up to {model.train_to}; saved to {M.MODEL_DIR}")
+    print("Top features:", ", ".join(model.importance().head(8).index))
+
+
+def cmd_backtest(settings, args) -> None:
+    from stockpredictor.backtest import run as bt
+    from stockpredictor.models import longterm as M
+
+    report = bt.run(Path(args.dir), start_year=args.start_year,
+                    capital=settings.paper_capital_longterm)
+    print(bt.format_report(report))
+    bt.save(report, M.MODEL_DIR / "backtest.json")
+    print(f"\nSaved report to {M.MODEL_DIR / 'backtest.json'}")
+
+
 def cmd_status(settings) -> None:
     print(f"Database:        {settings.db_path} ({'exists' if settings.db_path.exists() else 'missing'})")
     print(f"Angel One keys:  {'set' if settings.angel.is_complete else 'not set'}")
@@ -221,7 +243,14 @@ def _news_args(p):
     p.add_argument("--no-score", action="store_true", help="Skip FinBERT scoring")
 
 
+def _backtest_args(p):
+    _dir_arg(p)
+    p.add_argument("--start-year", type=int, default=2015, help="First out-of-sample year")
+
+
 ARG_COMMANDS = {
+    "train": (cmd_train, "Train the long-term model on all data", _dir_arg),
+    "backtest": (cmd_backtest, "Walk-forward backtest of the long-term model", _backtest_args),
     "news-update": (cmd_news_update, "Fetch company news and score sentiment", _news_args),
     "fundamentals-update": (cmd_fundamentals_update, "Save a fundamentals snapshot", _dir_arg),
     "features": (cmd_features, "Build long-term features and show a summary", _features_args),

@@ -1,0 +1,116 @@
+"""End-to-end long-term backtest: features -> walk-forward scores -> portfolio."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from stockpredictor import store
+from stockpredictor.backtest import portfolio as P
+from stockpredictor.features import longterm as F
+from stockpredictor.models import longterm as M
+
+
+def load_all(store_dir: Path):
+    daily, indices = store.load_daily(store_dir), store.load_indices(store_dir)
+    universe = store.load_universe(store_dir)
+    feats = F.build_features(daily, indices, universe)
+    labeled = M.add_labels(F.weekly_snapshots(feats), daily, indices)
+    return daily, indices, feats, labeled
+
+
+def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
+        capital: float = 100_000, rebalances=("daily", "weekly"), cached=None) -> dict:
+    daily, indices, feats, labeled, scores = cached or (*load_all(store_dir), None)
+    if scores is None:
+        scores = M.walk_forward(labeled, feats, start_year)
+    close = daily.pivot(index="date", columns="symbol", values="close").sort_index()
+
+    ic = M.information_coefficient(scores, labeled)
+    report = {
+        "period": f"{scores['date'].min():%Y-%m-%d} to {scores['date'].max():%Y-%m-%d}",
+        "rules": rules.__dict__, "capital": capital,
+        "ic_mean": ic.mean(), "ic_positive_share": (ic > 0).mean(),
+        "ic_t_stat": ic.mean() / ic.std() * np.sqrt(len(ic) / (M.HORIZON / 5)),
+        "strategies": {}, "benchmarks": {}, "yearly": {},
+    }
+
+    # Top-10 vs bottom-10 average forward excess return (weekly, overlapping).
+    m = scores.merge(labeled[["symbol", "date", "fwd_excess"]], on=["symbol", "date"]).dropna()
+    m["r"] = m.groupby("date")["score"].rank(ascending=False)
+    n = m.groupby("date")["r"].transform("max")
+    report["top10_fwd_excess"] = m.loc[m["r"] <= 10, "fwd_excess"].mean()
+    report["bottom10_fwd_excess"] = m.loc[m["r"] > n - 10, "fwd_excess"].mean()
+    report["hit_rate_top10"] = (m.loc[m["r"] <= 10, "fwd_excess"] > 0).mean()
+    report["base_rate_all"] = (m["fwd_excess"] > 0).mean()
+
+    curves = {}
+    for reb in rebalances:
+        res = P.simulate(scores, close, rules, capital, reb)
+        curves[f"model_{reb}"] = res.equity
+        report["strategies"][reb] = {**P.performance(res.equity),
+                                     **P.trade_stats(res.trades, res.equity),
+                                     "total_costs": res.total_costs}
+    # Baseline without machine learning: plain 12-1 month momentum, same rules.
+    base = feats.loc[feats["date"] >= scores["date"].min(), ["symbol", "date", "mom_12_1"]]
+    res = P.simulate(base.rename(columns={"mom_12_1": "score"}).dropna(), close, rules,
+                     capital, "weekly")
+    curves["momentum_only"] = res.equity
+    report["strategies"]["momentum only (weekly)"] = {
+        **P.performance(res.equity), **P.trade_stats(res.trades, res.equity),
+        "total_costs": res.total_costs}
+
+    dates = next(iter(curves.values())).index
+    nifty = indices[indices["symbol"] == F.MARKET_INDEX].set_index("date")["close"]
+    nifty = nifty.reindex(dates).ffill().bfill()   # index can miss a day the stocks traded
+    bench = {"nifty50": nifty / nifty.iloc[0] * capital,
+             "equal_weight_nifty100": P.equal_weight_benchmark(close, dates) * capital}
+    for name, curve in bench.items():
+        report["benchmarks"][name] = P.performance(curve)
+    for name, curve in {**curves, **bench}.items():
+        report["yearly"][name] = {str(k): v for k, v in P.yearly_returns(curve).items()}
+    report["_curves"] = {k: v for k, v in {**curves, **bench}.items()}
+    return report
+
+
+def format_report(r: dict) -> str:
+    pct = lambda x: f"{x * 100:6.1f}%"  # noqa: E731
+    lines = [f"Long-term backtest {r['period']}  (capital Rs {r['capital']:,.0f}, costs included)",
+             "",
+             f"Prediction quality: IC {r['ic_mean']:.3f} (t={r['ic_t_stat']:.1f}), "
+             f"positive in {r['ic_positive_share']:.0%} of weeks",
+             f"Top-10 picks beat Nifty over 3 months: {r['hit_rate_top10']:.0%} "
+             f"(all stocks: {r['base_rate_all']:.0%})",
+             f"Avg 3-month excess return: top-10 {pct(r['top10_fwd_excess'])}, "
+             f"bottom-10 {pct(r['bottom10_fwd_excess'])}",
+             "",
+             f"{'':26}{'CAGR':>8}{'Vol':>8}{'Sharpe':>8}{'MaxDD':>8}"]
+    rows = {**{(k if k.startswith("momentum") else f"Model ({k})"): v
+               for k, v in r["strategies"].items()},
+            "Nifty 50": r["benchmarks"]["nifty50"],
+            "Equal-weight Nifty 100": r["benchmarks"]["equal_weight_nifty100"]}
+    for name, s in rows.items():
+        lines.append(f"{name:26}{pct(s['cagr']):>8}{pct(s['volatility']):>8}"
+                     f"{s['sharpe']:8.2f}{pct(s['max_drawdown']):>8}")
+    lines.append("")
+    for k, s in r["strategies"].items():
+        lines.append(f"{k}: {s['trades_per_year']:.0f} trades/yr, win rate {s['win_rate']:.0%}, "
+                     f"avg hold {s['avg_hold_days']:.0f} days, costs Rs {s['total_costs']:,.0f}, "
+                     f"exits {s['exit_reasons']}")
+    lines.append("")
+    names = list(r["yearly"])
+    lines.append("Year  " + "".join(f"{n[:14]:>15}" for n in names))
+    for y in r["yearly"][names[0]]:
+        lines.append(f"{y}  " + "".join(f"{pct(r['yearly'][n].get(y, np.nan)):>15}" for n in names))
+    return "\n".join(lines)
+
+
+def save(r: dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    curves = r.pop("_curves", {})
+    path.write_text(json.dumps(r, indent=2, default=float))
+    if curves:
+        pd.DataFrame(curves).to_csv(path.with_suffix(".curves.csv"), float_format="%.2f")

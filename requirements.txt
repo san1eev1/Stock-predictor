@@ -12,3 +12,6 @@ yfinance>=0.2.54
 
 # Dev
 pytest>=8.0
+
+# Phase 5 (on macOS: brew install libomp)
+lightgbm>=4.3
