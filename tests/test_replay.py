@@ -47,3 +47,31 @@ def test_replay_runs_once_a_day_after_the_close(tmp_path):
     conn.execute("INSERT INTO app_settings (key, value) VALUES ('replay_day', '2026-09-25')")
     assert not bg._replay_due(conn, datetime(2026, 9, 25, 18, 0))    # already done today
     assert bg._replay_due(conn, datetime(2026, 9, 26, 10, 0))        # Saturday
+
+
+def test_tuning_round_is_checked_by_paper_trading(tmp_path, monkeypatch):
+    target = MI.Target("intraday", "px_1230", tmp_path / "m", "until 12:30")
+    days = pd.bdate_range("2026-01-01", periods=MI.MIN_TRAIN_DAYS + 20)
+    monkeypatch.setattr(T, "intraday_feats", lambda ctx, d, t: pd.DataFrame({"date": days}))
+    monkeypatch.setattr(T, "peer_walk_forward", lambda *a: None)
+    monkeypatch.setattr(T, "candidates", lambda cur, n, seed, grid: [{"a": 1}, {"a": 2}])
+    monkeypatch.setattr(T, "evaluate_intraday", lambda f, p, *a, **k: {"ic": 0.01 * p["a"]})
+    saved = []
+    monkeypatch.setattr(T, "_save_params", lambda d, p: saved.append(p))
+    monkeypatch.setattr(MI.IntradayModel, "train", lambda *a, **k: type("M", (), {"save": lambda s, d: None})())
+    paper = {1: 200, 2: 100}          # the new settings (a=2) paper-trade worse
+
+    def check(f, t, params, rules=None):
+        return {"period": "p", "days": 120, "avg_day_pnl": paper[params["a"]], "win_days": 0.5,
+                "accuracy": 0.55, "random": 0.5, "ic": 0.01}
+
+    monkeypatch.setattr(T, "paper_check", check)
+    db.init_db(tmp_path / "t.db")
+    conn = db.connect(tmp_path / "t.db")
+    r = T.tune_intraday("ctx", tmp_path, conn, log_all=False, target=target, check_days=10**6)
+    assert not r["adopted"] and not saved and r["paper"]["avg_day_pnl"] == 200
+    paper[2] = 300                    # now they paper-trade better: adopted
+    r = T.tune_intraday("ctx", tmp_path, conn, log_all=False, target=target, check_days=10**6)
+    assert r["adopted"] and saved == [{"a": 2}]
+    rows = conn.execute("SELECT avg_day_pnl, adopted FROM tune_checks ORDER BY id").fetchall()
+    assert [tuple(x) for x in rows] == [(200, 0), (300, 1)]

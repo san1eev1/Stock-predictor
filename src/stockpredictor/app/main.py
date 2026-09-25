@@ -354,6 +354,7 @@ def replay_history():
                "day is traded by a model trained only on earlier days; each round learns from "
                "the previous round's judged buy and sell picks (wrong 2×, right 1.5×). If the "
                "last round beats the first, that learning is kept for the live model.")
+    tuning_checks(c)
     runs = pd.read_sql("SELECT * FROM replay_runs ORDER BY id", c)
     if runs.empty:
         st.caption("The first replay runs after today's close (or now, at the weekend).")
@@ -382,6 +383,31 @@ def replay_history():
                          series=daily["horizon"].map(MODEL_NAMES), value=daily["accuracy"])
         st.altair_chart(C.lines(d[["date", "series", "value"]], "date", "value", "series", ".0%"),
                         width="stretch")
+
+
+def tuning_checks(c):
+    """The paper-trading check run after every background tuning round."""
+    st.subheader("🧪 Paper-trading check after each tuning round")
+    st.caption(f"After every tuning round the settings in use are paper-traded on the last "
+               f"{T.REPLAY_DAYS} days (live rules: top buys + sells, ₹1 lakh a day, costs; each "
+               "day predicted by a model trained only on earlier days). New settings are kept "
+               "only if they also paper-trade at least as well (P&L per day and picks right).")
+    t = pd.read_sql("SELECT * FROM tune_checks ORDER BY id DESC LIMIT 40", c)
+    if t.empty:
+        st.caption("Appears after the next tuning round (every few minutes).")
+        return
+    st.dataframe(pd.DataFrame({
+        "Time": t["run_at"].str[5:16].str.replace("T", " "),
+        "Model": t["horizon"].map(MODEL_NAMES), "Days": t["days"],
+        "Avg P&L per day": t["avg_day_pnl"], "Profitable days": t["win_days"],
+        "Picks right": t["accuracy"], "Random picks": t["random"], "IC": t["ic"],
+        "Settings": ["✅ new adopted" if a else "kept" for a in t["adopted"]]}),
+        hide_index=True, width="stretch", column_config={
+            "Avg P&L per day": st.column_config.NumberColumn(format="₹%.0f"),
+            "Profitable days": st.column_config.NumberColumn(format="percent"),
+            "Picks right": st.column_config.NumberColumn(format="percent"),
+            "Random picks": st.column_config.NumberColumn(format="percent"),
+            "IC": st.column_config.NumberColumn(format="%.3f")})
 
 
 def competition():

@@ -236,6 +236,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
 CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_prices(date);
 CREATE INDEX IF NOT EXISTS idx_news_symbol_time ON news(symbol, published_at);
 -- Historical paper-trading replays of the intraday models (rounds of learning after the close)
+-- Paper-trading check after every background tuning round (settings in use afterwards)
+CREATE TABLE IF NOT EXISTS tune_checks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at        TEXT NOT NULL,
+    horizon       TEXT NOT NULL,
+    period        TEXT,
+    days          INTEGER,
+    avg_day_pnl   REAL,
+    win_days      REAL,
+    accuracy      REAL,
+    random        REAL,
+    ic            REAL,
+    adopted       INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS replay_runs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at        TEXT NOT NULL,

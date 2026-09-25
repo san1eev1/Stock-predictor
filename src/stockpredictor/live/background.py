@@ -89,17 +89,24 @@ class BackgroundTrainer(threading.Thread):
             ctx = self._ctx()
             # Alternate: the 12:30 (traded) model, then the model that learns until the close.
             target = MI.TARGETS[self.rounds % len(MI.TARGETS)]
+            from stockpredictor.paper import intraday as PI
+
+            rules, _ = PI.get_rules(conn)
             with MI.MODEL_LOCK:
                 it = T.tune_intraday(ctx, self.store_dir, conn, n_candidates=CANDIDATES,
-                                     log_all=False, target=target)
+                                     log_all=False, target=target, rules=rules)
             self.rounds += 1
             if it is None:
                 log.info("Background training: not enough intraday history (%s) to tune yet",
                          target.label)
                 return
-            log.info("Background training round %d (%s): IC %.4f (current %.4f)%s",
+            p = it.get("paper")
+            log.info("Background training round %d (%s): IC %.4f (current %.4f)%s | paper "
+                     "check (%s): Rs %+.0f/day, %.0f%% picks right (random %.0f%%)",
                      self.rounds, target.label, it["ic"], it["previous_ic"],
-                     " -> new settings adopted" if it["adopted"] else "")
+                     " -> new settings adopted" if it["adopted"] else "",
+                     p["period"] if p else "-", p["avg_day_pnl"] if p else 0,
+                     (p["accuracy"] or 0) * 100 if p else 0, (p["random"] or 0) * 100 if p else 0)
             if it["adopted"]:
                 self.model_changed.set()
             if not config.CLOUD_TRAINING:

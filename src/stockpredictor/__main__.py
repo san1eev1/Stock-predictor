@@ -366,7 +366,9 @@ def cmd_cloud_train(settings, args) -> None:
                             cache=scores)
         rounds += 1
         adopted += int(r["adopted"])
-        print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f})"
+        print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f}), "
+              f"paper check: top-10 buys beat Nifty {r['top10_hit']:.1%} of weeks, "
+              f"avg {r['top10_excess']:+.2%}/week"
               + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
 
     if T.RUN_LOG.exists():   # keep the log small

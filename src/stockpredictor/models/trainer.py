@@ -198,7 +198,9 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
     best = max(valid, key=lambda r: -np.inf if np.isnan(r["ic"]) else r["ic"])
     base = results[0]
     adopted = (not best["current"] and not np.isnan(best["ic"])
-               and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN))
+               and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN)
+               # paper check: the top-10 buy picks must beat Nifty at least as often
+               and not best["top10_hit"] < base["top10_hit"])
     check = None
     if adopted and check_years > years:
         check = {"best": score(best["params"], check_years)["ic"],
@@ -380,14 +382,16 @@ def replay_file(target: MI.Target):
 
 
 def replay_round(feats: pd.DataFrame, target: MI.Target, rules, capital: float,
-                 last_days: int = REPLAY_DAYS) -> tuple[dict, pd.DataFrame] | None:
+                 last_days: int = REPLAY_DAYS,
+                 params: dict | None = None) -> tuple[dict, pd.DataFrame] | None:
     """One historical paper-trading batch: every day of the last `last_days` is traded by a
     model trained only on earlier days (using the fb_weight already in `feats`), then judged.
     Returns the result and the judged picks (symbol, date, correct) for the next round."""
     from stockpredictor.backtest import intraday as B
     from stockpredictor.data import intraday as I
 
-    scores = MI.walk_forward(feats, params=MI.current_params(target), last_days=last_days)
+    scores = MI.walk_forward(feats, params=params or MI.current_params(target),
+                             last_days=last_days)
     if scores.empty:
         return None
     m = scores.merge(feats[["symbol", "date", "target_ret"]], on=["symbol", "date"])
@@ -491,10 +495,24 @@ def intraday_feedback(conn, feats: pd.DataFrame, horizon: str = "intraday") -> p
     return out.drop(columns="correct")
 
 
+def paper_check(feats, target: MI.Target, params: dict, rules=None,
+                capital: float = 100_000) -> dict | None:
+    """Paper trading on the last REPLAY_DAYS days with `params` (live rules: 3 buys + 3 sells,
+    Rs 1 lakh a day, costs), every day predicted by a model trained only on earlier days."""
+    from stockpredictor.backtest import intraday as B
+
+    r = replay_round(feats, target, rules or B.IntradayRules(), capital, params=params)
+    return r[0] if r else None
+
+
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
                   seed: int | None = None, check_days: int = 250,
-                  log_all: bool = True, target: MI.Target = MI.TRADE) -> dict | None:
-    """Like tune_longterm: must win on the last 120 days and not lose on the last `check_days`."""
+                  log_all: bool = True, target: MI.Target = MI.TRADE,
+                  rules=None) -> dict | None:
+    """Like tune_longterm: must win on the last 120 days and not lose on the last `check_days`.
+    Then the paper-trading check: the new settings must also paper-trade at least as well
+    (P&L per day and share of picks right) as the current ones. Every round's paper result
+    is saved in tune_checks."""
     feats = intraday_feats(ctx, store_dir, target)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS + 10:
         return None
@@ -515,13 +533,29 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
                  "current": evaluate_intraday(feats, base["params"], check_days, peer)["ic"]}
         adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
                                                    or check["best"] >= check["current"])
+    paper = {"current": paper_check(feats, target, base["params"], rules)}
+    if adopted:
+        paper["new"] = paper_check(feats, target, best["params"], rules)
+        new, cur = paper["new"], paper["current"]
+        adopted = new is not None and (cur is None or (
+            new["avg_day_pnl"] >= cur["avg_day_pnl"] and new["accuracy"] >= cur["accuracy"]))
     if adopted:
         _save_params(target.model_dir, best["params"])
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
-              "all": results, "long_check": check}
+              "all": results, "long_check": check,
+              "paper": paper.get("new") if adopted else paper["current"],
+              "paper_before": paper["current"]}
+    if conn is not None and report["paper"]:
+        p = report["paper"]
+        conn.execute("INSERT INTO tune_checks (run_at, horizon, period, days, avg_day_pnl, "
+                     "win_days, accuracy, random, ic, adopted) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (datetime.now().isoformat(timespec="seconds"), target.horizon, p["period"],
+                      p["days"], p["avg_day_pnl"], p["win_days"], p["accuracy"], p["random"],
+                      p["ic"], int(adopted)))
+        conn.commit()
     if log_all or adopted:
         log_run(conn, target.horizon, "tune", f"{feats['date'].max():%Y-%m-%d}", report)
     if adopted:
