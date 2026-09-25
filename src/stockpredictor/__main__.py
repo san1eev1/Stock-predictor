@@ -404,7 +404,9 @@ def cmd_cloud_train(settings, args) -> None:
     from stockpredictor.data import intraday as I
 
     active = (ctx.universe["active"] == 1).sum()
-    share = 0.85 if len(I.backfill_symbols()) < 0.8 * active else 0.4
+    tried_path = I.BACKFILL_PATH.with_name("intraday_tried.json")
+    finished = len(json.loads(tried_path.read_text())) if tried_path.exists() else 0
+    share = 0.85 if finished < 0.9 * active else 0.4
     conn = _cloud_intraday(settings, d, ctx, args, started + budget * share)
 
     rounds = adopted = 0
@@ -447,12 +449,16 @@ def cmd_cloud_train(settings, args) -> None:
     print(json.dumps(status), flush=True)
 
 
+INTRADAY_HISTORY_START = date(2016, 10, 1)    # Angel One intraday history starts here
+
+
 def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
     """GitHub: Angel One 5-minute history (kept in GitHub's private cache, never committed),
     then both intraday models: retrain on all of it + judged paper picks, choose the trading
     rules by profit, 3 rounds of historical paper-trading replays, 12:30-vs-close comparison.
     Returns a database connection holding the run's results (None without Angel One keys)."""
     import tempfile
+    import time
 
     import pandas as pd
 
@@ -477,18 +483,37 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
         client.login()
         tokens = angelone.fetch_nse_equity_tokens()
         have = I.backfill_symbols()
-        # Stocks with no or incomplete history: 2 years. Everyone: the days since the last run.
-        todo = sorted((set(active) - have) | (set(active) & (I.backfill_missing_exit()
-                                                              | I.backfill_incomplete())))
         today = date.today()
+        # Full history from October 2016 (as far back as Angel One goes), stock by stock:
+        # stocks with no history first, then the older years for the rest. tried.json
+        # remembers finished stocks so recently listed ones are not asked again every run.
+        import json as _json
+
+        tried_path = I.BACKFILL_PATH.with_name("intraday_tried.json")
+        tried = _json.loads(tried_path.read_text()) if tried_path.exists() else {}
+        first = I.load_summaries(d).query("source == 'angelone'").groupby("symbol")["date"].min()
+        redo = set(active) & I.backfill_missing_exit()
+        todo = [s for s in active if s not in have] + sorted(
+            s for s in active if s in have and (s in redo or s not in tried))
+        n_new, done_now = 0, 0
+        for sym in todo:
+            if time.monotonic() > deadline:
+                break
+            errors = []
+            end = today if sym not in have or sym in redo else \
+                min(today, first.get(sym, pd.Timestamp(today)).date())
+            n_new += I.angel_backfill(client, tokens, [sym], INTRADAY_HISTORY_START, end,
+                                      progress=lambda m: errors.append(m) if "error" in m else None)
+            if not errors:
+                tried[sym] = f"{INTRADAY_HISTORY_START:%Y-%m-%d}"
+                done_now += 1
+                tried_path.write_text(_json.dumps(tried))
         if todo:
-            n = I.angel_backfill(client, tokens, todo, today - timedelta(days=730), today,
-                                 progress=lambda m: None, deadline=deadline)
-            print(f"Angel One history: {n} stock-days for {len(todo)} stocks with little or no "
-                  "history", flush=True)
+            print(f"Angel One history (from {INTRADAY_HISTORY_START:%b %Y}): {n_new} stock-days, "
+                  f"{done_now} of {len(todo)} stocks finished this run", flush=True)
         last = I.load_summaries(d).query("source == 'angelone'")["date"].max()
         if pd.notna(last) and last.date() < today:
-            rest = sorted(set(active) - set(todo))
+            rest = sorted(set(active) & have)
             n = I.angel_backfill(client, tokens, rest, last.date() + timedelta(days=1), today,
                                  progress=lambda m: None, deadline=deadline + 20 * 60)
             print(f"Angel One history: {n} new stock-days since {last:%Y-%m-%d}", flush=True)
@@ -497,7 +522,10 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
         from stockpredictor.data import fine
 
         cov = fine.coverage()
-        need = [s for s in active if cov.get(s, 0) < 0.8 * I.backfill_days()]
+        recent = I.load_summaries(d)
+        recent_days = recent.loc[recent["date"] >= pd.Timestamp(today - timedelta(days=730)),
+                                 "date"].nunique()
+        need = [s for s in active if cov.get(s, 0) < 0.8 * recent_days]
         if need:
             n = fine.backfill(client, tokens, need, today - timedelta(days=730), today,
                               progress=lambda m: None, deadline=deadline + 20 * 60)

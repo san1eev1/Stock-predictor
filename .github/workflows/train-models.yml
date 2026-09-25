@@ -66,6 +66,15 @@ jobs:
           key: angel-intraday-${{ github.run_id }}
           restore-keys: angel-intraday-
 
+      # Which stocks already have their full intraday history (separate cache entry, so the
+      # history cache above keeps restoring from older runs).
+      - name: Restore intraday download progress
+        uses: actions/cache/restore@v4
+        with:
+          path: data/intraday_tried.json
+          key: angel-tried-${{ github.run_id }}
+          restore-keys: angel-tried-
+
       - name: Train and self-tune
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
@@ -84,6 +93,13 @@ jobs:
             data/intraday_backfill.csv
             data/intraday_fine.csv
           key: angel-intraday-${{ github.run_id }}
+
+      - name: Save intraday download progress
+        if: always() && hashFiles('data/intraday_tried.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/intraday_tried.json
+          key: angel-tried-${{ github.run_id }}
 
       - name: Publish models
         working-directory: trained-models
