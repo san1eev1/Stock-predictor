@@ -77,8 +77,10 @@ def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:
 
     if os.getenv("FEATURE_CACHE", "1") == "0":
         return F.build_features(daily, indices, universe)
+    from stockpredictor.store import local_overlay_path
+
     files = sorted(Path(store_dir).glob("daily/*.csv")) + sorted(Path(store_dir).glob("indices/*.csv")) \
-        + [Path(store_dir) / "universe.csv"]
+        + [Path(store_dir) / "universe.csv", local_overlay_path("daily"), local_overlay_path("indices")]
     sig = "|".join(f"{f.name}:{f.stat().st_size}:{f.stat().st_mtime_ns}" for f in files if f.exists())
     key = hashlib.sha1(f"{FEATURE_CACHE_VERSION}|{sig}".encode()).hexdigest()[:16]
     cache_dir = DATA_DIR / "cache"
@@ -257,6 +259,7 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
 
     # 4. Save predictions (top picks = up, bottom = down) with reasons, and the
     #    shadow predictions of each strategy variant for the live race.
+    today["close"] = today["symbol"].map(prices).fillna(today["close"]).astype(float)
     save_predictions(conn, today, model, date, ctx.nifty_close(date))
     save_shadow(conn, today, model, date, ctx.nifty_close(date))
 
@@ -356,6 +359,8 @@ def _evaluate(conn, ctx, horizon_days: int, table: str, where: str) -> int:
                              else 63)
         j = min(i + h, len(dates) - 1)
         matured = i + h <= len(dates) - 1
+        if j == i:
+            continue          # no trading day has passed yet: nothing to measure
         px = close[p["symbol"]].iloc[: j + 1].dropna()
         if px.empty:
             continue

@@ -29,12 +29,14 @@ from stockpredictor.models import trainer as T
 from stockpredictor.paper import daily as D
 from stockpredictor.paper import engine as E
 from stockpredictor.paper import intraday as PI
+from stockpredictor.paper import scoreboard as SB
 from stockpredictor.portfolio import real as R
 
 log = logging.getLogger(__name__)
 AFTER_CLOSE = time(17, 15)
+LOCAL_FETCH_AFTER = time(17, 45)   # fetch prices ourselves if GitHub hasn't by then
 INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
-INTRADAY_LATEST = time(10, 15)     # too late to act on a 9:45 signal after this
+INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) until 14:30
 INTRADAY_SQUARE_OFF = time(15, 15)
 FIRST_FILL = time(9, 20)       # skip the opening minutes' noise
 LIVE_HISTORY_DAYS = 400        # enough history for 12-month features
@@ -70,6 +72,8 @@ class Monitor:
         self._last_quarter: datetime | None = None
         self._live_day: tuple | None = None   # (date, is_trading_day)
         self._imodel: MI.IntradayModel | None = None
+        self._started = False
+        self._last_pick_try: datetime | None = None
         self.capital_intraday = capital_intraday
         E.ensure_account(conn, capital)
         E.ensure_account(conn, capital_intraday, PI.HORIZON)
@@ -101,15 +105,22 @@ class Monitor:
         return syms
 
     def trading_today(self, now: datetime) -> bool:
-        if self._live_day is None or self._live_day[0] != now.date():
-            self._live_day = (now.date(), self.prices.market_is_live())
-        return self._live_day[1]
+        """Is NSE open today? A definite answer is kept for the day; an unknown one
+        (network hiccup) counts as open and is checked again after 30 minutes."""
+        if self._live_day is None or self._live_day[0] != now.date() or (
+                self._live_day[1] is None and (now - self._live_day[2]).total_seconds() > 1800):
+            self._live_day = (now.date(), self.prices.market_is_live(), now)
+        return self._live_day[1] is not False
 
     # --- jobs --------------------------------------------------------------
     def tick(self) -> list[str]:
         now = self.clock()
         done = []
         _set(self.conn, "monitor_heartbeat", now.isoformat(timespec="seconds"))
+        if not self._started:
+            self._started = True
+            self.startup_job(now)
+            done.append("startup")
         if in_market_hours(now) and self.trading_today(now):
             day = f"{now:%Y-%m-%d}"
             if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
@@ -181,9 +192,57 @@ class Monitor:
                           f"{now:%Y-%m-%d} {r.symbol} at {r.price:.2f} hit your stop-loss "
                           f"{r.stop_loss:.2f} (avg cost {r.avg_cost:.2f})")
 
+    def startup_job(self, now: datetime) -> None:
+        """Whenever the program starts: newest data, train if not yet today, catch up on
+        missed decisions, judge predictions, and make today's intraday picks if the market
+        is open. Then print the accuracy scoreboard."""
+        log.info("Starting up: getting data, training and catching up...")
+        try:
+            self.sync(self.store_dir)
+        except Exception as exc:
+            log.warning("sync failed (%s) - using the data already on this Mac", exc)
+        try:
+            ctx = self.ctx(reload=True)
+            last_close = ctx.daily["date"].max().date()
+            if (now.date() - last_close).days > 1 and now.weekday() < 5 \
+                    and now.time() >= LOCAL_FETCH_AFTER or (now.date() - last_close).days > 3:
+                if self.local_catchup(now):
+                    ctx = self.ctx(reload=True)
+            lt = T.retrain_longterm(ctx, self.conn)
+            if lt is not None:
+                self._model = lt
+                log.info("Long-term model retrained on data up to %s", lt.train_to)
+            it = T.retrain_intraday(ctx, self.store_dir, self.conn)
+            if it is not None:
+                self._imodel = it
+                log.info("Intraday model retrained on %s days", it.train_days)
+            results = D.run_daily(self.conn, ctx, self.capital, self.model())
+            for r in results:
+                log.info("Decision for %s: buy %s; sell %s", f"{r['date']:%Y-%m-%d}",
+                         ", ".join(r["buys"]) or "none",
+                         ", ".join(s_ for s_, _ in r["sells"]) or "none")
+            E.evaluate_predictions(self.conn, ctx)
+        except Exception:
+            log.exception("startup training/decision failed")
+        if in_market_hours(now) and self.trading_today(now) \
+                and INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
+                and _setting(self.conn, "id_last_picks") != f"{now:%Y-%m-%d}":
+            self.intraday_picks_job(now)
+        self.print_scoreboard(now)
+
+    def print_scoreboard(self, now: datetime) -> None:
+        try:
+            for line in SB.lines(SB.compute(self.conn, now)):
+                log.info(line)
+        except Exception:
+            log.exception("scoreboard failed")
+
     def intraday_picks_job(self, now: datetime) -> None:
         day = f"{now:%Y-%m-%d}"
-        _set(self.conn, "id_last_picks", day)       # at most one attempt per day
+        if self._last_pick_try and (now - self._last_pick_try).total_seconds() < 300:
+            return                                   # retry at most every 5 minutes
+        self._last_pick_try = now
+        _set(self.conn, "id_last_picks", day)       # set now; cleared again if data is missing
         rules, enabled = PI.get_rules(self.conn)
         model = self.intraday_model()
         if not enabled:
@@ -196,8 +255,9 @@ class Monitor:
         active = store.tradable(ctx.universe)
         f30 = intraday_bars.first30(self.prices, active, now.date())
         if len(f30) < 0.8 * len(active):
-            alert(self.conn, "paper-intraday", "info", None,
-                  f"{day} intraday skipped: first-30-minute data for only {len(f30)} stocks")
+            log.warning("Intraday: first-30-minute data for only %s of %s stocks - retrying in "
+                        "5 minutes", len(f30), len(active))
+            _set(self.conn, "id_last_picks", "")    # not done: allow a retry
             return
         feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
         prices = self.prices.get(sorted(feats["symbol"]))
@@ -207,8 +267,11 @@ class Monitor:
             if rules.skip_quantile > 0 else None
         r = PI.run_picks(self.conn, feats, model, prices, pd.Timestamp(now.date()), rules,
                          self.capital_intraday, negative, strengths)
+        late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
-        alert(self.conn, "paper-intraday", "decision", None, f"{day} 9:45 intraday: {msg}")
+        alert(self.conn, "paper-intraday", "decision", None,
+              f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
+        log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
 
     def square_off_job(self, now: datetime) -> None:
         day = f"{now:%Y-%m-%d}"
@@ -223,6 +286,7 @@ class Monitor:
         for line in PI.square_off(self.conn, prices, stamp):
             alert(self.conn, "paper-intraday", "fill", line.split()[1], f"{stamp} {line}")
         PI.evaluate_day(self.conn, day, prices)
+        self.print_scoreboard(now)
 
     def quarter_job(self, now: datetime) -> None:
         try:
@@ -246,6 +310,7 @@ class Monitor:
                     E.queue_orders(self.conn, [(sym, "negative news")], [], f"{now:%Y-%m-%d %H:%M}")
                     E.fill_pending(self.conn, {sym: p}, f"{now:%Y-%m-%d %H:%M}", rules)
         self.live_scores(now)
+        self.print_scoreboard(now)
 
     def live_scores(self, now: datetime) -> None:
         """Provisional scores: today's live prices appended as a temporary daily candle."""
@@ -254,6 +319,9 @@ class Monitor:
         live = self.prices.get(active)
         if not live:
             return
+        stamp_all = now.strftime("%Y-%m-%d %H:%M")
+        self.conn.executemany("INSERT OR REPLACE INTO live_prices VALUES (?, ?, ?, ?)",
+                              [(s_, p_, stamp_all, self.prices.source) for s_, p_ in live.items()])
         today = pd.Timestamp(now.date())
         start = sorted(ctx.daily["date"].unique())[-LIVE_HISTORY_DAYS]
         hist = ctx.daily[(ctx.daily["date"] >= start) & (ctx.daily["date"] < today)]
@@ -292,6 +360,11 @@ class Monitor:
             return False
         ctx = self.ctx(reload=True)
         latest = ctx.daily["date"].max()
+        if latest.date() < now.date() and now.time() >= LOCAL_FETCH_AFTER:
+            # GitHub's data job is late or didn't run: fetch today's prices ourselves.
+            if self.local_catchup(now):
+                ctx = self.ctx(reload=True)
+                latest = ctx.daily["date"].max()
         waited_long = now.time() >= time(21, 0)
         if latest.date() < now.date() and not waited_long:
             return False   # today's data not published yet; try again in 15 minutes
@@ -348,6 +421,29 @@ class Monitor:
                       f"{it['previous_ic']:.3f} -> {it['ic']:.3f}")
         except Exception:
             log.exception("evening tuning failed")
+
+    def local_catchup(self, now: datetime) -> bool:
+        """Download recent daily prices (and intraday summaries) directly from Yahoo."""
+        try:
+            from stockpredictor.data import daily as DD
+            from stockpredictor.data import intraday as I
+
+            ctx = self.ctx()
+            symbols = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
+            stocks, idx = DD.fetch_recent(symbols)
+            if stocks.empty:
+                return False
+            git_last = f"{ctx.daily['date'].max():%Y-%m-%d}"
+            new_stocks = stocks[stocks["date"] > git_last]
+            store.save_local_overlay("daily", new_stocks)
+            store.save_local_overlay("indices", idx[idx["date"] > git_last])
+            bars = I.yahoo_bars(symbols, period="5d")
+            I.upsert_backfill([r for s_, b in bars.items() for r in I.summarize(b, s_, "yahoo")])
+            log.info("Fetched %s new daily rows from Yahoo (GitHub data was late)", len(new_stocks))
+            return not new_stocks.empty
+        except Exception:
+            log.exception("local data catch-up failed")
+            return False
 
     def angel_topup(self, now: datetime) -> None:
         settings = getattr(self.prices, "settings", None)

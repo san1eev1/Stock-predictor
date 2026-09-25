@@ -22,6 +22,7 @@ from stockpredictor.backtest import intraday as BI
 from stockpredictor.models import intraday as MI
 from stockpredictor.paper import engine as E
 from stockpredictor.paper import intraday as PI
+from stockpredictor.paper import scoreboard as SB
 from stockpredictor.portfolio import real as R
 
 st.set_page_config(page_title="Stock Predictor", page_icon="📈", layout="wide")
@@ -108,6 +109,8 @@ def sidebar():
         else:
             st.caption("Live monitor: ⚪ not started (`python -m stockpredictor run`)")
         st.divider()
+        accuracy_now_sidebar()
+        st.divider()
         st.subheader("🔔 Alerts")
         alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 8").fetchall()
         if not alerts:
@@ -116,6 +119,27 @@ def sidebar():
                  "info": "ℹ️"}
         for a in alerts:
             st.caption(f"{icons.get(a['kind'], '•')} {a['message']}")
+
+
+@st.fragment(run_every=REFRESH)
+def accuracy_now_sidebar():
+    sb = SB.compute(conn(), now_ist().replace(tzinfo=None))
+    st.subheader("📊 Accuracy now")
+    it, ij, lo, lj = (sb["intraday_today"], sb["intraday_judged"], sb["longterm_open"],
+                      sb["longterm_judged"])
+    if it["buy_n"] + it["sell_n"]:
+        st.metric("Intraday today", f"{it['right']:.0%}",
+                  f"{(it['right'] - (it['random'] or 0)) * 100:+.0f} pts vs random"
+                  if it["random"] is not None else None)
+        st.caption(f"Buys {it['buy_right']}/{it['buy_n']} up · sells {it['sell_right']}/{it['sell_n']} down")
+    else:
+        st.caption("Intraday today: picks at 9:46")
+    if ij["n"]:
+        st.caption(f"Intraday judged: **{ij['accuracy']:.0%}** of {ij['n']} (random {ij['random']:.0%})")
+    if lo["n"]:
+        st.caption(f"Long-term this week: **{lo['on_track']}/{lo['n']}** on track")
+    st.caption(f"Long-term judged: **{lj['accuracy']:.0%}** of {lj['n']} (random {lj['random']:.0%})"
+               if lj["n"] else "Long-term judged: first results after 1 week")
 
 
 # --- Pages -------------------------------------------------------------------------
@@ -542,12 +566,37 @@ def portfolio_live(h: str):
 
 def page_accuracy():
     st.title("Accuracy")
+    accuracy_now_panel()
     tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
     with tab_lt:
         accuracy_tab("longterm")
         strategy_race()
     with tab_id:
         accuracy_tab("intraday")
+
+
+@st.fragment(run_every=REFRESH)
+def accuracy_now_panel():
+    sb = SB.compute(conn(), now_ist().replace(tzinfo=None))
+    it, ij, lo, lj = (sb["intraday_today"], sb["intraday_judged"], sb["longterm_open"],
+                      sb["longterm_judged"])
+    st.subheader(f"📊 Right now · {sb['time'][11:]}")
+    k = st.columns(4)
+    if it["buy_n"] + it["sell_n"]:
+        k[0].metric("Intraday today", f"{it['right']:.0%}",
+                    f"{(it['right'] - (it['random'] or 0)) * 100:+.0f} pts vs random"
+                    if it["random"] is not None else None,
+                    help=f"Buys {it['buy_right']}/{it['buy_n']} up, sells {it['sell_right']}/"
+                         f"{it['sell_n']} down since 9:45 (live prices)")
+    else:
+        k[0].metric("Intraday today", "—", help="Picks are made at 9:46 on trading days")
+    k[1].metric("Intraday, all judged days", f"{ij['accuracy']:.0%}" if ij["n"] else "—",
+                f"{(ij['accuracy'] - ij['random']) * 100:+.0f} pts vs random" if ij["n"] else None)
+    k[2].metric("Long-term on track this week", f"{lo['on_track']}/{lo['n']}" if lo["n"] else "—")
+    k[3].metric("Long-term, all judged", f"{lj['accuracy']:.0%}" if lj["n"] else "—",
+                f"{(lj['accuracy'] - lj['random']) * 100:+.0f} pts vs random" if lj["n"] else None)
+    st.caption("Refreshes every minute while the market is open. 'vs random' compares with picking "
+               "stocks at random on the same days.")
 
 
 ACCURACY_TEXT = {

@@ -60,6 +60,7 @@ def test_intraday_day_cycle(tmp_path, monkeypatch):
                       sync=lambda d: None, capital_intraday=100_000)
     mon._ctx, mon._imodel = ctx, model
     mon._model = None
+    mon._started = True
     monkeypatch.setattr(MON.Monitor, "quarter_job", lambda self, now: None)
 
     assert "intraday-picks" in mon.tick()
@@ -74,3 +75,25 @@ def test_intraday_day_cycle(tmp_path, monkeypatch):
     assert acc["matured"] == 20 and acc["closed_trades"] == 20   # 10+10 candidates, all traded
     assert conn.execute("SELECT COUNT(*) FROM alerts WHERE source = 'paper-intraday' "
                         "AND kind = 'decision'").fetchone()[0] == 1
+
+
+def test_intraday_picks_retry_when_live_data_missing(tmp_path, monkeypatch):
+    daily, indices, universe = synthetic(n_days=400, symbols=[f"S{i:02d}" for i in range(20)])
+    universe = universe.assign(active=1, name=universe["symbol"])
+    lt = F.build_features(daily, indices, universe)
+    ctx = E.MarketContext(daily, indices, universe, lt, pd.DataFrame(columns=N.NEWS_COLS))
+    db.init_db(tmp_path / "t.db")
+    conn = db.connect(tmp_path / "t.db")
+    clock = {"now": datetime(2026, 9, 25, 11, 0, tzinfo=IST)}
+    mon = MON.Monitor(conn, tmp_path, FakePrices(), 100_000, clock=lambda: clock["now"],
+                      sync=lambda d: None)
+    mon._ctx, mon._started = ctx, True
+    mon._imodel = object()                       # any model: data check happens first
+    calls = []
+    monkeypatch.setattr(MON.intraday_bars, "first30", lambda c, s, d: calls.append(1) or {})
+    mon.intraday_picks_job(clock["now"])
+    assert MON._setting(conn, "id_last_picks") == ""          # not marked done
+    mon.intraday_picks_job(clock["now"])                      # within 5 min: no retry
+    clock["now"] = datetime(2026, 9, 25, 11, 6, tzinfo=IST)
+    mon.intraday_picks_job(clock["now"])
+    assert len(calls) == 2

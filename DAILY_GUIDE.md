@@ -57,6 +57,29 @@ There are **three ways** to run it each day. Pick one.
 
 ---
 
+## What you see when you start it (any time of day)
+
+Within about a minute the terminal shows something like:
+
+```
+Starting up: getting data, training and catching up...
+Long-term model retrained on data up to 2026-09-17
+Decision for 2026-09-24: buy DIVISLAB, TITAN, ... ; sell none
+Intraday picks made (late start): LONG LTM 2 @ 4076.20; ...        <- only if the market is open
+===== Accuracy now (2026-09-25 11:08) =====
+Intraday today : buys 6/10 up, sells 7/10 down -> 65% right (random picks: 52%)
+Intraday judged: 58% right on 120 picks over 6 days (random: 50%)
+Long-term open : 12/20 picks on track (judged after 1 week)
+Long-term judged: 55% right on 40 picks over 2 days (random: 50%)
+```
+
+So whenever you run it, it **trains if it hasn't today, catches up on missed days, makes any
+missing picks** (intraday picks even on a late start, until 2:30 PM, at the prices of that moment),
+and prints the **accuracy right now**. The scoreboard is printed again every 15 minutes and is
+always visible in the dashboard sidebar (📊 Accuracy now) and at the top of the Accuracy page.
+
+If GitHub's evening data update is late, the program downloads the day's prices itself after 5:45 PM.
+
 ## What happens during a trading day (A and B)
 
 | Time (IST) | What the program does | Where to see it |

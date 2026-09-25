@@ -96,14 +96,37 @@ def import_store(conn: sqlite3.Connection, store_dir: Path) -> None:
 
 # --- Reading for training (pandas, no database needed) -----------------------
 
+def local_overlay_path(folder: str) -> Path:
+    """Prices the Mac fetched itself when the git data was late (merged on load)."""
+    from stockpredictor.config import DATA_DIR
+
+    return DATA_DIR / "local_prices" / f"{folder}.csv"
+
+
 def _load_prices(store_dir: Path, folder: str) -> pd.DataFrame:
     files = sorted((store_dir / folder).glob("*.csv"))
     if not files:
         raise FileNotFoundError(
             f"No data in {store_dir / folder}. Run `python -m stockpredictor sync-data` first.")
     df = pd.concat((pd.read_csv(f) for f in files), ignore_index=True)
+    overlay = local_overlay_path(folder)
+    if overlay.exists():                      # git data wins where both have a day
+        df = pd.concat([df, pd.read_csv(overlay)], ignore_index=True) \
+            .drop_duplicates(["symbol", "date"], keep="first")
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values(["symbol", "date"]).reset_index(drop=True)
+
+
+def save_local_overlay(folder: str, rows: pd.DataFrame, keep_after: str | None = None) -> int:
+    path = local_overlay_path(folder)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=PRICE_COLS)
+    df = pd.concat([rows[PRICE_COLS], old], ignore_index=True).drop_duplicates(
+        ["symbol", "date"], keep="first")
+    if keep_after:                            # drop days the git data now covers
+        df = df[df["date"] > keep_after]
+    df.sort_values(["symbol", "date"]).to_csv(path, index=False, float_format="%.4f")
+    return len(rows)
 
 
 def load_daily(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:

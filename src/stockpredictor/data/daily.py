@@ -203,3 +203,24 @@ def update_all(conn: sqlite3.Connection, symbols: list[str], start: date = DEFAU
         print(f"[{i}/{len(jobs)}] {name}: {results[name]}", flush=True)
         time.sleep(pause)
     return results
+
+
+def fetch_recent(symbols: list[str], period: str = "7d") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Last few days of daily candles for stocks and indices in one batch (Yahoo).
+    Used by the Mac when the GitHub data update is late."""
+    import yfinance as yf
+
+    tickers = {yahoo_ticker(s): s for s in symbols}
+    tickers.update({t: n for n, t in INDICES.items()})
+    df = yf.download(list(tickers), period=period, interval="1d", auto_adjust=False,
+                     actions=True, group_by="ticker", progress=False, threads=True)
+    stocks, idx = [], []
+    for t, name in tickers.items():
+        try:
+            part = df[t].dropna(subset=["Close"])
+        except KeyError:
+            continue
+        rows = history_to_rows(name, part, source="yahoo-local")
+        (idx if name in INDICES else stocks).extend(rows)
+    cols = ["symbol", "date", "open", "high", "low", "close", "adj_close", "volume", "source"]
+    return pd.DataFrame(stocks, columns=cols), pd.DataFrame(idx, columns=cols)

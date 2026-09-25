@@ -79,12 +79,15 @@ class LivePrices:
         self.source = "yahoo"
         return prices
 
-    def market_is_live(self) -> bool:
-        """Market hours AND Nifty traded today (so NSE holidays are skipped)."""
+    def market_is_live(self) -> bool | None:
+        """True if NSE traded today, False on a holiday, None if we can't tell yet
+        (e.g. a failed request) - callers treat None as open and ask again later."""
         if not in_market_hours():
             return False
         try:
             _, newest = yahoo_prices(["RELIANCE"])
-            return newest is not None and newest.astimezone(IST).date() == now_ist().date()
         except Exception:
-            return True  # can't tell; assume open during market hours
+            return None
+        if newest is None:
+            return None
+        return newest.astimezone(IST).date() == now_ist().date()

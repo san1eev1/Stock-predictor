@@ -31,6 +31,7 @@ def make(tmp_path, ctx, model, prices, when):
     mon = MON.Monitor(conn, tmp_path, FakePrices(prices), 100_000,
                       clock=lambda: clock["now"], sync=lambda d: None)
     mon._ctx, mon._model = ctx, model
+    mon._started = True          # startup routine has its own test
     return mon, conn, clock
 
 
@@ -98,3 +99,31 @@ def test_live_scores_saved(tmp_path, ctx_model):
     mon.live_scores(mon.clock())
     rows = conn.execute("SELECT COUNT(*), MIN(rank), MAX(rank) FROM live_scores").fetchone()
     assert tuple(rows) == (len(prices), 1, len(prices))
+
+
+def test_startup_trains_decides_and_prints_scoreboard(tmp_path, ctx_model, monkeypatch, caplog):
+    import logging
+    ctx, model = ctx_model
+    last = ctx.daily["date"].max()
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(MON.T, "retrain_longterm", lambda ctx, conn: None)
+    monkeypatch.setattr(MON.T, "retrain_intraday", lambda ctx, d, conn: None)
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(last.year, last.month, last.day, 20, 0))
+    mon._started = False
+    with caplog.at_level(logging.INFO):
+        assert "startup" in mon.tick()
+    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE horizon='longterm'").fetchone()[0] == 20
+    assert any("Accuracy now" in r.message for r in caplog.records)
+    assert "startup" not in mon.tick()          # only once per run
+
+
+def test_unknown_market_state_counts_as_open_and_rechecks(tmp_path, ctx_model):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 25, 10, 0))
+    answers = iter([None, False])
+    mon.prices.market_is_live = lambda: next(answers)
+    assert mon.trading_today(clock["now"]) is True             # unknown -> assume open
+    clock["now"] = ist(2026, 9, 25, 10, 10)
+    assert mon.trading_today(clock["now"]) is True             # not re-asked within 30 min
+    clock["now"] = ist(2026, 9, 25, 10, 45)
+    assert mon.trading_today(clock["now"]) is False            # re-asked: holiday
