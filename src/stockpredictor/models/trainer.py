@@ -372,6 +372,7 @@ def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
 
 REPLAY_ROUNDS = 3
 REPLAY_DAYS = 120
+PI_CANDIDATES = 10       # buy and sell candidates judged per day (paper.intraday.N_CANDIDATES)
 
 
 def replay_file(target: MI.Target):
@@ -403,7 +404,15 @@ def replay_round(feats: pd.DataFrame, target: MI.Target, rules, capital: float,
               "days": r["trading_days"], "avg_day_pnl": r["avg_day_pnl"],
               "win_days": r["win_days"], "accuracy": r["direction_accuracy"],
               "random": r["random_baseline"], "ic": float(ic.mean())}
-    judged = sim["trades"][["symbol", "date", "correct"]].astype({"correct": int})
+    # P&L comes from the traded picks (rules.n_long / n_short); the model learns from all
+    # 10 buy + 10 sell candidates of each day, like the live paper trading.
+    from dataclasses import replace
+
+    n = PI_CANDIDATES
+    wide = sim if (rules.n_long, rules.n_short) == (n, n) else B.simulate(
+        scores, summ, replace(rules, n_long=n, n_short=n, skip_quantile=0.0), capital,
+        exit_col=target.exit_col, exit_minutes=minutes)
+    judged = wide["trades"][["symbol", "date", "correct"]].astype({"correct": int})
     return result, judged
 
 

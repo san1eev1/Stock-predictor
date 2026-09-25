@@ -251,9 +251,6 @@ def picks_tables(preds: pd.DataFrame, summary: pd.DataFrame, fund: pd.DataFrame)
 
     st.subheader("▲ 10 Buy candidates — expected to rise more than Nifty next week")
     table("up")
-    st.subheader("▼ 10 Sell candidates — expected to fall behind Nifty next week")
-    st.caption("Sell these if you hold them, or avoid buying them.")
-    table("down")
 
 
 def ensure_longterm_picks(c, m) -> str:
@@ -319,10 +316,12 @@ def live_block():
 
 def page_paper_longterm():
     st.title("Paper trading — Long-term")
-    st.caption("Buy-only virtual portfolio (₹1 lakh). It buys the stocks with the strongest "
-               "sustained buy signal and sells a holding when the model expects it to fall "
-               "(rank drops below the exit rank), on a stop-loss, or on severe bad news. "
-               "Decisions after the close, orders filled at the next market price.")
+    rules, _ = D.get_rules(conn())
+    st.caption(f"Buy-only virtual portfolio (₹1 lakh). It holds the top {rules.n_hold} stocks "
+               "with the strongest sustained buy signal (the Long-term picks page lists the top "
+               "10) and sells a holding when the model expects it to fall (rank drops below the "
+               "exit rank), on a stop-loss, or on severe bad news. Decisions after the close, "
+               "orders filled at the next market price.")
     if need_data():
         return
     accuracy_now_panel("longterm")
@@ -448,7 +447,8 @@ def paper_longterm():
                  "charges ate all the profit. The paper portfolio therefore buys the stocks whose "
                  "weekly prediction has been strong **over the last 20 days** (blended with "
                  "12-month momentum) and holds them until they fall out of the top half. In the "
-                 "2015-2026 backtest this earned ~20% a year after costs vs ~9% for Nifty 50.")
+                 "2015-2026 backtest (10 holdings) this earned ~20% a year after costs vs ~9% "
+                 "for Nifty 50.")
     paper_book(c, E.HORIZON, "Holdings", prices)
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = ? ORDER BY date",
                      c, params=(E.HORIZON,))
@@ -658,8 +658,8 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
     st.caption(f"{exit_col} = price at this model's square-off (judged here) · Live = now · "
                "Close 15:30 = market close (appears after 15:30).")
     traded = {(r[0], r[1]) for r in c.execute(
-        "SELECT symbol, side FROM paper_trades WHERE horizon = 'intraday' AND entry_time LIKE ?",
-        (f"{day}%",))}
+        "SELECT symbol, side FROM paper_trades WHERE horizon = ? AND entry_time LIKE ?",
+        (target.horizon, f"{day}%"))}
     for direction, title in (("up", f"▲ 10 Buy candidates (expected to rise 9:45 → {until})"),
                              ("down", f"▼ 10 Sell candidates (expected to fall 9:45 → {until})")):
         p = preds[preds["direction"] == direction].sort_values("rank").copy()
@@ -716,8 +716,10 @@ def paper_intraday(horizon: str = PI.HORIZON):
         return
     trades["Day"] = trades["entry_time"].str[:10]
     trades["sign"] = trades["side"].map({"long": 1, "short": -1})
-    for side, title in (("long", "▲ Buy trades — 10 buy candidates"),
-                        ("short", "▼ Sell trades — 10 sell candidates (short)")):
+    rules, _ = PI.get_rules(c)
+    for side, title in (("long", f"▲ Buy trades — the top {rules.n_long} of the 10 buy candidates"),
+                        ("short", f"▼ Sell trades (short) — the top {rules.n_short} of the 10 "
+                                  "sell candidates")):
         t = trades[trades["side"] == side].copy()
         st.subheader(title)
         if t.empty:

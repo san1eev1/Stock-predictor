@@ -3,10 +3,11 @@
 Personal AI stock predictor for the **Nifty LargeMidcap 250** (Nifty 100 + Midcap 150), with two
 tracks:
 
-- **Long-term:** 1-week predictions — 10 buy and 10 sell candidates after every close, judged
-  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio.
-- **Intraday — two competing models:** at 9:45 each picks 10 buys and 10 sells from the first
-  30 minutes. One trades **until 12:30**, the other **until the close (15:15 square-off)**, each
+- **Long-term:** 1-week predictions — the top 10 buy candidates after every close, judged
+  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio holding the top 3.
+- **Intraday — two competing models:** at 9:45 each lists the top 10 buys and top 10 sells
+  (separate tables) from the first 30 minutes and paper-trades the top 3 buys + 3 sells (fewer
+  trades, lower costs; all 10 + 10 are still judged and learned from). One trades **until 12:30**, the other **until the close (15:15 square-off)**, each
   on its own ₹1 lakh a day. After the close they are compared, both learn from the full session,
   and each can learn from the other.
 
@@ -122,10 +123,10 @@ starts in 2026).
 
 ## Dashboard pages
 
-- **Long-term picks** — long-term accuracy (UP / DOWN tables, live today row); 10 buy and 10 sell
-  candidates with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
+- **Long-term picks** — long-term accuracy (UP / DOWN tables, live today row); top 10 buy candidates
+  (no sell candidates) with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
 - **Intraday — until 12:30** / **Intraday — until close** — each model's accuracy (UP / DOWN);
-  10 buy / 10 sell at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;
+  top 10 buy / top 10 sell (🧪 = the 3 + 3 traded) at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;
   the close page also compares 12:30 vs close exits
 - **Paper trading — Long-term** — accuracy; **Buying** (holdings + queued buys) and **Selling**
   (queued sells + sold) tables with P&L after costs

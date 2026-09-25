@@ -50,7 +50,7 @@ There are **three ways** to run it each day. Pick one.
 1. Any time **after 5:15 PM** on a trading day: `Cmd+Shift+P` → **Tasks: Run Task** →
    **3. Quick daily run**.
 2. It downloads the day's data, retrains on it and on judged paper trades, makes the long-term
-   decision, updates paper trading, and prints the **10 buy + 10 sell** candidates.
+   decision, updates paper trading, and prints the **top 10 buy** candidates.
 3. If you run it between 9:46 and 10:15 AM it also makes the intraday picks.
 4. Limits: no minute-by-minute stop-losses or intraday square-off while the Mac is off, and
    missed days are caught up next time (up to 30 days).
@@ -86,22 +86,21 @@ If GitHub's evening data update is late, the program downloads the day's prices 
 |---|---|---|
 | 9:15 | Starts watching live prices (Angel One real-time) | sidebar: *Live monitor 🟢* |
 | 9:20 | Fills last night's long-term paper orders at market prices | Paper trading → Long-term |
-| **9:46** | **Intraday: 10 buy + 10 sell candidates**, paper trades on a fresh ₹1 lakh | **Intraday picks** |
+| **9:46** | **Intraday: top 10 buy + top 10 sell candidates**, top 3 + 3 paper-traded on a fresh ₹1 lakh | **Intraday picks** |
 | every minute | Stop-loss / target checks (paper) · stop-loss alerts (your portfolio) | 🔔 Alerts |
 | every 15 min | New news, live re-ranking of long-term picks | Long-term picks → *Live ranking* |
 | **12:30** | **Intraday square-off** and scoring (trading stops; learning doesn't) | Paper trading → Intraday → *Day by day* |
 | all day | Background training of the intraday model; newest GitHub-trained models downloaded every 15 min | Model → *Continuous training* |
 | **15:32** | Today's full session added to history, intraday model retrains | Model |
-| **17:15+** | Data update → **retrain** → **next week's 10 buy + 10 sell** → paper orders → light self-tuning | **Long-term picks** |
+| **17:15+** | Data update → **retrain** → **next week's top 10 buys** → paper orders → light self-tuning | **Long-term picks** |
 | every hour | GitHub retrains + self-tunes the long-term and news models on all history since 2005 | Model (☁️ status) |
 
 ## What to look at in the dashboard
 
-1. **Long-term picks** — 10 buy candidates (expected to beat Nifty **next week**) and 10 sell
-   candidates (expected to fall behind next week), plus **Sell now** for holdings the model
-   expects to fall.
-2. **Intraday picks** — 10 buy + 10 sell for today, entry / stop-loss / target and live result.
-3. **Paper trading — Long-term** (buy-only) and **Paper trading — Intraday** (10 buy + 10 sell
+1. **Long-term picks** — top 10 buy candidates (expected to beat Nifty **next week**; no sell
+   candidates), plus **Sell now** for holdings the model expects to fall. Paper holds the top 3.
+2. **Intraday picks** — top 10 buy + top 10 sell for today (3 + 3 traded), entry / stop-loss / target and live result.
+3. **Paper trading — Long-term** (buy-only) and **Paper trading — Intraday** (3 buy + 3 sell
    trades a day, separate sections), each with P&L after costs.
 4. **My portfolio** — enter your real Groww trades (➕ Add a trade); live P&L and stop-loss alerts.
 5. **Accuracy** — how often picks were right (long-term judged after 1 week, intraday same day)
