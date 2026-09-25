@@ -49,10 +49,12 @@ def _store_version() -> float:
     return max((f.stat().st_mtime for f in files), default=0)
 
 
-@st.cache_resource(show_spinner="Loading market data…")
+# One copy only (max_entries=1): each data update replaces the old copy instead of adding
+# another (the old copies used to pile up to several GB). Recent years only, like the monitor.
+@st.cache_resource(show_spinner="Loading market data…", max_entries=1)
 def market(version: float) -> E.MarketContext | None:
     try:
-        return E.MarketContext.load(STORE)
+        return E.MarketContext.load(STORE, years=config.LIVE_CONTEXT_YEARS)
     except FileNotFoundError:
         return None
 
@@ -72,7 +74,7 @@ def current_prices(c) -> dict[str, float]:
     return {**base, **live_prices(c)}
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _prev_closes(version: float, day: str) -> dict[str, float]:
     m = market(version)
     if m is None:
