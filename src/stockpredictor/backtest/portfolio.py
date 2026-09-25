@@ -24,6 +24,9 @@ class Rules:
     news_exit: bool = True      # sell on strongly negative news
     max_per_sector: int = 0     # at most this many holdings from one sector (0 = no limit)
     vol_sizing: bool = False    # size positions by volatility (calmer stocks get more)
+    regime: str = "off"         # when Nifty 50 is below its 200-day average (a falling
+                                # market): "no_buys", "exit" (sell all, hold cash) or
+                                # "half" (half-size new positions); "off" = ignore
 
 
 @dataclass
@@ -93,7 +96,7 @@ class SimResult:
 def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
              capital: float = 100_000, rebalance: str = "daily",
              costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1,
-             sectors: dict | None = None) -> SimResult:
+             sectors: dict | None = None, risk_off: set | None = None) -> SimResult:
     """scores: symbol/date/score rows. close: date x symbol close prices.
 
     lag=1: scores computed after a day's close are traded on the next day's
@@ -119,6 +122,12 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         blocked = {s for s, until in cooldown.items() if d < until}
         sells, buys = decide(holdings, score_by_date[d], last_price, rules,
                              rebalance=d in rebalance_days, blocked=blocked, sectors=sectors)
+        off = rules.regime != "off" and risk_off is not None and d in risk_off
+        if off and rules.regime in ("no_buys", "exit"):
+            buys = []
+        if off and rules.regime == "exit":
+            sold = {s for s, _ in sells}
+            sells = sells + [(s, "risk-off") for s in holdings if s not in sold]
         for sym, reason in sells:
             pos, price = holdings.pop(sym), last_price[sym]
             value = pos.qty * price
@@ -136,6 +145,8 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         for sym in buys:
             price = last_price[sym]
             size = slot * vol_scale(vol, d, sym) if vol is not None else slot
+            if off and rules.regime == "half":
+                size *= 0.5
             qty = int(min(size, cash) / (price * 1.003))
             if qty <= 0:
                 continue
@@ -149,6 +160,14 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         equity[d] = cash + sum(p.qty * last_price[s] for s, p in holdings.items())
 
     return SimResult(pd.Series(equity, name="equity"), pd.DataFrame(trades), total_costs)
+
+
+def risk_off_days(indices: pd.DataFrame, index: str = "NIFTY50", window: int = 200) -> set:
+    """Days on which the PREVIOUS close of `index` was below its `window`-day average
+    (known before that day's trading: no look-ahead)."""
+    n = indices[indices["symbol"] == index].set_index("date")["close"].sort_index()
+    below = (n < n.rolling(window).mean()).shift(1).fillna(False).astype(bool)
+    return set(below[below].index)
 
 
 def vol_scale(vol: pd.DataFrame, d, sym: str) -> float:

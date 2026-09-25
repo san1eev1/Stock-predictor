@@ -41,3 +41,15 @@ def test_custom_stop_loss_and_delete(conn):
     assert R.stop_loss_pct(conn, "longterm", "SBIN") == 0.05
     R.delete_trade(conn, tid)
     assert R.trades(conn, "longterm").empty
+
+
+def test_regime_filter_uses_only_the_previous_close():
+    import pandas as pd
+
+    from stockpredictor.backtest import portfolio as P
+
+    days = pd.bdate_range("2025-01-01", periods=260)
+    close = [100.0] * 250 + [50.0] * 10                   # crash on day 250
+    idx = pd.DataFrame({"symbol": "NIFTY50", "date": days, "close": close})
+    off = P.risk_off_days(idx)
+    assert days[250] not in off and days[251] in off     # known only the day after

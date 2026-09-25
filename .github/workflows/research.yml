@@ -1,0 +1,38 @@
+# Research experiments (backtests) on GitHub instead of the Mac: run a script from scripts/
+# on the full market data and print its results in the log.
+name: Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Script in scripts/ to run"
+        default: "research_longterm.py"
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements-train.txt && pip install -e . --no-deps
+
+      - name: Get market data
+        run: |
+          git clone -q --depth 1 --branch market-data \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" market-data
+
+      - name: Run
+        env:
+          FEATURE_CACHE: "0"
+        run: python "scripts/${{ inputs.script }}" market-data
