@@ -122,6 +122,9 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
 
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {"early_stopping": True, "n_seeds": 3, **(params or current_params())}
+    if params.pop("label", "move") == "trade" and "target_trade" in train:
+        # learn what the 9:45 buy/sell trades earn (stop, target, square-off)
+        train = train.assign(target=train["target_trade"]).dropna(subset=["target"])
     weights = sample_weights(train, params)
     params.pop("tail_weight", None)
     params.pop("peer_weight", None)            # used when scoring (Blended), not by LightGBM

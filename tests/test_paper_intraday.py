@@ -85,3 +85,16 @@ def test_two_books_each_start_with_their_own_capital(setup):
     PI.evaluate_day(conn, f"{d:%Y-%m-%d}", prices, PI.CLOSE_HORIZON)
     days = PI.daily_results(conn, 100_000, PI.CLOSE_HORIZON)
     assert len(days) == 1 and days["trades"].iloc[0] == 4
+
+
+def test_daily_loss_limit_closes_the_book(setup):
+    conn, *_ = setup
+    E.ensure_account(conn, 100_000, PI.HORIZON)
+    PI.start_day(conn, 100_000, PI.HORIZON)
+    conn.execute("INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, "
+                 "costs, status, reason, stop_loss, target) VALUES ('intraday', 'X', 'long', 100, "
+                 "'2026-09-28 09:45', 1000, 0, 'open', '9:45 pick', 900, 1200)")
+    conn.execute("UPDATE paper_accounts SET cash = cash - 100000 WHERE horizon = 'intraday'")
+    assert PI.check_exits(conn, {"X": 990}, "2026-09-28 10:00") == []       # -1%: keep
+    out = PI.check_exits(conn, {"X": 984}, "2026-09-28 10:05")               # -1.6%: stop
+    assert len(out) == 1 and not PI.open_trades(conn, PI.HORIZON)

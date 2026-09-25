@@ -41,7 +41,8 @@ FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
 MIN_STOCKS_PER_DAY = 50      # intraday days with fewer known outcomes are not used
 # Intraday: also try focusing on the biggest risers and fallers (both ends = buy and sell picks).
 # Learning from each other: blend in the other intraday model's ranking (peer_weight).
-INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0], "peer_weight": [0.0, 0.25, 0.5]}
+INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0], "peer_weight": [0.0, 0.25, 0.5],
+                 "label": ["move", "trade"]}      # trade: learn the stop/target trade outcome
 # IC gain needed to switch settings. Re-running the same settings with another random
 # seed moves IC by about +/-0.004, so smaller "gains" are noise.
 MARGIN = 0.01
@@ -267,8 +268,9 @@ def intraday_feats(ctx, store_dir, target: MI.Target = MI.TRADE) -> pd.DataFrame
     from stockpredictor.data import intraday as I
     from stockpredictor.features import intraday as FI
 
+    sectors = dict(zip(ctx.universe["symbol"], ctx.universe["industry"]))
     feats = FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats,
-                     store.load_actions(store_dir), exit_col=target.exit_col)
+                     store.load_actions(store_dir), exit_col=target.exit_col, sectors=sectors)
     if feats.empty:
         return feats
     # A day only teaches ranking if enough stocks have its outcome (e.g. while the 12:30
@@ -343,6 +345,9 @@ RULE_SIDES = [(5, 5), (3, 3), (2, 2), (1, 1), (5, 0), (3, 0), (2, 0), (1, 0),
               (0, 5), (0, 3), (0, 2), (0, 1), (3, 1), (1, 3)]
 RULE_SKIPS = [0.0, 0.3, 0.5, 0.7]
 RULE_EXITS = [(1.0, 2.0), (0.5, 1.0), (0.75, 1.5), (1.0, 0.0), (1.5, 3.0), (0.75, 0.0)]
+RULE_PROBS = [0.0, 0.5, 0.55, 0.6]     # 'take this trade?' thresholds (models/take.py)
+MIN_TRADE_DAYS = 0.2      # a rule set must trade on at least 1 day in 5 (not trading at all
+                          # "earns" Rs 0 and would otherwise win against losing rules)
 
 
 def rules_for(target: MI.Target, base=None):
@@ -360,7 +365,8 @@ def rules_for(target: MI.Target, base=None):
     return B.IntradayRules(n_long=min(base.n_long, int(r["n_long"])),
                            n_short=min(base.n_short, int(r["n_short"])),
                            stop_loss=float(r["stop_loss"]), target=float(r["target"]),
-                           skip_quantile=float(r["skip_quantile"]))
+                           skip_quantile=float(r["skip_quantile"]),
+                           min_prob=float(r.get("min_prob", 0.0)))
 
 
 def day_profit(days: pd.DataFrame) -> float:
@@ -380,45 +386,75 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     from stockpredictor.backtest import intraday as B
     from stockpredictor.data import intraday as I
 
+    from stockpredictor.models import take as K
+
     current = current or B.IntradayRules()
     scores = MI.walk_forward(feats, params=MI.current_params(target), last_days=days)
     if scores.empty or scores["date"].nunique() < 60:
         return None
+    # 'Take this trade?' model: out-of-sample probabilities for every candidate (cross-fit
+    # on the two halves) so thresholds can be judged fairly; the live one uses all days.
+    try:                     # optional: without it the other rules are still tuned
+        cand = K.candidates(scores, feats)
+        y = K.outcomes(cand, B.IntradayRules(), target.exit_col,
+                       K.exit_minutes(target.exit_col), capital)
+        take_ok = bool(y.notna().sum() >= 400)
+        if take_ok:
+            scores = K.with_probs(scores, cand, K.cross_fit(cand, y))
+    except (KeyError, ValueError, TypeError):
+        take_ok = False
     dates = sorted(scores["date"].unique())
     recent = set(dates[len(dates) // 2:])
     minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
-    summ = feats[["symbol", "date", "c30", target.exit_col, *I.LEVEL_COLS]]
+    summ = B.summary_columns(feats, target.exit_col)
     results: dict = {}
 
-    def run(r) -> tuple[float, float]:           # (recent, earlier) profit per day
+    def run(r) -> tuple[float, float, float]:    # (recent, earlier) profit per day, trade days
         if r not in results:
-            d = B.simulate(scores, summ, r, capital, exit_col=target.exit_col,
-                           exit_minutes=minutes)["days"]
+            sim = B.simulate(scores, summ, r, capital, exit_col=target.exit_col,
+                             exit_minutes=minutes)
+            d, t = sim["days"], sim["trades"]
             late = d["date"].isin(recent)
-            results[r] = (day_profit(d[late]), day_profit(d[~late]))
+            traded = t["date"].nunique() / max(1, len(d)) if not t.empty else 0.0
+            results[r] = (day_profit(d[late]), day_profit(d[~late]), traded)
         return results[r]
 
     def best_of(options):
-        return max(options, key=lambda r: run(r)[0])
+        ok = [r for r in options if run(r)[2] >= MIN_TRADE_DAYS] or options[:1]
+        return max(ok, key=lambda r: run(r)[0])
 
     cap = lambda n: min(n, max_n)                              # noqa: E731
     now = replace(current, n_long=cap(current.n_long), n_short=cap(current.n_short))
-    # Buys/sells per day together with skipping weak days (they interact), then stop/target.
+    # Buys/sells per day together with skipping weak days (they interact), then stop/target,
+    # then the 'take this trade?' threshold.
     best = best_of([now, *(replace(now, n_long=cap(a), n_short=cap(b), skip_quantile=q)
                            for a, b in RULE_SIDES for q in RULE_SKIPS)])
     best = best_of([best, *(replace(best, stop_loss=sl, target=tp) for sl, tp in RULE_EXITS)])
-    (new_late, new_early), (cur_late, cur_early) = run(best), run(now)
-    adopted = best != now and new_late > cur_late and new_early >= cur_early
+    if take_ok:
+        best = best_of([best, *(replace(best, min_prob=p) for p in RULE_PROBS)])
+    (new_late, new_early, new_days), (cur_late, cur_early, _) = run(best), run(now)
+    adopted = (best != now and new_late > cur_late and new_early >= cur_early
+               and new_days >= MIN_TRADE_DAYS)
     chosen = best if adopted else now
+    top = sorted((r for r in results if results[r][2] >= MIN_TRADE_DAYS),
+                 key=lambda r: -results[r][0])[:5]
     report = {"target": target.horizon, "adopted": adopted,
               "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
                         "stop_loss": chosen.stop_loss, "target": chosen.target,
-                        "skip_quantile": chosen.skip_quantile},
+                        "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob},
               "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
               "current_day_profit_recent": cur_late, "tested": len(results),
+              "trade_days": run(chosen)[2],
+              "profitable": bool(run(chosen)[0] > 0 and run(chosen)[1] > 0),
+              "top": [{"n_long": r.n_long, "n_short": r.n_short, "stop": r.stop_loss,
+                       "target": r.target, "skip": r.skip_quantile, "min_prob": r.min_prob,
+                       "recent": round(results[r][0]), "before": round(results[r][1]),
+                       "trade_days": round(results[r][2], 2)} for r in top],
               "period": f"{pd.Timestamp(dates[0]):%Y-%m-%d} to {pd.Timestamp(dates[-1]):%Y-%m-%d}",
               "updated": datetime.now().isoformat(timespec="seconds")}
     target.model_dir.mkdir(parents=True, exist_ok=True)
+    if take_ok:                    # the live filter learns from all the days
+        K.save(*K.fit(cand, y), target.model_dir)
     (target.model_dir / RULES_FILE).write_text(json.dumps(report, indent=1))
     return report
 
@@ -452,7 +488,7 @@ def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
         ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
                                      include_groups=False).dropna()
         minutes = I.EXIT_MINUTES if t == MI.TRADE else I.WINDOW_MINUTES
-        sim = B.simulate(scores, f[["symbol", "date", "c30", t.exit_col, *I.LEVEL_COLS]], rules,
+        sim = B.simulate(scores, B.summary_columns(f, t.exit_col), rules,
                          capital, exit_col=t.exit_col, exit_minutes=minutes)
         r = B.metrics(sim, capital)
         out[t.horizon] = {
@@ -494,7 +530,7 @@ def replay_round(feats: pd.DataFrame, target: MI.Target, rules, capital: float,
     ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
                                  include_groups=False).dropna()
     minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
-    summ = feats[["symbol", "date", "c30", target.exit_col, *I.LEVEL_COLS]]
+    summ = B.summary_columns(feats, target.exit_col)
     sim = B.simulate(scores, summ, rules, capital, exit_col=target.exit_col, exit_minutes=minutes)
     r = B.metrics(sim, capital)
     if not r.get("trading_days"):

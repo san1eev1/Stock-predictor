@@ -55,7 +55,8 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
             n_long=min(rules.n_long, int(learned["n_long"])),
             n_short=min(rules.n_short, int(learned["n_short"])),
             stop_loss=float(learned["stop_loss"]), target=float(learned["target"]),
-            skip_quantile=float(learned["skip_quantile"]))
+            skip_quantile=float(learned["skip_quantile"]),
+            min_prob=float(learned.get("min_prob", 0.0)))
     return rules, s.get("id_enabled", "1") == "1"
 
 
@@ -66,8 +67,9 @@ def todays_features(ctx: E.MarketContext, first30: dict[str, dict], today: pd.Ti
     hist = hist[hist["date"] >= today - pd.Timedelta(days=HISTORY_DAYS * 1.6)]
     rows = [{"symbol": s, "date": today, **v, "source": "live"} for s, v in first30.items()]
     summ = pd.concat([hist[hist["date"] < today], pd.DataFrame(rows)], ignore_index=True)
+    sectors = dict(zip(ctx.universe["symbol"], ctx.universe["industry"]))
     feats = FI.build(summ, ctx.daily[ctx.daily["date"] < today], ctx.feats,
-                     ctx_actions(store_dir))
+                     ctx_actions(store_dir), sectors=sectors)
     return feats[feats["date"] == today]
 
 
@@ -83,7 +85,8 @@ def recent_strengths(model: MI.IntradayModel, store_dir: Path, ctx: E.MarketCont
     hist = hist[hist["date"] >= hist["date"].max() - pd.Timedelta(days=days * 1.6)]
     if hist.empty:
         return pd.Series(dtype=float)
-    f = FI.build(hist, ctx.daily, ctx.feats, ctx_actions(store_dir))
+    f = FI.build(hist, ctx.daily, ctx.feats, ctx_actions(store_dir),
+                 sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])))
     f = f.assign(score=model.score(f))
     return f.groupby("date")["score"].apply(lambda s: B.signal_strength(s, rules)).tail(days)
 
@@ -122,6 +125,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     reasons = [why if side == "long" else
                [x for x in why if x.startswith("-")] + [x for x in why if x.startswith("+")]
                for why, side in zip(model.explain(picks), picks["side"])]
+    take = take_probs(day, feats_today, horizon) if rules.min_prob > 0 else {}
     slot = capital / max(1, rules.n_long + rules.n_short)
     sl, tp = B.snap(rules.stop_loss), B.snap(rules.target)
     opened = []
@@ -137,7 +141,10 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
             (horizon, stamp, p["symbol"], "up" if sign > 0 else "down", float(p["confidence"]),
              rank, entry, stop, target, json.dumps(why), model.train_to))
         limit = 0 if skipped else rules.n_long if sign > 0 else rules.n_short
-        qty = int(slot / entry) if rank <= limit else 0
+        # 'take this trade?' filter: skip picks unlikely to make money after costs
+        prob = take.get((p["symbol"], p["side"]))
+        taken = rules.min_prob <= 0 or (prob is not None and prob >= rules.min_prob)
+        qty = int(slot / entry) if rank <= limit and taken else 0
         if qty <= 0:
             continue
         c = costs.cost("buy" if sign > 0 else "sell", qty * entry)
@@ -150,6 +157,19 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         opened.append(f"{p['side'].upper():5} {p['symbol']} {qty} @ {entry:.2f}")
     conn.commit()
     return {"skipped": skipped, "strength": strength, "picks": opened}
+
+
+def take_probs(day: pd.DataFrame, feats_today: pd.DataFrame, horizon: str) -> dict:
+    """{(symbol, side): chance the trade makes money after costs} from the book's
+    'take this trade?' model (trained on GitHub); {} if there is none."""
+    from stockpredictor.models import take as K
+
+    t = next((t for t in MI.TARGETS if t.horizon == horizon), None)
+    loaded = K.load(t.model_dir) if t is not None else None
+    if loaded is None:
+        return {}
+    c = K.candidates(day[["symbol", "date", "score"]], feats_today)
+    return dict(zip(zip(c["symbol"], c["side"]), K.predict(*loaded, c)))
 
 
 def exit_comparison(conn: sqlite3.Connection, closes: pd.DataFrame) -> pd.DataFrame:
@@ -241,6 +261,9 @@ def close_trade(conn, t, price: float, reason: str, stamp: str,
     return f"{t['side']} {t['symbol']} closed @ {price:.2f} ({reason}), P&L {gross - t['costs'] - c:+.0f}"
 
 
+DAILY_LOSS_LIMIT = 0.015   # a book that is down 1.5% of its capital today stops for the day
+
+
 def check_exits(conn, prices: dict[str, float], stamp: str,
                 books: tuple[str, ...] = BOOKS) -> list[str]:
     log = []
@@ -253,6 +276,13 @@ def check_exits(conn, prices: dict[str, float], stamp: str,
             log.append(close_trade(conn, t, p, "stop-loss", stamp))
         elif t["target"] and ((long_ and p >= t["target"]) or (not long_ and p <= t["target"])):
             log.append(close_trade(conn, t, p, "target", stamp))
+    # Daily loss limit: close everything left in a book once its day's loss reaches the limit.
+    for h in books:
+        v = value(conn, prices, h)
+        if v["positions"] and v["capital"] and v["pnl"] <= -DAILY_LOSS_LIMIT * v["capital"]:
+            for t in open_trades(conn, h):
+                log.append(close_trade(conn, t, prices.get(t["symbol"], t["entry_price"]),
+                                       "daily loss limit", stamp))
     conn.commit()
     return log
 

@@ -19,6 +19,7 @@ RANKED = ["gap", "r30", "rel_r30", "vwap_dev", "vol30_adv", "pos30", "ret_5"]
 PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close",
               I.EXIT_COL]
 EXCLUDE = {"symbol", "date", "source", "target", "target_ret", "prev_date", "prev_close", "adv20",
+           "target_trade", "trade_long_ret", "trade_short_ret", "industry",
            "fb_weight",
            *PRICE_COLS,
            "v30", *I.LEVEL_COLS}
@@ -82,8 +83,12 @@ def _daily_context(daily: pd.DataFrame, lt_feats: pd.DataFrame) -> pd.DataFrame:
     return ctx.merge(lt_feats[["symbol", "date", *cols]], on=["symbol", "date"], how="left")
 
 
+TRADE_LABEL_RULES = (1.0, 2.0)      # stop-loss %, target % behind the trade-outcome label
+
+
 def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
-          actions: pd.DataFrame | None = None, exit_col: str = I.EXIT_COL) -> pd.DataFrame:
+          actions: pd.DataFrame | None = None, exit_col: str = I.EXIT_COL,
+          sectors: dict | None = None) -> pd.DataFrame:
     """Features for every summary row that has a previous trading day in `daily`.
     The target is the 9:45 -> `exit_col` move (12:30 exit by default, or "close")."""
     if summ.empty:
@@ -123,8 +128,36 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     for col in RANKED:
         s[f"{col}_rank"] = s.groupby("date")[col].rank(pct=True)
 
+    if sectors:                           # the stock vs its own sector in the first 30 min
+        s["industry"] = s["symbol"].map(sectors).fillna("other")
+        by_sec = s.groupby(["date", "industry"])
+        s["sec_r30"] = by_sec["r30"].transform("median")
+        s["sec_gap"] = by_sec["gap"].transform("median")
+        s["sec_breadth30"] = by_sec["r30"].transform(lambda x: (x > 0).mean())
+        s["rel_sec_r30"] = s["r30"] - s["sec_r30"]
+        s["rel_sec_gap"] = s["gap"] - s["sec_gap"]
+        s["sec_vs_mkt_r30"] = s["sec_r30"] - s["mkt_r30"]
+    from stockpredictor.features.calendar import add_calendar
+
+    s = add_calendar(s, daily["date"].unique(), actions)
+
     s["target_ret"] = s[exit_col] / s["c30"] - 1            # 12:30 square-off, or the close
     s["target"] = s.groupby("date")["target_ret"].rank(pct=True)
+    # Trade-outcome label: what a buy and a sell at 9:45 actually return with a stop-loss
+    # and target (whichever is hit first, else the square-off). Used when params.label ==
+    # "trade": the model then learns what the trades earn, not only the raw move.
+    from stockpredictor.backtest.intraday import trade_exits
+
+    minutes = I.EXIT_MINUTES if exit_col == I.EXIT_COL else I.WINDOW_MINUTES
+    has = s[exit_col].notna()
+    sl, tp = TRADE_LABEL_RULES
+    s["trade_long_ret"] = np.nan
+    s["trade_short_ret"] = np.nan
+    if has.any():
+        h = s[has]
+        s.loc[has, "trade_long_ret"] = trade_exits(h, "long", sl, tp, exit_col, minutes) / h["c30"] - 1
+        s.loc[has, "trade_short_ret"] = 1 - trade_exits(h, "short", sl, tp, exit_col, minutes) / h["c30"]
+    s["target_trade"] = (s["trade_long_ret"] - s["trade_short_ret"]).groupby(s["date"]).rank(pct=True)
     return s.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 

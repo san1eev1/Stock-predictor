@@ -90,7 +90,8 @@ def test_rules_tuned_by_profit(tmp_path, monkeypatch):
     def fake_sim(sc, summ, r, capital, exit_col, exit_minutes):
         # 2 buys, no sells, skipping weak days earns most; everything else loses costs
         pnl = 100.0 if (r.n_long, r.n_short, r.skip_quantile) == (2, 0, 0.5) else -300.0
-        return {"days": pd.DataFrame({"date": days, "pnl": pnl})}
+        t = pd.DataFrame({"date": days}) if pnl > 0 else pd.DataFrame({"date": days[:5]})
+        return {"days": pd.DataFrame({"date": days, "pnl": pnl}), "trades": t}
 
     monkeypatch.setattr(B, "simulate", fake_sim)
     rep = T.tune_rules(feats, target, B.IntradayRules(), max_n=5)

@@ -677,7 +677,8 @@ def _intraday_features(d: Path):
     from stockpredictor.paper.engine import MarketContext
 
     ctx = MarketContext.load(d)
-    return FI.build(intraday.load_summaries(d), ctx.daily, ctx.feats, store.load_actions(d))
+    return FI.build(intraday.load_summaries(d), ctx.daily, ctx.feats, store.load_actions(d),
+                    sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])))
 
 
 def cmd_train_intraday(settings, args) -> None:

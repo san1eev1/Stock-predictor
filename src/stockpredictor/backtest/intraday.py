@@ -29,6 +29,8 @@ class IntradayRules:
     target: float = 2.0         # % (one of LEVELS), 0 = no target
     skip_quantile: float = 0.0  # skip days whose signal strength is below this
                                 # quantile of the previous 60 days (0 = never skip)
+    min_prob: float = 0.0       # trade a pick only if the 'take this trade?' model gives it
+                                # at least this chance of profit after costs (0 = off)
 
 
 def snap(pct: float) -> float:
@@ -64,11 +66,54 @@ def replay(row, side: str, rules: IntradayRules, exit_col: str = I.EXIT_COL,
     return row[exit_col], ("12:30 square-off" if exit_col == I.EXIT_COL else "15:15 square-off")
 
 
+def trade_exits(df: pd.DataFrame, side: str, stop_loss: float, target: float,
+                exit_col: str = I.EXIT_COL, exit_minutes: int = I.EXIT_MINUTES) -> np.ndarray:
+    """Vectorised `replay` for many rows: the exit price of each trade (stop, target or
+    square-off, whichever comes first) from the first-hit minutes in the summaries."""
+    c30 = df["c30"].to_numpy(float)
+    sl, tp = snap(stop_loss), snap(target)
+    adverse, favourable = ("d", "u") if side == "long" else ("u", "d")
+    sign = 1 if side == "long" else -1
+    nan = np.full(len(df), np.nan)
+    t_sl = df[I.level_col(adverse, sl)].to_numpy(float) if sl else nan
+    t_tp = df[I.level_col(favourable, tp)].to_numpy(float) if tp else nan
+    t_sl = np.where(t_sl <= exit_minutes, t_sl, np.nan)
+    t_tp = np.where(t_tp <= exit_minutes, t_tp, np.nan)
+    stop_first = ~np.isnan(t_sl) & (np.isnan(t_tp) | (t_sl <= t_tp))
+    out = df[exit_col].to_numpy(float).copy()
+    out = np.where(~np.isnan(t_tp), c30 * (1 + sign * tp / 100), out)
+    return np.where(stop_first, c30 * (1 - sign * sl / 100), out)
+
+
+# Paper-trading realism
+SLIP_RANGE_SHARE = 0.05   # slippage = 5% of the stock's first-30-minute range ...
+SLIP_MIN, SLIP_MAX = 0.0003, 0.002   # ... between 0.03% and 0.2% per order
+LIQUIDITY_SHARE = 0.01    # a position is at most 1% of the stock's first-30-minute volume
+
+
+def summary_columns(feats: pd.DataFrame, exit_col: str) -> pd.DataFrame:
+    """What the simulation needs from the intraday features (with range and volume for
+    realistic slippage and position limits when available)."""
+    cols = ["symbol", "date", "c30", exit_col, *I.LEVEL_COLS,
+            *[c for c in ("h30", "l30", "v30") if c in feats]]
+    return feats[list(dict.fromkeys(cols))]
+
+
+def slippage(row) -> float | None:
+    """This stock's slippage per order: wider first-30-minute range -> worse fills."""
+    try:
+        rng = (row["h30"] - row["l30"]) / row["c30"]
+    except (KeyError, TypeError):
+        return None
+    return None if rng != rng else float(min(SLIP_MAX, max(SLIP_MIN, SLIP_RANGE_SHARE * rng)))
+
+
 def trade_pnl(side: str, qty: int, entry: float, exit_: float,
-              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> tuple[float, float]:
+              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS,
+              slip: float | None = None) -> tuple[float, float]:
     """(P&L after costs, costs) for a round trip."""
     buy_px, sell_px = (entry, exit_) if side == "long" else (exit_, entry)
-    c = costs.cost("buy", qty * buy_px) + costs.cost("sell", qty * sell_px)
+    c = costs.cost("buy", qty * buy_px, slip) + costs.cost("sell", qty * sell_px, slip)
     gross = (exit_ - entry) * qty * (1 if side == "long" else -1)
     return gross - c, c
 
@@ -96,10 +141,17 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
         pnl_day = 0.0
         for _, p in pick(day, rules).iterrows():
             qty = int(slot / p["c30"])
+            v30 = p.get("v30", np.nan)
+            if v30 == v30 and v30 > 0:               # no position bigger than 1% of volume
+                qty = min(qty, int(LIQUIDITY_SHARE * v30))
             if qty <= 0:
                 continue
+            if rules.min_prob > 0:
+                prob = p.get("prob_long" if p["side"] == "long" else "prob_short", np.nan)
+                if not prob >= rules.min_prob:        # NaN (no estimate) is not taken
+                    continue
             exit_, reason = replay(p, p["side"], rules, exit_col, exit_minutes)
-            pnl, c = trade_pnl(p["side"], qty, p["c30"], exit_, costs)
+            pnl, c = trade_pnl(p["side"], qty, p["c30"], exit_, costs, slippage(p))
             pnl_day += pnl
             ex = p[exit_col]
             correct = (ex > p["c30"]) if p["side"] == "long" else (ex < p["c30"])
@@ -138,7 +190,7 @@ def metrics(sim: dict, capital: float = 100_000) -> dict:
 def run(feats: pd.DataFrame, scores: pd.DataFrame, rules: IntradayRules = IntradayRules(),
         capital: float = 100_000) -> dict:
     """Model vs simple no-ML baselines, plus a small stop/target grid."""
-    summ = feats[["symbol", "date", "c30", I.EXIT_COL, *I.LEVEL_COLS]]
+    summ = summary_columns(feats, I.EXIT_COL)
     out = {"period": f"{scores['date'].min():%Y-%m-%d} to {scores['date'].max():%Y-%m-%d}",
            "rules": asdict(rules), "capital": capital, "strategies": {}, "grid": []}
     base = feats[feats["date"].isin(scores["date"].unique())]

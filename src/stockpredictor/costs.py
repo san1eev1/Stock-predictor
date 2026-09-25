@@ -54,13 +54,14 @@ class IntradayCosts:
     gst_pct: float = 0.18
     slippage_pct: float = 0.0005        # 0.05% per order
 
-    def cost(self, side: str, value: float) -> float:
+    def cost(self, side: str, value: float, slippage_pct: float | None = None) -> float:
+        """slippage_pct: this order's own slippage (e.g. higher for a volatile stock)."""
         if value <= 0:
             return 0.0
         brokerage = min(self.brokerage_max, max(self.brokerage_min, value * self.brokerage_pct))
         exchange, sebi = value * self.exchange_pct, value * self.sebi_pct
         total = (brokerage + exchange + sebi + self.gst_pct * (brokerage + exchange + sebi)
-                 + value * self.slippage_pct)
+                 + value * (self.slippage_pct if slippage_pct is None else slippage_pct))
         total += value * (self.stamp_buy_pct if side == "buy" else self.stt_sell_pct)
         return round(total, 2)
 
