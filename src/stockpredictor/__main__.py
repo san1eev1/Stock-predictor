@@ -463,13 +463,13 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
         T.INTRADAY_FEEDBACK = store.load_intraday_feedback(Path(args.feedback))
     n_fb = 0 if T.INTRADAY_FEEDBACK is None else len(T.INTRADAY_FEEDBACK)
     print(f"Intraday paper feedback: {n_fb} judged buy/sell picks", flush=True)
+    active = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
     try:
         from stockpredictor.data import angelone
 
         client = angelone.AngelDataClient(settings.angel)
         client.login()
         tokens = angelone.fetch_nse_equity_tokens()
-        active = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
         have = I.backfill_symbols()
         # Stocks with no or incomplete history: 2 years. Everyone: the days since the last run.
         todo = sorted((set(active) - have) | (set(active) & (I.backfill_missing_exit()
@@ -505,8 +505,18 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
     except Exception as exc:
         print(f"Angel One download failed ({exc}); training on the history already cached",
               flush=True)
-    print(f"Intraday history: {I.backfill_days()} days, {len(I.backfill_symbols())} stocks",
-          flush=True)
+    have = len(I.backfill_symbols())
+    print(f"Intraday history: {I.backfill_days()} days, {have} stocks", flush=True)
+    if have < 0.8 * len(active):
+        # A model trained on a fraction of the stocks is worse than the Mac's own: publish
+        # none (the Mac then uses its models) until the download is complete.
+        import shutil
+
+        for t in MI.TARGETS:
+            shutil.rmtree(t.model_dir, ignore_errors=True)
+        print(f"Intraday: history for only {have} of {len(active)} stocks so far - intraday "
+              "training postponed (download continues next run)", flush=True)
+        return None
 
     path = Path(tempfile.mkdtemp()) / "cloud.db"
     db.init_db(path)

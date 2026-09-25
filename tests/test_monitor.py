@@ -234,3 +234,22 @@ def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
     clock["now"] = ist(2026, 9, 28, 16, 1)
     assert "mac-train" in mon.tick() and calls == [1]
     assert "mac-train" not in mon.tick() and calls == [1]  # once a day
+
+
+def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 20, 59))  # Monday
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(MON.config, "CLOUD_TRAINING", True)
+    monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", False)
+    started = []
+    monkeypatch.setattr(MON, "start_github_run", lambda w: started.append(w) or True)
+    mon._started = True
+    for key in ("gh_run_1630",):
+        MON._set(conn, key, "2026-09-28")           # the data run was started earlier
+    mon.tick()
+    assert started == []                             # 20:59: too early for training
+    clock["now"] = ist(2026, 9, 28, 21, 2)
+    assert "github-train-models" in mon.tick() and started == ["train-models.yml"]
+    mon.tick()
+    assert started == ["train-models.yml"]           # once per slot

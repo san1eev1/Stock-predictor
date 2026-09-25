@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -41,6 +41,10 @@ INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.int
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 21:00 IST)
+# GitHub's own schedules often start hours late, so the Mac starts the runs on time (the
+# schedules stay as a backup). Weekdays: data update, then two training runs.
+GITHUB_RUNS = ((time(16, 30), "update-market-data.yml"), (time(21, 0), "train-models.yml"),
+               (time(23, 0), "train-models.yml"))
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -66,6 +70,35 @@ def alert(conn: sqlite3.Connection, source: str, kind: str, symbol: str | None, 
     if cur.rowcount:
         log.warning("ALERT %s %s %s", kind, symbol or "", message)
     return bool(cur.rowcount)
+
+
+def start_github_run(workflow: str) -> bool:
+    """Start a GitHub Actions workflow now (gh CLI), unless one is already queued/running."""
+    import shutil
+    import subprocess
+
+    gh = shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+                                     if Path(p).exists()), None)
+    if gh is None:
+        log.warning("GitHub CLI (gh) not found: cannot start %s", workflow)
+        return False
+    cwd = config.PROJECT_ROOT
+    try:
+        busy = subprocess.run([gh, "run", "list", "--workflow", workflow, "--limit", "5",
+                               "--json", "status", "-q", ".[].status"], cwd=cwd, timeout=60,
+                              capture_output=True, text=True).stdout.split()
+        if any(s in ("queued", "in_progress", "pending", "waiting") for s in busy):
+            log.info("GitHub: %s already queued/running", workflow)
+            return False
+        r = subprocess.run([gh, "workflow", "run", workflow], cwd=cwd, timeout=60,
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            log.info("GitHub: started %s", workflow)
+            return True
+        log.warning("GitHub: could not start %s: %s", workflow, r.stderr.strip()[:200])
+    except Exception as exc:
+        log.warning("GitHub: could not start %s (%s)", workflow, exc)
+    return False
 
 
 class Monitor:
@@ -188,6 +221,15 @@ class Monitor:
             self.angel_topup(now)
             self.daily_mac_train(self.ctx())
             done.append("mac-train")
+        if config.CLOUD_TRAINING and now.weekday() < 5:
+            for at, workflow in GITHUB_RUNS:
+                key = f"gh_run_{at:%H%M}"
+                if now.time() >= at and _setting(self.conn, key) != day \
+                        and now.time() < (datetime.combine(now.date(), at)
+                                          + timedelta(hours=1)).time():
+                    _set(self.conn, key, day)
+                    if start_github_run(workflow):
+                        done.append(f"github-{workflow.split('.')[0]}")
         # Without the background thread, tune in the monitor itself (only when idle).
         if self.background is None and config.MAC_TRAINING and self.market_idle(now) \
                 and self.idle_tune(now):
