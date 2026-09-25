@@ -131,6 +131,8 @@ class Monitor:
             self._started = True
             self.startup_job(now)
             done.append("startup")
+            if self.background is not None:
+                self.background.ready.set()
         if in_market_hours(now) and self.trading_today(now):
             day = f"{now:%Y-%m-%d}"
             if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \

@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import sqlite3
 import subprocess
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +26,9 @@ import pandas as pd
 from stockpredictor.config import PROJECT_ROOT
 
 DATA_BRANCH = "market-data"
+# Held while the data folder is being refreshed, so the background training thread never
+# reads files that git is replacing.
+DATA_LOCK = threading.RLock()
 DEFAULT_STORE_DIR = PROJECT_ROOT / "market-data"
 
 PRICE_COLS = ["symbol", "date", "open", "high", "low", "close", "adj_close", "volume", "source"]
@@ -186,11 +190,16 @@ def sync(store_dir: Path = DEFAULT_STORE_DIR, remote: str | None = None,
     With `years` (default: config.LOCAL_HISTORY_YEARS on the Mac) only the newest yearly
     price files are downloaded at all (git partial clone + sparse checkout); training on
     the full history happens on GitHub."""
-    import shutil
-
     from stockpredictor.config import LOCAL_HISTORY_YEARS
 
     years = LOCAL_HISTORY_YEARS if years is None else years
+    with DATA_LOCK:
+        _sync(store_dir, remote, years)
+
+
+def _sync(store_dir: Path, remote: str | None, years: int) -> None:
+    import shutil
+
     git_dir = store_dir / ".git"
     if git_dir.exists() and bool(years) != _is_partial(store_dir):
         shutil.rmtree(store_dir)              # switching full <-> recent-only: start clean

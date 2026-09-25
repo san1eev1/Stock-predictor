@@ -35,6 +35,7 @@ class BackgroundTrainer(threading.Thread):
         self.stop_event = threading.Event()
         self.wake = threading.Event()
         self.model_changed = threading.Event()     # the monitor reloads the intraday model
+        self.ready = threading.Event()             # set by the monitor once startup is done
         self._live_day: date | None = None
         self.rounds = 0
 
@@ -51,6 +52,7 @@ class BackgroundTrainer(threading.Thread):
     # --- the thread ---------------------------------------------------------------------
     def run(self) -> None:
         conn = db.connect(self.db_path)
+        self.ready.wait(timeout=30 * 60)           # let the monitor's startup sync finish first
         log.info("Background training started (keeps learning from history all day)")
         while not self.stop_event.is_set():
             if self._live_day is not None:
@@ -62,9 +64,11 @@ class BackgroundTrainer(threading.Thread):
             self.wake.clear()
 
     def _ctx(self):
+        from stockpredictor import store
         from stockpredictor.paper.engine import MarketContext
 
-        return MarketContext.load(self.store_dir)
+        with store.DATA_LOCK:                      # not while the monitor refreshes the data
+            return MarketContext.load(self.store_dir)
 
     def _tune(self, conn) -> None:
         try:
