@@ -32,7 +32,7 @@ SHORT_HORIZON = "longterm_short"     # virtual short book for the 10 sell candid
 
 def book_sign(horizon: str) -> int:
     return -1 if horizon.endswith("_short") else 1
-N_PICKS = 10    # predictions saved per side (up / down) each day
+N_PICKS = 10    # long-term: the top 10 buy (up) predictions each day; no down predictions
 # Strategy variants raced live on paper: momentum share of the score.
 SHADOW_VARIANTS = {"AI model": 0.0, "50/50 blend": 0.5, "Momentum only": 1.0}
 
@@ -290,8 +290,7 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
 def save_predictions(conn, today: pd.DataFrame, model: M.LongTermModel,
                      date: pd.Timestamp, nifty: float) -> None:
     ranked = today.sort_values("score", ascending=False).reset_index(drop=True)
-    picks = pd.concat([ranked.head(N_PICKS).assign(direction="up"),
-                       ranked.tail(N_PICKS).assign(direction="down")])
+    picks = ranked.head(N_PICKS).assign(direction="up")
     reasons = model.explain(picks)
     rows = []
     for (idx, r), why in zip(picks.iterrows(), reasons):
@@ -327,7 +326,7 @@ def save_shadow(conn, today: pd.DataFrame, model: M.LongTermModel, date: pd.Time
     for name, w in SHADOW_VARIANTS.items():
         score = M.blend(raw, today, w)
         ranked = today.assign(s=score.values).sort_values("s", ascending=False)
-        for direction, part in (("up", ranked.head(N_PICKS)), ("down", ranked.tail(N_PICKS))):
+        for direction, part in (("up", ranked.head(N_PICKS)),):
             rows += [(name, f"{date:%Y-%m-%d}", r.symbol, direction, float(r.close), nifty)
                      for r in part.itertuples()]
     conn.executemany("INSERT OR REPLACE INTO shadow_predictions (variant, date, symbol, direction, "

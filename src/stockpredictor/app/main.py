@@ -274,7 +274,6 @@ def sell_now(c, preds: pd.DataFrame):
     ranks = dict(c.execute("SELECT symbol, rank FROM lt_scores").fetchall())
     n = len(ranks) or 100
     rules, _ = D.get_rules(c)
-    weak = set(preds.loc[preds["direction"] == "down", "symbol"])
     rows = []
     held = [("Paper", s) for s in E.holdings(c)]
     real = R.holdings(c, "longterm")
@@ -283,8 +282,6 @@ def sell_now(c, preds: pd.DataFrame):
     for who, sym in held:
         r = ranks.get(sym)
         reasons = []
-        if sym in weak:
-            reasons.append("in this week's 10 sell candidates")
         if r is not None and r > rules.exit_rank:
             reasons.append(f"trading rank {r} of {n} (below {rules.exit_rank})")
         if reasons:
@@ -913,9 +910,10 @@ def accuracy_now_panel(horizon: str):
     st.subheader(f"📊 {name} — accuracy · {now:%H:%M}")
     c = conn()
     acc = SB.by_direction(c, horizon, now, live_prices(c), prev_closes())
+    sides = (("up", "▲ Predicted UP (buy picks)"),) if horizon == "longterm" else \
+        (("up", "▲ Predicted UP (buy picks)"), ("down", "▼ Predicted DOWN (sell picks)"))
     cols = st.columns(2)
-    for col, (d, title) in zip(cols, (("up", "▲ Predicted UP (buy picks)"),
-                                      ("down", "▼ Predicted DOWN (sell picks)"))):
+    for col, (d, title) in zip(cols, sides):
         df = pd.DataFrame(acc[d])
         df["vs random"] = ((pd.to_numeric(df["Accuracy"]) - pd.to_numeric(df["Random"])) * 100).round()
         for k_ in ("Accuracy", "Random"):
@@ -926,8 +924,8 @@ def accuracy_now_panel(horizon: str):
                 "Accuracy": st.column_config.NumberColumn(format="%.0f%%"),
                 "Random": st.column_config.NumberColumn(format="%.0f%%"),
                 "vs random": st.column_config.NumberColumn(format="%+d pts")})
-    st.caption(("Judged after 1 week: a buy pick is right if it beat Nifty 50, a sell pick if it "
-                "lagged. 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
+    st.caption(("Judged after 1 week: a buy pick is right if it beat Nifty 50 (long-term predicts "
+                "only UP). 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
                 else "Judged at 12:30: a buy pick is right if it rose from 9:45, a sell pick if it "
                 "fell." if horizon == "intraday"
                 else "Judged at 15:15 (the close square-off): a buy pick is right if it rose from "
@@ -937,7 +935,7 @@ def accuracy_now_panel(horizon: str):
 
 ACCURACY_TEXT = {
     "longterm": ("A long-term prediction is judged after 1 week: a buy pick is ✅ if it beat "
-                 "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.",
+                 "Nifty 50 (long-term makes buy predictions only).",
                  "First results appear one week after the first prediction.", "vs Nifty"),
     "intraday": ("An intraday pick is judged at 12:30 the same day: a long is ✅ if the price rose "
                  "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 250 "
@@ -976,27 +974,42 @@ def accuracy_tab(h: str):
                                     ".0%"), width="stretch")
         up_name, down_name = ("Longs", "Shorts") if h.startswith("intraday") \
             else ("Up picks", "Weakest picks")
-        st.caption(f"{up_name}: {a['accuracy_up']:.0%} · {down_name}: {a['accuracy_down']:.0%}"
+        down = f" · {down_name}: {a['accuracy_down']:.0%}" if pd.notna(a["accuracy_down"]) else ""
+        st.caption(f"{up_name}: {a['accuracy_up']:.0%}{down}"
                    + (f" · Paper trades profitable: {a['profitable_trades']:.0%} of "
                       f"{a['closed_trades']}" if a.get("closed_trades") else ""))
     else:
         k[2].metric("Accuracy", "—")
         st.info(waiting)
+    predictions_table(h, ret_label)
+
+
+@st.fragment(run_every=REFRESH)
+def predictions_table(h: str, ret_label: str):
+    """Prediction vs reality; open predictions show the live price (latest close after hours)."""
+    c = conn()
     preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = ? "
                         "ORDER BY date DESC, direction DESC, rank", c, params=(h,))
     if preds.empty:
         return
+    now = preds["symbol"].map(current_prices(c)).astype(float)
+    judged = preds["correct"].notna()
+    preds["Price now/at end"] = preds["actual_exit"].astype(float).where(judged, now)
+    preds["Share %"] = as_pct(pct(preds["Price now/at end"], preds["entry_price"]))
     preds["Result"] = ["⏳ open" if pd.isna(x) else "✅" if x else "❌" for x in preds["correct"]]
-    if h == "intraday":
+    if h.startswith("intraday"):
         preds["direction"] = preds["direction"].map({"up": "long ▲", "down": "short ▼"})
     st.subheader("Prediction vs reality")
+    st.caption(f"Open predictions: live price, updated every minute (after 15:30 the last "
+               f"price of the day) · {now_ist():%H:%M}")
     st.dataframe(preds[["date", "symbol", "direction", "confidence", "entry_price",
-                        "actual_exit", "actual_return", "Result"]].rename(columns={
+                        "Price now/at end", "Share %", "actual_return", "Result"]].rename(columns={
         "date": "Date", "symbol": "Stock", "direction": "Predicted", "confidence": "Confidence",
-        "entry_price": "Price then", "actual_exit": "Price now/at end",
-        "actual_return": ret_label}), hide_index=True, width="stretch",
+        "entry_price": "Price then", "actual_return": ret_label}), hide_index=True,
+        width="stretch",
         column_config={"Confidence": st.column_config.NumberColumn(format="percent"),
                        ret_label: st.column_config.NumberColumn(format="percent"),
+                       "Share %": PCT,
                        "Price then": st.column_config.NumberColumn(format="₹%.2f"),
                        "Price now/at end": st.column_config.NumberColumn(format="₹%.2f")})
 

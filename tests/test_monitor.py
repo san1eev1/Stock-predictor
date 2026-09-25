@@ -97,7 +97,7 @@ def test_tick_routing(tmp_path, ctx_model, monkeypatch):
     assert mon.tick() == ["after-close"]
     mon._last_quarter = None
     assert mon.tick() == []
-    assert conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0] == 20
+    assert conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0] == 10              # top 10 buys only (no down)
 
 
 def test_live_scores_saved(tmp_path, ctx_model):
@@ -122,7 +122,7 @@ def test_startup_trains_decides_and_prints_scoreboard(tmp_path, ctx_model, monke
     mon._started = False
     with caplog.at_level(logging.INFO):
         assert "startup" in mon.tick()
-    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE horizon='longterm'").fetchone()[0] == 20
+    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE horizon='longterm'").fetchone()[0] == 10
     assert any("Accuracy now" in r.message for r in caplog.records)
     assert "startup" not in mon.tick()          # only once per run
 

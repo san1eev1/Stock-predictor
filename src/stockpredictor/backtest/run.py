@@ -66,6 +66,13 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
         report["strategies"][reb] = {**P.performance(res.equity),
                                      **P.trade_stats(res.trades, res.equity),
                                      "total_costs": res.total_costs}
+    if rules.n_hold != 10:           # same strategy with 10 holdings, for comparison
+        wide = P.Rules(**{**rules.__dict__, "n_hold": 10})
+        res = P.simulate(scores, close, wide, capital, "weekly")
+        curves["model_weekly_10_holdings"] = res.equity
+        report["strategies"]["weekly, 10 holdings"] = {
+            **P.performance(res.equity), **P.trade_stats(res.trades, res.equity),
+            "total_costs": res.total_costs}
     # Baseline without machine learning: plain 12-1 month momentum, same rules.
     base = feats.loc[feats["date"] >= scores["date"].min(), ["symbol", "date", "mom_12_1"]] \
         .merge(point_in_time_universe(feats, universe_size), on=["symbol", "date"])

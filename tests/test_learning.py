@@ -45,7 +45,7 @@ def test_paper_feedback_adds_weighted_rows(conn, ctx_model):
     labeled = T.longterm_labeled(ctx)
     out = T.paper_feedback(ctx, conn, labeled)
     fb = out.dropna(subset=["fb_weight"])
-    assert len(fb) == 20 and set(fb["fb_weight"]) <= {1.5, 2.0}
+    assert len(fb) == 10 and set(fb["fb_weight"]) <= {1.5, 2.0}
     assert not out.duplicated(["symbol", "date"]).any()
     assert fb["target"].notna().all()
 
@@ -56,7 +56,7 @@ def test_shadow_race_and_live_switch(conn, ctx_model, tmp_path, monkeypatch):
     for day in sorted(ctx.feats["date"].unique())[-160:-130]:
         E.run_decision(conn, ctx, model, day)
     n = conn.execute("SELECT COUNT(DISTINCT variant), COUNT(*) FROM shadow_predictions").fetchone()
-    assert tuple(n) == (3, 3 * 20 * 30)
+    assert tuple(n) == (3, 3 * 10 * 30)
     E.evaluate_predictions(conn, ctx)
     race = E.strategy_race(conn)
     assert set(race["variant"]) == set(E.SHADOW_VARIANTS) and (race["days"] == 30).all()

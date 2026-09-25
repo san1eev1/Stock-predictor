@@ -75,10 +75,11 @@ days the app isn't open), *Keep training now*, *Get latest data*, *Backtest long
 
 | Where | What | How often |
 |---|---|---|
-| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~150-minute run; news relevance model; weekly backtest. Published to the `models` branch. | **Every 3 hours** (`train-models.yml`) |
+| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~150-minute run; news relevance model; **long-term historical paper trading** (walk-forward since 2015 with the live rules — top 3 held — plus a 10-holding comparison, costs included) once a day on the first run after the 15:30 close. Published to the `models` branch. | **Every 3 hours** (`train-models.yml`) |
 | **Mac, background thread** | Both intraday models take turns self-tuning on their history (uses your Angel One data, which stays on the Mac) | Every ~5 minutes, all day |
 | **Mac, after the close** | Today's full live session is added; both intraday models retrain with it; the 12:30-vs-close comparison is refreshed | Every trading day, 15:32 |
 | **Mac, after the close** | **Historical paper-trading replays:** each intraday model trades the last 120 days again in **3 rounds**, each round learning from the previous round's judged buy/sell picks; kept for the live model only if the last round beats the first (🔁 tab on *Paper trading — Intraday*) | Daily, 15:40 (weekends: any time) |
+| **Mac, after the close** | Live prices stop at 15:30; from then on the Mac only learns from history (intraday tuning, replays) | Every trading day |
 | **Mac, after each close** | Judged paper predictions (stock, date, right/wrong) sent to the `paper-feedback` branch for cloud training | Daily |
 
 New settings are adopted only if they beat the current ones out-of-sample over the last 3 years
@@ -123,7 +124,7 @@ starts in 2026).
 
 ## Dashboard pages
 
-- **Long-term picks** — long-term accuracy (UP / DOWN tables, live today row); top 10 buy candidates
+- **Long-term picks** — long-term accuracy (UP table only — long-term predicts only UP; live today row); top 10 buy candidates
   (no sell candidates) with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
 - **Intraday — until 12:30** / **Intraday — until close** — each model's accuracy (UP / DOWN);
   top 10 buy / top 10 sell (🧪 = the 3 + 3 traded) at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;

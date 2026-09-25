@@ -339,10 +339,25 @@ def cmd_cloud_train(settings, args) -> None:
                                 if news else "not enough headlines yet"), flush=True)
 
     bt_path = M.MODEL_DIR / "backtest.json"
-    if not bt_path.exists() or time.time() - bt_path.stat().st_mtime > 7 * 86400 or args.backtest:
+    # Long-term paper trading on history (walk-forward since 2015, the live paper rules:
+    # top 3 held), once a day on the first run after the 15:30 close.
+    from stockpredictor.live.prices import now_ist
+
+    ist = now_ist()
+    close = ist.replace(hour=15, minute=30, second=0, microsecond=0)
+    last_close = close if ist >= close else close - timedelta(days=1)
+    try:     # the file's own time is the clone time on GitHub: use the time saved inside it
+        done = datetime.fromisoformat(json.loads(bt_path.read_text())["updated"])
+    except (OSError, KeyError, ValueError):
+        done = None
+    if args.backtest or done is None or done < last_close:
         report = bt.run(d, capital=settings.paper_capital_longterm)
+        report["updated"] = ist.isoformat(timespec="seconds")
         bt.save(report, bt_path)
-        print("Backtest refreshed", flush=True)
+        s = report["strategies"]
+        print("Long-term historical paper trading: " + "; ".join(
+            f"{k}: {v['cagr']:.1%}/yr, Sharpe {v['sharpe']:.2f}, worst fall {v['max_drawdown']:.1%}"
+            for k, v in s.items()), flush=True)
 
     rounds = adopted = 0
     scores: dict = {}               # settings already scored this run are not re-tested
@@ -687,7 +702,7 @@ def cmd_today(settings, args) -> None:
     D.run_daily(conn, ctx, settings.paper_capital_longterm, mon.model())
     print("3/3 Today's long-term picks\n")
     last = conn.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'longterm'").fetchone()[0]
-    for direction, title in (("up", "▲ 10 BUY candidates"), ("down", "▼ 10 SELL candidates")):
+    for direction, title in (("up", "▲ 10 BUY candidates"),):
         rows = conn.execute("SELECT symbol, confidence, entry_price FROM predictions WHERE horizon = "
                             "'longterm' AND date = ? AND direction = ? ORDER BY confidence DESC",
                             (last, direction)).fetchall()
@@ -695,7 +710,7 @@ def cmd_today(settings, args) -> None:
         for i, r in enumerate(rows, 1):
             print(f"   {i:2}. {r['symbol']:<12} confidence {r['confidence']:.0%}   Rs {r['entry_price']:,.2f}")
         print()
-    for h, name in ((E.HORIZON, "Buy book"), (E.SHORT_HORIZON, "Sell book")):
+    for h, name in ((E.HORIZON, "Buy book"),):
         v = E.value(conn, ctx.closes_on(ctx.daily["date"].max()), h)
         print(f"  Paper {name}: Rs {v['equity']:,.0f} (P&L Rs {v['pnl']:+,.0f}), {v['positions']} positions")
     print("\nOpen the dashboard for details: python -m stockpredictor app")

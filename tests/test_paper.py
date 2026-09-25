@@ -60,10 +60,10 @@ def test_predictions_saved_and_evaluated(conn, ctx_model):
     dates = sorted(ctx.feats["date"].unique())
     E.run_decision(conn, ctx, model, dates[-40])
     n = conn.execute("SELECT COUNT(*), SUM(direction='up') FROM predictions").fetchone()
-    assert tuple(n) == (20, 10)
-    assert E.evaluate_predictions(conn, ctx, horizon_days=20) == 20
+    assert tuple(n) == (10, 10)
+    assert E.evaluate_predictions(conn, ctx, horizon_days=20) == 10
     acc = E.accuracy(conn)
-    assert acc["matured"] == 20 and 0 <= acc["accuracy"] <= 1
+    assert acc["matured"] == 10 and 0 <= acc["accuracy"] <= 1
     assert 0 <= acc["random_baseline"] <= 1
 
 
