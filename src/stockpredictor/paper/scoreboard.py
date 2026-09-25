@@ -18,11 +18,12 @@ def _live_prices(conn) -> dict[str, float]:
     return {r[0]: r[1] for r in conn.execute("SELECT symbol, price FROM live_prices")}
 
 
-def intraday_today(conn: sqlite3.Connection, day: str, prices: dict[str, float] | None = None) -> dict:
+def intraday_today(conn: sqlite3.Connection, day: str, prices: dict[str, float] | None = None,
+                   horizon: str = "intraday") -> dict:
     """How today's 10 buy / 10 sell intraday picks are doing since 9:45."""
     prices = prices if prices is not None else _live_prices(conn)
     preds = conn.execute("SELECT symbol, direction, entry_price, actual_exit FROM predictions "
-                         "WHERE horizon = 'intraday' AND date = ?", (day,)).fetchall()
+                         "WHERE horizon = ? AND date = ?", (horizon, day)).fetchall()
     out = {"picks": len(preds), "buy_n": 0, "buy_right": 0, "sell_n": 0, "sell_right": 0}
     for p in preds:
         px = p["actual_exit"] if p["actual_exit"] is not None else prices.get(p["symbol"])
@@ -133,14 +134,15 @@ def by_direction(conn: sqlite3.Connection, horizon: str, now: datetime | None = 
     now = now or datetime.now()
     prices = prices if prices is not None else _live_prices(conn)
     out = {}
-    if horizon == "intraday":
-        it = intraday_today(conn, f"{now:%Y-%m-%d}", prices)
+    if horizon in ("intraday", "intraday_close"):
+        it = intraday_today(conn, f"{now:%Y-%m-%d}", prices, horizon)
         ru = it["random_up"]
+        until = "12:30" if horizon == "intraday" else "the close"
         for d, key in (("up", "buy"), ("down", "sell")):
             rnd = None if ru is None else (ru if d == "up" else 1 - ru)
-            out[d] = [_row("Today (live, since 9:45)", it[f"{key}_right"], it[f"{key}_n"], rnd,
+            out[d] = [_row(f"Today (9:45 → {until})", it[f"{key}_right"], it[f"{key}_n"], rnd,
                            "picks at 9:46"),
-                      _judged_row("All judged days", judged(conn, "intraday", direction=d),
+                      _judged_row("All judged days", judged(conn, horizon, direction=d),
                                   "none yet")]
         return out
     lt = longterm_today(conn, prices, prev_close or {})

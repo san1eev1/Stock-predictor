@@ -412,7 +412,7 @@ def accuracy(conn: sqlite3.Connection, horizon: str = HORIZON) -> dict:
     m = df.dropna(subset=["correct"])
     if not m.empty:
         up = m["direction"] == "up"
-        if horizon == "intraday":   # ranks count from the strongest pick on each side
+        if horizon.startswith("intraday"):   # ranks count from the strongest pick on each side
             strong = m["rank"] <= 2
             names = ("Long 1-2", "Long 3+", "Short 3+", "Short 1-2")
         else:

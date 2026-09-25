@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
+from datetime import time as dtime
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +31,9 @@ st.set_page_config(page_title="Stock Predictor", page_icon="📈", layout="wide"
 
 SETTINGS = load_settings()
 STORE = store.DEFAULT_STORE_DIR
+MARKET_CLOSE = dtime(15, 30)
+MODEL_NAMES = {"longterm": "Long-term", "intraday": "Intraday 12:30",
+               "intraday_close": "Intraday close"}
 REFRESH = "60s"   # always: a page opened before 9:15 must still go live
 
 
@@ -80,6 +84,19 @@ def _prev_closes(version: float, day: str) -> dict[str, float]:
 def prev_closes() -> dict[str, float]:
     """Yesterday's close per stock (the base for today's % up/down)."""
     return _prev_closes(_store_version(), f"{now_ist():%Y-%m-%d}")
+
+
+def closing_prices(day: str) -> dict[str, float]:
+    """Market close (15:30) on `day`: the official close once the evening data is in; before
+    that, on the day itself after 15:30, the last live price."""
+    m, now = ctx(), now_ist()
+    out = {}
+    if m is not None:
+        d = m.daily[m.daily["date"] == pd.Timestamp(day)]
+        out = dict(zip(d["symbol"], d["close"]))
+    if not out and day == f"{now:%Y-%m-%d}" and now.time() >= MARKET_CLOSE:
+        out = live_prices(conn())
+    return out
 
 
 def pct(new: pd.Series, base: pd.Series) -> pd.Series:
@@ -422,6 +439,7 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
 
 def page_intraday():
     st.title("Intraday picks")
+    st.header("Until 12:30 — traded")
     accuracy_now_panel("intraday")
     c = conn()
     rules, enabled = PI.get_rules(c)
@@ -436,8 +454,68 @@ def page_intraday():
     last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'intraday'").fetchone()[0]
     if not last:
         intraday_preview()
-        return
-    intraday_live(last)
+    else:
+        intraday_live(last)
+
+    st.divider()
+    st.header("Until the 15:30 close — learning model")
+    st.caption("A second model predicts 9:45 → close for the same stocks. It is not traded; it "
+               "keeps learning from the market until the close and is judged at 15:30.")
+    accuracy_now_panel("intraday_close")
+    last_close = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = ?",
+                           (MI.CLOSE.horizon,)).fetchone()[0]
+    if last_close:
+        intraday_live(last_close, MI.CLOSE)
+    else:
+        st.caption("Its first picks appear at 9:46 on the next trading day.")
+    st.divider()
+    exit_comparison()
+
+
+def exit_comparison():
+    """Which is the better time to exit: 12:30 or the close?"""
+    st.header("⚖️ Exit at 12:30 or at the close?")
+    c, m = conn(), ctx()
+    path = T.COMPARE_PATH
+    if path.exists():
+        r = json.loads(path.read_text())
+        a, b = r[MI.TRADE.horizon], r[MI.CLOSE.horizon]
+        st.subheader("History (walk-forward backtest, same days, costs included)")
+        rows = [{"Model": "Until 12:30", **a}, {"Model": "Until the close", **b}]
+        t = pd.DataFrame(rows)
+        st.dataframe(pd.DataFrame({
+            "Model": t["Model"], "Days": t["days"], "Avg P&L per day (₹1 lakh)": t["avg_day_pnl"],
+            "Profitable days": t["win_days"], "Picks right": t["direction_accuracy"],
+            "Random picks": t["random_baseline"], "Prediction quality (IC)": t["ic"]}),
+            hide_index=True, width="stretch", column_config={
+                "Avg P&L per day (₹1 lakh)": st.column_config.NumberColumn(format="₹%.0f"),
+                "Profitable days": st.column_config.NumberColumn(format="percent"),
+                "Picks right": st.column_config.NumberColumn(format="percent"),
+                "Random picks": st.column_config.NumberColumn(format="percent"),
+                "Prediction quality (IC)": st.column_config.NumberColumn(format="%.3f")})
+        best, other = (a, b) if a["avg_day_pnl"] >= b["avg_day_pnl"] else (b, a)
+        name = "12:30" if best is a else "the close"
+        st.caption(f"{r['period']} ({a['days']} days, each predicted by a model trained only on "
+                   f"earlier days; same stop-loss/target rules). So far exiting at **{name}** "
+                   f"earned more: {C.money(best['avg_day_pnl'])} vs "
+                   f"{C.money(other['avg_day_pnl'])} per day. Updated "
+                   f"{r['updated'][:16].replace('T', ' ')}, refreshed after every close.")
+    else:
+        st.caption("The historical comparison is computed in the background (needs the 12:30 "
+                   "prices in the intraday history; a few minutes after start).")
+    if m is not None:
+        live = PI.exit_comparison(c, m.daily[["symbol", "date", "close"]])
+        st.subheader("Live (judged days)")
+        if live.empty:
+            st.caption("Appears after the first trading day with both models.")
+        else:
+            st.dataframe(live, hide_index=True, width="stretch", column_config={
+                "Accuracy": st.column_config.NumberColumn(format="percent"),
+                "Random": st.column_config.NumberColumn(format="percent"),
+                "Avg move in our favour": st.column_config.NumberColumn(format="percent")})
+            st.caption("'Same picks held to the close' uses the official close once the evening "
+                       "data is in. A few days prove little — trust the comparison after "
+                       "several weeks.")
 
 
 def intraday_preview():
@@ -474,26 +552,35 @@ def intraday_preview():
 
 
 @st.fragment(run_every=REFRESH)
-def intraday_live(day: str):
+def intraday_live(day: str, target: MI.Target = MI.TRADE):
     c = conn()
-    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'intraday' AND date = ?",
-                        c, params=(day,))
+    traded_model = target == MI.TRADE
+    until = "12:30" if traded_model else "close"
+    preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = ? AND date = ?",
+                        c, params=(target.horizon, day))
     live = live_prices(c)
+    closes = closing_prices(day)
     st.subheader(f"Picks for {pd.Timestamp(day):%d %b %Y}")
+    st.caption("Exit 12:30 = price at the intraday square-off (judged here) · Live = now · "
+               "Close 15:30 = market close (appears after 15:30)." if traded_model else
+               "Live = now · Close 15:30 = market close, where these picks are judged.")
     traded = {(r[0], r[1]) for r in c.execute(
         "SELECT symbol, side FROM paper_trades WHERE horizon = 'intraday' AND entry_time LIKE ?",
         (f"{day}%",))}
-    for direction, title in (("up", "▲ 10 Buy candidates (expected to rise 9:45 → 12:30)"),
-                             ("down", "▼ 10 Sell candidates (expected to fall 9:45 → 12:30)")):
+    for direction, title in (("up", f"▲ 10 Buy candidates (expected to rise 9:45 → {until})"),
+                             ("down", f"▼ 10 Sell candidates (expected to fall 9:45 → {until})")):
         p = preds[preds["direction"] == direction].sort_values("rank").copy()
         if p.empty:
             continue
         sign = 1 if direction == "up" else -1
-        now_px = pd.Series([live.get(s_, x) if pd.isna(x) else x
-                            for s_, x in zip(p["symbol"], p["actual_exit"])], index=p.index, dtype=float)
-        p["Now"] = dash(now_px, "₹{:,.2f}")
+        live_px = p["symbol"].map(live).astype(float)
+        # Exit price at 12:30 once squared off; the live price until then.
+        now_px = p["actual_exit"].astype(float).fillna(live_px)
+        p["Exit 12:30"] = p["actual_exit"].astype(float)
+        p["Live"] = live_px
+        p["Close 15:30"] = p["symbol"].map(closes).astype(float)
         p["Move"] = dash(sign * (now_px / p["entry_price"] - 1), "{:+.2%}")
-        p["Today %"] = as_pct(pct(now_px, p["symbol"].map(prev_closes())))
+        p["Today %"] = as_pct(pct(live_px, p["symbol"].map(prev_closes())))
         p["Share since 9:45"] = as_pct(pct(now_px, p["entry_price"]))
         p["target"] = dash(p["target"], "₹{:,.2f}")
         p["Result"] = ["⏳" if pd.isna(x) else "✅" if x else "❌" for x in p["correct"]]
@@ -501,8 +588,12 @@ def intraday_live(day: str):
         side = "long" if direction == "up" else "short"
         p["Paper"] = ["🧪" if (s_, side) in traded else "" for s_ in p["symbol"]]
         st.markdown(f"**{title}**")
-        st.dataframe(p[["symbol", "Paper", "confidence", "entry_price", "stop_loss", "target", "Now",
-                        "Today %", "Share since 9:45", "Move", "Result", "Why"]].rename(columns={
+        cols = ["symbol", "Paper", "confidence", "entry_price", "stop_loss", "target",
+                "Exit 12:30", "Live", "Close 15:30", "Today %", "Share since 9:45", "Move",
+                "Result", "Why"]
+        if not traded_model:                 # not traded: no stops, judged at the close
+            cols = [x for x in cols if x not in ("Paper", "stop_loss", "target", "Exit 12:30")]
+        st.dataframe(p[cols].rename(columns={
             "symbol": "Stock", "confidence": "Confidence", "entry_price": "Entry 9:45",
             "stop_loss": "Stop-loss", "target": "Target", "Move": "Move (in our favour)",
             "Why": "Signals (↑ raised score, ↓ lowered it)"}), hide_index=True, width="stretch",
@@ -510,7 +601,7 @@ def intraday_live(day: str):
                 format="percent", min_value=0, max_value=1),
                 "Today %": PCT, "Share since 9:45": PCT,
                 **{k_: st.column_config.NumberColumn(format="₹%.2f")
-                   for k_ in ["Entry 9:45", "Stop-loss"]}})
+                   for k_ in ["Entry 9:45", "Stop-loss", "Exit 12:30", "Live", "Close 15:30"]}})
 
 
 @st.fragment(run_every=REFRESH)
@@ -546,6 +637,11 @@ def paper_intraday():
                        f"profitable days {(by_day > 0).mean():.0%} · total P&L {C.money(closed['pnl'].sum())}")
         t["Live/Exit"] = [live.get(s_, e) if st_ == "open" else x
                           for s_, e, x, st_ in zip(t["symbol"], t["entry_price"], t["exit_price"], t["status"])]
+        today = f"{now_ist():%Y-%m-%d}"
+        t["Exit"] = t["exit_price"].where(t["status"] == "closed")
+        t["Live"] = [live.get(s_) if d_ == today else None for s_, d_ in zip(t["symbol"], t["Day"])]
+        close_by_day = {d_: closing_prices(d_) for d_ in t["Day"].unique()}
+        t["Close 15:30"] = [close_by_day[d_].get(s_) for s_, d_ in zip(t["symbol"], t["Day"])]
         t["P&L"] = [p if st_ == "closed" else sg * (lv - e) * q - cst
                     for p, st_, sg, lv, e, q, cst in zip(t["pnl"], t["status"], t["sign"], t["Live/Exit"],
                                                         t["entry_price"], t["qty"], t["costs"])]
@@ -555,12 +651,14 @@ def paper_intraday():
                         for s_, lv, st_ in zip(t["symbol"], t["Live/Exit"], t["status"])]
         t["Status"] = ["⏳ open" if x == "open" else ("✅ " if p > 0 else "❌ ") + (r or "")
                        for x, p, r in zip(t["status"], t["P&L"], t["exit_reason"])]
-        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Live/Exit", "Share move %", "Today %",
-                        "stop_loss", "target", "P&L", "Status"]].rename(columns={
-            "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45", "stop_loss": "Stop-loss",
+        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Exit", "Live", "Close 15:30",
+                        "Share move %", "Today %", "stop_loss", "target", "P&L", "Status"]].rename(columns={
+            "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45",
+            "Exit": "Exit (12:30 or stop/target)", "stop_loss": "Stop-loss",
             "target": "Target", "P&L": "P&L (after costs)"}), hide_index=True, width="stretch",
             column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
-                           for k_ in ["Entry 9:45", "Live/Exit", "Stop-loss", "Target", "P&L (after costs)"]}
+                           for k_ in ["Entry 9:45", "Exit (12:30 or stop/target)", "Live",
+                                      "Close 15:30", "Stop-loss", "Target", "P&L (after costs)"]}
             | {"Share move %": PCT, "Today %": PCT})
     intraday_days(c)
 
@@ -697,7 +795,7 @@ def portfolio_live(h: str):
 
 def page_accuracy():
     st.title("Accuracy")
-    tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
+    tab_lt, tab_id, tab_cl = st.tabs(["Long-term", "Intraday until 12:30", "Intraday until close"])
     with tab_lt:
         accuracy_now_panel("longterm")
         accuracy_tab("longterm")
@@ -705,14 +803,18 @@ def page_accuracy():
     with tab_id:
         accuracy_now_panel("intraday")
         accuracy_tab("intraday")
+    with tab_cl:
+        accuracy_now_panel("intraday_close")
+        accuracy_tab("intraday_close")
 
 
 @st.fragment(run_every=REFRESH)
 def accuracy_now_panel(horizon: str):
     """This model's accuracy, predicted-UP and predicted-DOWN picks in separate tables."""
     now = now_ist().replace(tzinfo=None)
-    name = "Long-term" if horizon == "longterm" else "Intraday"
-    st.subheader(f"📊 {name} accuracy · {now:%H:%M}")
+    name = {"longterm": "Long-term", "intraday": "Intraday until 12:30 (traded)",
+            "intraday_close": "Intraday until the 15:30 close (learning)"}[horizon]
+    st.subheader(f"📊 {name} — accuracy · {now:%H:%M}")
     c = conn()
     acc = SB.by_direction(c, horizon, now, live_prices(c), prev_closes())
     cols = st.columns(2)
@@ -731,7 +833,9 @@ def accuracy_now_panel(horizon: str):
     st.caption(("Judged after 1 week: a buy pick is right if it beat Nifty 50, a sell pick if it "
                 "lagged. 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
                 else "Judged at 12:30: a buy pick is right if it rose from 9:45, a sell pick if it "
-                "fell.") + " 'Random' = picking stocks at random on the same days. "
+                "fell." if horizon == "intraday"
+                else "A second model that keeps learning until the close: judged at 15:30, a buy "
+                "pick is right if it rose from 9:45, a sell pick if it fell. Not traded.") + " 'Random' = picking stocks at random on the same days. "
                "Updates every minute.")
 
 
@@ -743,6 +847,9 @@ ACCURACY_TEXT = {
                  "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 250 "
                  "stocks that moved that way.", "Results appear after the first trading day.",
                  "9:45 → 12:30"),
+    "intraday_close": ("The learning model's pick is judged at the 15:30 close: a buy is ✅ if the "
+                       "price rose from 9:45, a sell is ✅ if it fell. Not traded.",
+                       "Results appear after the first trading day's close.", "9:45 → close"),
 }
 
 
@@ -771,7 +878,8 @@ def accuracy_tab(h: str):
             roll["date"] = pd.to_datetime(roll["date"])
             st.altair_chart(C.lines(roll.assign(series="Model"), "date", "value", "series",
                                     ".0%"), width="stretch")
-        up_name, down_name = ("Longs", "Shorts") if h == "intraday" else ("Up picks", "Weakest picks")
+        up_name, down_name = ("Longs", "Shorts") if h.startswith("intraday") \
+            else ("Up picks", "Weakest picks")
         st.caption(f"{up_name}: {a['accuracy_up']:.0%} · {down_name}: {a['accuracy_down']:.0%}"
                    + (f" · Paper trades profitable: {a['profitable_trades']:.0%} of "
                       f"{a['closed_trades']}" if a.get("closed_trades") else ""))
@@ -892,7 +1000,7 @@ def training_history():
     if not tunes.empty:
         tunes["date"] = pd.to_datetime(tunes["version"])
         tunes["value"] = tunes["m"].map(lambda m: m.get("ic"))
-        tunes["series"] = tunes["horizon"].map({"longterm": "Long-term", "intraday": "Intraday"})
+        tunes["series"] = tunes["horizon"].map(MODEL_NAMES)
         if len(tunes) >= 2:
             st.caption("Prediction quality (IC) at each weekly tuning")
             st.altair_chart(C.lines(tunes[["date", "series", "value"]], "date", "value", "series",
@@ -911,7 +1019,7 @@ def training_history():
     if not retrains.empty:
         last = retrains.groupby("horizon").tail(1)
         st.caption("Last retrain: " + " · ".join(
-            f"{'Long-term' if r.horizon == 'longterm' else 'Intraday'} "
+            f"{MODEL_NAMES.get(r.horizon, r.horizon)} "
             f"{r.version[:16].replace('T', ' ')} (data to {r.train_to})" for r in last.itertuples()))
 
 

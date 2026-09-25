@@ -49,3 +49,16 @@ def test_longterm_today_uses_yesterdays_close(tmp_path):
     out = SB.by_direction(c, "longterm", datetime(2026, 9, 25, 11, 0), prices, prev)
     assert out["up"][0]["Right"] == "1/2" and out["up"][0]["Random"] == 0.5
     assert out["down"][0]["Right"] == "1/1"
+
+
+def test_close_model_accuracy_is_separate(tmp_path):
+    db.init_db(tmp_path / "t.db")
+    c = db.connect(tmp_path / "t.db")
+    c.executemany("INSERT INTO predictions (date, horizon, symbol, direction, confidence, "
+                  "entry_price, correct, base_rate) VALUES ('2026-09-24', ?, 'A', 'up', 0.6, 100, ?, 0.5)",
+                  [("intraday", 1), ("intraday_close", 0)])
+    c.commit()
+    now = datetime(2026, 9, 25, 11, 0)
+    assert SB.by_direction(c, "intraday", now, prices={})["up"][1]["Right"] == "1/1"
+    close = SB.by_direction(c, "intraday_close", now, prices={})["up"]
+    assert close[1]["Right"] == "0/1" and "close" in close[0]["What"]

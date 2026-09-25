@@ -38,6 +38,7 @@ EXIT_TIME = time(15, 15)          # end of the stored window (first-hit times, p
 TRADE_EXIT = time(12, 30)         # intraday trades are squared off here
 EXIT_COL = "px_1230"              # price at TRADE_EXIT: the model's target and square-off price
 EXIT_MINUTES = 165                # TRADE_EXIT minus the 9:45 entry
+WINDOW_MINUTES = 330              # EXIT_TIME minus 9:45: last minute with stored first-hit times
 BAR_MINUTES = 5
 LEVELS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)   # percent
 LEVEL_COLS = [f"{p}{int(round(lv * 100)):03d}" for p in "ud" for lv in LEVELS]
@@ -189,12 +190,15 @@ def backfill_symbols(path: Path = BACKFILL_PATH) -> set[str]:
     return set(pd.read_csv(path, usecols=["symbol"])["symbol"].unique())
 
 
-def backfill_has_exit(path: Path = BACKFILL_PATH) -> bool:
-    """Does the Angel One history include the 12:30 exit price? (older downloads don't)"""
+def backfill_missing_exit(path: Path = BACKFILL_PATH) -> set[str]:
+    """Stocks whose Angel One history lacks the 12:30 exit price (older downloads)."""
     if not path.exists():
-        return False
-    head = pd.read_csv(path, nrows=2000)
-    return EXIT_COL in head and head[EXIT_COL].notna().mean() > 0.5
+        return set()
+    df = pd.read_csv(path, usecols=lambda c: c in ("symbol", EXIT_COL))
+    if EXIT_COL not in df:
+        return set(df["symbol"])
+    has = df.groupby("symbol")[EXIT_COL].apply(lambda x: x.notna().mean() > 0.5)
+    return set(has[~has].index)
 
 
 def backfill_days(path: Path = BACKFILL_PATH) -> int:

@@ -247,12 +247,13 @@ def live_selection(conn) -> dict | None:
 
 # --- Intraday -----------------------------------------------------------------------
 
-def intraday_feats(ctx, store_dir) -> pd.DataFrame:
+def intraday_feats(ctx, store_dir, target: MI.Target = MI.TRADE) -> pd.DataFrame:
     from stockpredictor import store
     from stockpredictor.data import intraday as I
     from stockpredictor.features import intraday as FI
 
-    return FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats, store.load_actions(store_dir))
+    return FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats, store.load_actions(store_dir),
+                    exit_col=target.exit_col)
 
 
 def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120) -> dict:
@@ -270,31 +271,76 @@ def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120) -
             "direction_accuracy": float(acc), "days": int(len(ic))}
 
 
-def retrain_intraday(ctx, store_dir, conn=None, force: bool = False) -> MI.IntradayModel | None:
+def retrain_intraday(ctx, store_dir, conn=None, force: bool = False,
+                     target: MI.Target = MI.TRADE) -> MI.IntradayModel | None:
     """Daily retrain on all intraday history (Yahoo + Angel One), once per day."""
-    if not force and (MI.MODEL_DIR / "meta.json").exists():
-        meta = json.loads((MI.MODEL_DIR / "meta.json").read_text())
+    meta_path = target.model_dir / "meta.json"
+    if not force and meta_path.exists():
+        meta = json.loads(meta_path.read_text())
         if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d"):
             return None
-    feats = intraday_feats(ctx, store_dir)
-    if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
+    feats = intraday_feats(ctx, store_dir, target)
+    if feats.empty or feats.dropna(subset=["target"])["date"].nunique() < MI.MIN_TRAIN_DAYS:
         return None
-    feats = intraday_feedback(conn, feats)
-    model = MI.IntradayModel.train(feats)
-    model.save()
+    feats = intraday_feedback(conn, feats, target.horizon)
+    model = MI.IntradayModel.train(feats, target=target)
+    model.save(target.model_dir)
     fb = int(feats["fb_weight"].notna().sum()) if "fb_weight" in feats else 0
-    log_run(conn, "intraday", "retrain", model.train_to,
-            {"days": model.train_days, "feedback_rows": fb, "params": MI.current_params()})
+    log_run(conn, target.horizon, "retrain", model.train_to,
+            {"days": model.train_days, "feedback_rows": fb, "params": MI.current_params(target)})
     return model
 
 
-def intraday_feedback(conn, feats: pd.DataFrame) -> pd.DataFrame:
+COMPARE_PATH = MI.MODEL_DIR.parent / "intraday_compare.json"
+
+
+def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
+                  capital: float = 100_000) -> dict | None:
+    """Which exit is better, 12:30 or the close? Both models, walk-forward on the SAME days
+    (each day predicted by a model trained only on earlier days), traded with the same rules
+    and costs. Saved for the dashboard."""
+    from stockpredictor.backtest import intraday as B
+    from stockpredictor.data import intraday as I
+
+    rules = rules or B.IntradayRules()
+    feats = {t.horizon: intraday_feats(ctx, store_dir, t).dropna(subset=["target"])
+             for t in MI.TARGETS}
+    common = set.intersection(*(set(f["date"].unique()) for f in feats.values()))
+    if len(common) < MI.MIN_TRAIN_DAYS + 20:
+        return None
+    out = {}
+    for t in MI.TARGETS:
+        f = feats[t.horizon][feats[t.horizon]["date"].isin(common)]
+        scores = MI.walk_forward(f, params=MI.current_params(t), last_days=last_days)
+        if scores.empty:
+            return None
+        m = scores.merge(f[["symbol", "date", "target_ret"]], on=["symbol", "date"])
+        ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
+                                     include_groups=False).dropna()
+        minutes = I.EXIT_MINUTES if t == MI.TRADE else I.WINDOW_MINUTES
+        sim = B.simulate(scores, f[["symbol", "date", "c30", t.exit_col, *I.LEVEL_COLS]], rules,
+                         capital, exit_col=t.exit_col, exit_minutes=minutes)
+        r = B.metrics(sim, capital)
+        out[t.horizon] = {
+            "label": t.label, "days": r.get("trading_days", 0), "ic": float(ic.mean()),
+            "avg_day_pnl": r.get("avg_day_pnl"), "win_days": r.get("win_days"),
+            "return_pct": r.get("return_pct"), "direction_accuracy": r.get("direction_accuracy"),
+            "random_baseline": r.get("random_baseline"), "trade_win_rate": r.get("trade_win_rate")}
+    days = sorted(scores["date"].unique())
+    out["period"] = f"{pd.Timestamp(days[0]):%Y-%m-%d} to {pd.Timestamp(days[-1]):%Y-%m-%d}"
+    out["updated"] = datetime.now().isoformat(timespec="seconds")
+    COMPARE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    COMPARE_PATH.write_text(json.dumps(out, indent=1, default=float))
+    return out
+
+
+def intraday_feedback(conn, feats: pd.DataFrame, horizon: str = "intraday") -> pd.DataFrame:
     """Judged intraday paper picks, buy AND sell, get extra weight in training (wrong ones
     more), so the model concentrates on the calls it actually makes."""
     if conn is None:
         return feats
-    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = "
-                         "'intraday' AND correct IS NOT NULL", conn)
+    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = ? "
+                         "AND correct IS NOT NULL", conn, params=(horizon,))
     if judged.empty:
         return feats
     judged["date"] = pd.to_datetime(judged["date"])
@@ -306,12 +352,12 @@ def intraday_feedback(conn, feats: pd.DataFrame) -> pd.DataFrame:
 
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
                   seed: int | None = None, check_days: int = 250,
-                  log_all: bool = True) -> dict | None:
+                  log_all: bool = True, target: MI.Target = MI.TRADE) -> dict | None:
     """Like tune_longterm: must win on the last 120 days and not lose on the last `check_days`."""
-    feats = intraday_feats(ctx, store_dir)
+    feats = intraday_feats(ctx, store_dir, target)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS + 10:
         return None
-    current = MI.current_params()
+    current = MI.current_params(target)
     results = []
     for i, params in enumerate(candidates(current, n_candidates, seed, INTRADAY_GRID)):
         results.append({"params": params, **evaluate_intraday(feats, params), "current": i == 0})
@@ -328,14 +374,14 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
         adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
                                                    or check["best"] >= check["current"])
     if adopted:
-        _save_params(MI.MODEL_DIR, best["params"])
+        _save_params(target.model_dir, best["params"])
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
               "all": results, "long_check": check}
     if log_all or adopted:
-        log_run(conn, "intraday", "tune", f"{feats['date'].max():%Y-%m-%d}", report)
+        log_run(conn, target.horizon, "tune", f"{feats['date'].max():%Y-%m-%d}", report)
     if adopted:
-        MI.IntradayModel.train(feats).save()
+        MI.IntradayModel.train(feats, target=target).save(target.model_dir)
     return report

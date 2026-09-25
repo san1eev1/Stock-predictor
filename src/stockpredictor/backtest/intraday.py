@@ -46,21 +46,22 @@ def pick(scores: pd.DataFrame, rules: IntradayRules) -> pd.DataFrame:
     return out
 
 
-def replay(row, side: str, rules: IntradayRules) -> tuple[float, str]:
+def replay(row, side: str, rules: IntradayRules, exit_col: str = I.EXIT_COL,
+           exit_minutes: int = I.EXIT_MINUTES) -> tuple[float, str]:
     """Exit price and reason for one trade, from its intraday summary row."""
     c30, sl, tp = row["c30"], snap(rules.stop_loss), snap(rules.target)
     adverse, favourable = ("d", "u") if side == "long" else ("u", "d")
     t_sl = row[I.level_col(adverse, sl)] if sl else np.nan
     t_tp = row[I.level_col(favourable, tp)] if tp else np.nan
-    # Hits after the 12:30 square-off don't count.
-    t_sl = t_sl if t_sl <= I.EXIT_MINUTES else np.nan
-    t_tp = t_tp if t_tp <= I.EXIT_MINUTES else np.nan
+    # Hits after the square-off don't count.
+    t_sl = t_sl if t_sl <= exit_minutes else np.nan
+    t_tp = t_tp if t_tp <= exit_minutes else np.nan
     sign = 1 if side == "long" else -1
     if not np.isnan(t_sl) and (np.isnan(t_tp) or t_sl <= t_tp):
         return c30 * (1 - sign * sl / 100), "stop-loss"
     if not np.isnan(t_tp):
         return c30 * (1 + sign * tp / 100), "target"
-    return row[I.EXIT_COL], "12:30 square-off"
+    return row[exit_col], ("12:30 square-off" if exit_col == I.EXIT_COL else "close")
 
 
 def trade_pnl(side: str, qty: int, entry: float, exit_: float,
@@ -78,7 +79,8 @@ def signal_strength(day_scores: pd.Series, rules: IntradayRules) -> float:
 
 
 def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = IntradayRules(),
-             capital: float = 100_000, costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> dict:
+             capital: float = 100_000, costs: IntradayCosts = DEFAULT_INTRADAY_COSTS,
+             exit_col: str = I.EXIT_COL, exit_minutes: int = I.EXIT_MINUTES) -> dict:
     data = scores.merge(summ, on=["symbol", "date"])
     slot = capital / (rules.n_long + rules.n_short)
     strength = data.groupby("date")["score"].apply(lambda s: signal_strength(s, rules))
@@ -87,7 +89,7 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
 
     trades, days = [], []
     for d, day in data.groupby("date"):
-        up_share = (day[I.EXIT_COL] > day["c30"]).mean()
+        up_share = (day[exit_col] > day["c30"]).mean()
         if strength[d] < threshold.get(d, -np.inf):
             days.append({"date": d, "pnl": 0.0, "skipped": True})
             continue
@@ -96,10 +98,10 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
             qty = int(slot / p["c30"])
             if qty <= 0:
                 continue
-            exit_, reason = replay(p, p["side"], rules)
+            exit_, reason = replay(p, p["side"], rules, exit_col, exit_minutes)
             pnl, c = trade_pnl(p["side"], qty, p["c30"], exit_, costs)
             pnl_day += pnl
-            ex = p[I.EXIT_COL]
+            ex = p[exit_col]
             correct = (ex > p["c30"]) if p["side"] == "long" else (ex < p["c30"])
             trades.append({"date": d, "symbol": p["symbol"], "side": p["side"], "qty": qty,
                            "entry": p["c30"], "exit": exit_, "reason": reason, "pnl": pnl,

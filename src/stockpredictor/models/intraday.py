@@ -1,4 +1,5 @@
-"""Intraday ranking model: which stocks will do best / worst from 9:45 to 12:30."""
+"""Intraday ranking models: which stocks will do best / worst from 9:45 to 12:30 (traded),
+and from 9:45 to the 15:30 close (a second model that keeps learning until the close)."""
 
 from __future__ import annotations
 
@@ -12,11 +13,27 @@ import numpy as np
 import pandas as pd
 
 from stockpredictor.config import LOCAL_MODELS_DIR
+from stockpredictor.data import intraday as I
 from stockpredictor.features import intraday as FI
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
 MODEL_DIR = LOCAL_MODELS_DIR / "intraday"     # trained on the Mac (Angel One data)
+
+
+@dataclass(frozen=True)
+class Target:
+    """What an intraday model predicts: the 9:45 -> exit move."""
+    horizon: str          # predictions.horizon in the database
+    exit_col: str         # intraday summary column with the exit price
+    model_dir: Path
+    label: str
+
+
+TRADE = Target("intraday", I.EXIT_COL, MODEL_DIR, "until 12:30 (traded)")
+CLOSE = Target("intraday_close", "close", LOCAL_MODELS_DIR / "intraday_close",
+               "until the 15:30 close (learning)")
+TARGETS = (TRADE, CLOSE)
 # Held while model files are written or read (background training runs in another thread).
 MODEL_LOCK = threading.RLock()
 MIN_TRAIN_DAYS = 40
@@ -28,9 +45,9 @@ PARAMS = dict(
 )
 
 
-def current_params() -> dict:
-    """Tuned settings if the weekly tuner saved any, else the defaults."""
-    path = MODEL_DIR / "params.json"
+def current_params(target: Target = TRADE) -> dict:
+    """Tuned settings if the tuner saved any, else the defaults."""
+    path = target.model_dir / "params.json"
     if path.exists():
         return json.loads(path.read_text())
     return {**PARAMS, "num_rounds": NUM_ROUNDS}
@@ -65,10 +82,11 @@ class IntradayModel:
     metrics: dict = field(default_factory=dict)
 
     @classmethod
-    def train(cls, feats: pd.DataFrame, params: dict | None = None) -> "IntradayModel":
+    def train(cls, feats: pd.DataFrame, params: dict | None = None,
+              target: Target = TRADE) -> "IntradayModel":
         train = feats.dropna(subset=["target"])
         cols = FI.feature_columns(train)
-        return cls(_fit(train, cols, params), cols, datetime.now().isoformat(timespec="seconds"),
+        return cls(_fit(train, cols, params or current_params(target)), cols, datetime.now().isoformat(timespec="seconds"),
                    f"{train['date'].max():%Y-%m-%d}", int(train["date"].nunique()))
 
     def score(self, feats: pd.DataFrame) -> pd.Series:

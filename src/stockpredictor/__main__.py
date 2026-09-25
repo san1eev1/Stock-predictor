@@ -431,9 +431,9 @@ def _angel_startup(settings, store_dir: Path) -> None:
     active = uni.loc[uni["active"] == 1, "symbol"].tolist()
     have = intraday.backfill_days()
     # Full download if there is little history; otherwise only stocks new to the universe.
-    # (also a full download once when the history lacks the 12:30 exit prices)
-    todo = active if have < 200 or not intraday.backfill_has_exit() \
-        else sorted(set(active) - intraday.backfill_symbols())
+    # (and again for stocks whose history lacks the 12:30 exit prices; resumes if interrupted)
+    todo = active if have < 200 else sorted(
+        (set(active) - intraday.backfill_symbols()) | (set(active) & intraday.backfill_missing_exit()))
     if not todo:
         print(f"  Angel One intraday history: {have} days available\n")
         return
@@ -450,9 +450,14 @@ def _angel_startup(settings, store_dir: Path) -> None:
         log = logging.getLogger("backfill")
         try:
             tokens = angelone.fetch_nse_equity_tokens()
+            failed = []
             n = intraday.angel_backfill(client, tokens, todo, date.today() - timedelta(days=730),
                                         date.today() - timedelta(days=1),
-                                        progress=lambda m: log.debug(m))
+                                        progress=lambda m: failed.append(m) if ": error" in m
+                                        else log.debug(m))
+            if failed:
+                log.warning("Angel One backfill: %d of %d stocks failed (retried next start), "
+                            "e.g. %s", len(failed), len(todo), failed[0])
             if not n:
                 log.info("Angel One backfill: nothing new downloaded (will retry next start)")
                 return

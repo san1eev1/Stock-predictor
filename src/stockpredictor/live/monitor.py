@@ -77,6 +77,7 @@ class Monitor:
         self._last_quarter: datetime | None = None
         self._live_day: tuple | None = None   # (date, is_trading_day)
         self._imodel: MI.IntradayModel | None = None
+        self._cmodel: MI.IntradayModel | None = None   # 9:45 -> close (learning model)
         self._models_rev: str | None = None      # commit of the cloud-trained models in use
         self.background = None                   # live/background.py BackgroundTrainer
         self._started = False
@@ -100,6 +101,11 @@ class Monitor:
         if self._imodel is None and (MI.MODEL_DIR / "model.txt").exists():
             self._imodel = MI.IntradayModel.load()
         return self._imodel
+
+    def close_model(self) -> MI.IntradayModel | None:
+        if self._cmodel is None and (MI.CLOSE.model_dir / "model.txt").exists():
+            self._cmodel = MI.IntradayModel.load(MI.CLOSE.model_dir)
+        return self._cmodel
 
     def watched_symbols(self) -> set[str]:
         syms = set(E.holdings(self.conn)) | set(E.holdings(self.conn, E.SHORT_HORIZON))
@@ -126,7 +132,7 @@ class Monitor:
         _set(self.conn, "monitor_heartbeat", now.isoformat(timespec="seconds"))
         if self.background is not None and self.background.model_changed.is_set():
             self.background.model_changed.clear()
-            self._imodel = None                  # background training improved it: reload
+            self._imodel = self._cmodel = None   # background training improved them: reload
         if not self._started:
             self._started = True
             self.startup_job(now)
@@ -161,12 +167,14 @@ class Monitor:
         # After the close: today's whole session (trading stopped at 12:30, but the model
         # keeps learning from the market until 15:30) goes into the intraday history.
         day = f"{now:%Y-%m-%d}"
-        if self.background is not None and now.weekday() < 5 and now.time() >= LIVE_LEARN \
+        if now.weekday() < 5 and now.time() >= LIVE_LEARN \
                 and _setting(self.conn, "id_last_squareoff") == day \
                 and _setting(self.conn, "live_learn_day") != day:
             _set(self.conn, "live_learn_day", day)
-            self.background.learn_from_today(now.date())
-            done.append("live-learn")
+            self.judge_close(day)
+            if self.background is not None:
+                self.background.learn_from_today(now.date())
+                done.append("live-learn")
         # Without the background thread, tune in the monitor itself (only when idle).
         if self.background is None and self.market_idle(now) and self.idle_tune(now):
             done.append("tune")
@@ -206,6 +214,9 @@ class Monitor:
                           f"{now:%Y-%m-%d %H:%M} {label} tuning improved long-term IC "
                           f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
                     msg += " (improved - new settings adopted)"
+            for tgt in MI.TARGETS[1:]:
+                T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=n, target=tgt)
+            self._cmodel = None
             it = T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=n)
             if it:
                 msg += f", intraday IC {it['ic']:.3f}"
@@ -320,6 +331,8 @@ class Monitor:
             if it is not None:
                 self._imodel = it
                 log.info("Intraday model retrained on %s days", it.train_days)
+            if T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.CLOSE) is not None:
+                self._cmodel = None
             results = D.run_daily(self.conn, ctx, self.capital, self.model())
             for r in results:
                 log.info("Decision for %s: buy %s; sell %s", f"{r['date']:%Y-%m-%d}",
@@ -371,11 +384,26 @@ class Monitor:
             if rules.skip_quantile > 0 else None
         r = PI.run_picks(self.conn, feats, model, prices, pd.Timestamp(now.date()), rules,
                          self.capital_intraday, negative, strengths)
+        close_model = self.close_model()
+        if close_model is not None:              # predictions only: learns until the close
+            PI.predict_only(self.conn, feats, close_model, prices, pd.Timestamp(now.date()))
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
+
+    def judge_close(self, day: str) -> None:
+        """Judge the 9:45 -> close predictions at the day's closing prices."""
+        syms = {r[0] for r in self.conn.execute(
+            "SELECT symbol FROM predictions WHERE horizon = ? AND date = ?", (MI.CLOSE.horizon, day))}
+        syms |= {r[0] for r in self.conn.execute(
+            "SELECT symbol FROM intraday_open WHERE date = ?", (day,))}
+        if not syms:
+            return
+        n = PI.evaluate_day(self.conn, day, self.prices.get(sorted(syms)), MI.CLOSE.horizon)
+        if n:
+            log.info("Judged %d 9:45 -> close predictions at the closing prices", n)
 
     def square_off_job(self, now: datetime) -> None:
         day = f"{now:%Y-%m-%d}"
@@ -483,6 +511,8 @@ class Monitor:
             it = T.retrain_intraday(ctx, self.store_dir, self.conn)
             if it is not None:
                 self._imodel = it
+            if T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.CLOSE) is not None:
+                self._cmodel = None
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())

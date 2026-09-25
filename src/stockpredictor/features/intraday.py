@@ -61,8 +61,9 @@ def _daily_context(daily: pd.DataFrame, lt_feats: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
-          actions: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Features for every summary row that has a previous trading day in `daily`."""
+          actions: pd.DataFrame | None = None, exit_col: str = I.EXIT_COL) -> pd.DataFrame:
+    """Features for every summary row that has a previous trading day in `daily`.
+    The target is the 9:45 -> `exit_col` move (12:30 exit by default, or "close")."""
     if summ.empty:
         return summ
     s = summ.copy()
@@ -99,7 +100,7 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     for col in RANKED:
         s[f"{col}_rank"] = s.groupby("date")[col].rank(pct=True)
 
-    s["target_ret"] = s[I.EXIT_COL] / s["c30"] - 1          # trades are squared off at 12:30
+    s["target_ret"] = s[exit_col] / s["c30"] - 1            # 12:30 square-off, or the close
     s["target"] = s.groupby("date")["target_ret"].rank(pct=True)
     return s.sort_values(["date", "symbol"]).reset_index(drop=True)
 
