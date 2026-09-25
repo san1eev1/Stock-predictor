@@ -195,7 +195,8 @@ def market_regime(indices: pd.DataFrame) -> pd.DataFrame:
 
 def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
                    universe: pd.DataFrame | None = None,
-                   delivery: pd.DataFrame | None = None) -> pd.DataFrame:
+                   delivery: pd.DataFrame | None = None,
+                   earnings: pd.DataFrame | None = None) -> pd.DataFrame:
     """Return features for every (symbol, date) with enough history."""
     daily = daily.sort_values(["symbol", "date"]).reset_index(drop=True)
 
@@ -233,6 +234,10 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
         from stockpredictor.data.delivery import features as delivery_features
 
         feats = feats.merge(delivery_features(delivery), on=["symbol", "date"], how="left")
+    if earnings is not None and not earnings.empty:        # results dates (data/earnings.py)
+        from stockpredictor.data.earnings import add_features as earnings_features
+
+        feats = earnings_features(feats, earnings)
 
     ranks = feats.groupby("date")[RANKED].rank(pct=True).add_suffix("_rank")
     feats = pd.concat([feats, ranks], axis=1)

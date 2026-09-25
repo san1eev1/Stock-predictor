@@ -55,7 +55,10 @@ class MarketContext:
         universe = store.load_universe(store_dir)
         from stockpredictor.nlp import relevance as R
 
-        feats = cached_features(store_dir, daily, indices, universe, DL.load(store_dir))
+        from stockpredictor.data import earnings as ER
+
+        feats = cached_features(store_dir, daily, indices, universe, DL.load(store_dir),
+                                ER.load(store_dir))
         return cls(daily, indices, universe, feats,
                    R.add_relevance(N.load_news(store_dir), universe))
 
@@ -71,7 +74,8 @@ class MarketContext:
 FEATURE_CACHE_VERSION = 4     # 4: cleaned prices (data/clean.py)
 
 
-def cached_features(store_dir, daily, indices, universe, delivery=None) -> pd.DataFrame:
+def cached_features(store_dir, daily, indices, universe, delivery=None,
+                    earnings=None) -> pd.DataFrame:
     """Build features once per data update and reuse them (~1 s instead of ~15 s per load).
     Stored as compressed float32 (~100 MB); set FEATURE_CACHE=0 in .env to turn it off."""
     import hashlib
@@ -81,11 +85,11 @@ def cached_features(store_dir, daily, indices, universe, delivery=None) -> pd.Da
     from stockpredictor.config import DATA_DIR
 
     if os.getenv("FEATURE_CACHE", "1") == "0":
-        return F.build_features(daily, indices, universe, delivery)
+        return F.build_features(daily, indices, universe, delivery, earnings)
     from stockpredictor.store import local_overlay_path
 
     files = sorted(Path(store_dir).glob("daily/*.csv")) + sorted(Path(store_dir).glob("indices/*.csv")) \
-        + sorted(Path(store_dir).glob("delivery/*.csv")) \
+        + sorted(Path(store_dir).glob("delivery/*.csv")) + [Path(store_dir) / "earnings.csv"] \
         + [Path(store_dir) / "universe.csv", local_overlay_path("daily"), local_overlay_path("indices")]
     sig = "|".join(f"{f.name}:{f.stat().st_size}:{f.stat().st_mtime_ns}" for f in files if f.exists())
     key = hashlib.sha1(f"{FEATURE_CACHE_VERSION}|{sig}".encode()).hexdigest()[:16]
@@ -96,7 +100,7 @@ def cached_features(store_dir, daily, indices, universe, delivery=None) -> pd.Da
             return pd.read_pickle(path).copy()
         except Exception:
             path.unlink(missing_ok=True)
-    feats = F.build_features(daily, indices, universe, delivery)
+    feats = F.build_features(daily, indices, universe, delivery, earnings)
     floats = feats.select_dtypes("float64").columns
     feats[floats] = feats[floats].astype(np.float32)
     feats = feats.copy()

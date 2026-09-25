@@ -67,9 +67,7 @@ def todays_features(ctx: E.MarketContext, first30: dict[str, dict], today: pd.Ti
     hist = hist[hist["date"] >= today - pd.Timedelta(days=HISTORY_DAYS * 1.6)]
     rows = [{"symbol": s, "date": today, **v, "source": "live"} for s, v in first30.items()]
     summ = pd.concat([hist[hist["date"] < today], pd.DataFrame(rows)], ignore_index=True)
-    sectors = dict(zip(ctx.universe["symbol"], ctx.universe["industry"]))
-    feats = FI.build(summ, ctx.daily[ctx.daily["date"] < today], ctx.feats,
-                     ctx_actions(store_dir), sectors=sectors)
+    feats = FI.build_for(summ, ctx, store_dir, daily=ctx.daily[ctx.daily["date"] < today])
     return feats[feats["date"] == today]
 
 
@@ -85,8 +83,7 @@ def recent_strengths(model: MI.IntradayModel, store_dir: Path, ctx: E.MarketCont
     hist = hist[hist["date"] >= hist["date"].max() - pd.Timedelta(days=days * 1.6)]
     if hist.empty:
         return pd.Series(dtype=float)
-    f = FI.build(hist, ctx.daily, ctx.feats, ctx_actions(store_dir),
-                 sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])))
+    f = FI.build_for(hist, ctx, store_dir)
     f = f.assign(score=model.score(f))
     return f.groupby("date")["score"].apply(lambda s: B.signal_strength(s, rules)).tail(days)
 

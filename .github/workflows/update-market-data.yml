@@ -70,6 +70,7 @@ jobs:
           # Fundamentals snapshot once a week (Fridays) or on manual runs.
           if [ "$(date -u +%u)" = "5" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python -m stockpredictor fundamentals-update --dir market-data || echo "::warning::fundamentals failed"
+            python -m stockpredictor earnings-update --dir market-data || echo "::warning::results dates failed"
           fi
 
       - name: Commit and push

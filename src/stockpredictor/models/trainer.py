@@ -272,9 +272,7 @@ def intraday_feats(ctx, store_dir, target: MI.Target = MI.TRADE) -> pd.DataFrame
     from stockpredictor.data import intraday as I
     from stockpredictor.features import intraday as FI
 
-    sectors = dict(zip(ctx.universe["symbol"], ctx.universe["industry"]))
-    feats = FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats,
-                     store.load_actions(store_dir), exit_col=target.exit_col, sectors=sectors)
+    feats = FI.build_for(I.load_summaries(store_dir), ctx, store_dir, exit_col=target.exit_col)
     if feats.empty:
         return feats
     # A day only teaches ranking if enough stocks have its outcome (e.g. while the 12:30

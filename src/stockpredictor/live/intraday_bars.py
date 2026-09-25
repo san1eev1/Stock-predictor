@@ -26,11 +26,14 @@ def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
             if not token:
                 continue
             try:
-                bars = I.angel_bars(client, token, today, today)
+                # 1-minute bars: the same opening summary plus the fine 1/3-minute features
+                bars = I.angel_bars(client, token, today, today, interval="ONE_MINUTE")
                 bars = bars[(bars["ts"] >= start) & (bars["ts"] < end)]
                 summ = I.summarize_first30(bars)
                 if summ:
-                    out[s] = summ
+                    from stockpredictor.data.fine import summarize_fine
+
+                    out[s] = {**summ, **(summarize_fine(bars) or {})}
             except Exception as exc:
                 log.warning("first30 %s: %s", s, exc)
     missing = [s for s in symbols if s not in out]

@@ -56,7 +56,9 @@ jobs:
       - name: Restore Angel One intraday history
         uses: actions/cache/restore@v4
         with:
-          path: data/intraday_backfill.csv
+          path: |
+            data/intraday_backfill.csv
+            data/intraday_fine.csv
           key: angel-intraday-${{ github.run_id }}
           restore-keys: angel-intraday-
 
@@ -74,7 +76,9 @@ jobs:
         if: always() && hashFiles('data/intraday_backfill.csv') != ''
         uses: actions/cache/save@v4
         with:
-          path: data/intraday_backfill.csv
+          path: |
+            data/intraday_backfill.csv
+            data/intraday_fine.csv
           key: angel-intraday-${{ github.run_id }}
 
       - name: Publish models

@@ -94,6 +94,16 @@ def cmd_delivery_update(settings, args) -> None:
     print(f"Delivery data: {n} new days")
 
 
+def cmd_earnings_update(settings, args) -> None:
+    """Quarterly results dates (Yahoo) -> earnings.csv in the git store."""
+    from stockpredictor import store
+    from stockpredictor.data import earnings
+
+    d = Path(args.dir)
+    n = earnings.update(d, store.load_universe(d)["symbol"].tolist())
+    print(f"Results dates: {n} announcements stored")
+
+
 def _delivery_args(p) -> None:
     _dir_arg(p)
     p.add_argument("--start", default="2005-01-01", help="Oldest day to download")
@@ -466,6 +476,22 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
             n = I.angel_backfill(client, tokens, rest, last.date() + timedelta(days=1), today,
                                  progress=lambda m: None, deadline=deadline + 20 * 60)
             print(f"Angel One history: {n} new stock-days since {last:%Y-%m-%d}", flush=True)
+        # 1-minute opening features (data/fine.py): 2 years for stocks without them, then the
+        # days since the last run; resumes next run when the time budget is used.
+        from stockpredictor.data import fine
+
+        cov = fine.coverage()
+        need = [s for s in active if cov.get(s, 0) < 0.8 * I.backfill_days()]
+        if need:
+            n = fine.backfill(client, tokens, need, today - timedelta(days=730), today,
+                              progress=lambda m: None, deadline=deadline + 20 * 60)
+            print(f"1-minute history: {n} stock-days for {len(need)} stocks", flush=True)
+        last_fine = fine.load()["date"].max()
+        if pd.notna(last_fine) and last_fine.date() < today:
+            rest = [s for s in active if s not in need]
+            n = fine.backfill(client, tokens, rest, last_fine.date() + timedelta(days=1), today,
+                              progress=lambda m: None, deadline=deadline + 30 * 60)
+            print(f"1-minute history: {n} new stock-days", flush=True)
     except Exception as exc:
         print(f"Angel One download failed ({exc}); training on the history already cached",
               flush=True)
@@ -695,8 +721,7 @@ def _intraday_features(d: Path):
     from stockpredictor.paper.engine import MarketContext
 
     ctx = MarketContext.load(d)
-    return FI.build(intraday.load_summaries(d), ctx.daily, ctx.feats, store.load_actions(d),
-                    sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])))
+    return FI.build_for(intraday.load_summaries(d), ctx, d)
 
 
 def cmd_train_intraday(settings, args) -> None:
@@ -938,6 +963,7 @@ ARG_COMMANDS = {
     "data-check": (cmd_data_check, "Report data coverage and gaps", _symbols_arg),
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
+    "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
 }
 
 COMMANDS = {

@@ -93,7 +93,7 @@ TRADE_LABEL_RULES = (1.0, 2.0)      # stop-loss %, target % behind the trade-out
 
 def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
           actions: pd.DataFrame | None = None, exit_col: str = I.EXIT_COL,
-          sectors: dict | None = None) -> pd.DataFrame:
+          sectors: dict | None = None, earnings: pd.DataFrame | None = None) -> pd.DataFrame:
     """Features for every summary row that has a previous trading day in `daily`.
     The target is the 9:45 -> `exit_col` move (12:30 exit by default, or "close")."""
     if summ.empty:
@@ -145,6 +145,10 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     from stockpredictor.features.calendar import add_calendar
 
     s = add_calendar(s, daily["date"].unique(), actions)
+    if earnings is not None and not earnings.empty:        # results-day moves
+        from stockpredictor.data.earnings import add_features as earnings_features
+
+        s = earnings_features(s, earnings)
 
     s["target_ret"] = s[exit_col] / s["c30"] - 1            # 12:30 square-off, or the close
     s["target"] = s.groupby("date")["target_ret"].rank(pct=True)
@@ -164,6 +168,20 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
         s.loc[has, "trade_short_ret"] = 1 - trade_exits(h, "short", sl, tp, exit_col, minutes) / h["c30"]
     s["target_trade"] = (s["trade_long_ret"] - s["trade_short_ret"]).groupby(s["date"]).rank(pct=True)
     return s.sort_values(["date", "symbol"]).reset_index(drop=True)
+
+
+def build_for(summ: pd.DataFrame, ctx, store_dir, exit_col: str = I.EXIT_COL,
+              daily: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`build` with everything from the market context and data store (corporate actions,
+    sectors, results dates) - the one way training and live picks build features."""
+    from stockpredictor import store
+    from stockpredictor.data import earnings as ER
+    from stockpredictor.data import fine
+
+    return build(fine.attach(summ), ctx.daily if daily is None else daily, ctx.feats,
+                 store.load_actions(store_dir), exit_col=exit_col,
+                 sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])),
+                 earnings=ER.load(store_dir))
 
 
 def feature_columns(feats: pd.DataFrame) -> list[str]:

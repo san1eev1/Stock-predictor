@@ -663,8 +663,13 @@ class Monitor:
             symbols = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
             n = I.angel_backfill(client, self.prices._tokens, symbols, now.date(), now.date(),
                                  progress=lambda m: None)
+            from stockpredictor.data import fine
+
+            nf = fine.backfill(client, self.prices._tokens, symbols, now.date(), now.date(),
+                               progress=lambda m: None)
             _set(self.conn, "angel_topup_day", f"{now:%Y-%m-%d}")
-            log.info("Angel One: saved today's intraday summaries for %s stocks", n)
+            log.info("Angel One: saved today's intraday summaries for %s stocks (1-minute "
+                     "features for %s)", n, nf)
         except Exception:
             log.exception("Angel One daily top-up failed")
 

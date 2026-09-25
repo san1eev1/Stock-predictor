@@ -71,3 +71,17 @@ def test_overnight_cues_have_no_look_ahead():
     assert abs(out["g_sp500_ret1_prev"] - (99 / 101 - 1)) < 1e-12
     # intraday on the 25th uses the 24th's row: the US close of the 24th (known by 9:15)
     assert abs(out["g_sp500_ret1_asof"] - (110 / 99 - 1)) < 1e-12
+
+
+def test_fine_opening_features_from_one_minute_bars():
+    import numpy as np
+
+    from stockpredictor.data.fine import summarize_fine
+
+    ts = pd.date_range("2026-09-25 09:15", periods=30, freq="1min")
+    close = 100 + np.arange(30) * 0.1                      # steady rise, breaks out after 9:30
+    bars = pd.DataFrame({"ts": ts, "open": close - 0.05, "high": close + 0.02,
+                         "low": close - 0.07, "close": close, "volume": [100] * 29 + [500]})
+    f = summarize_fine(bars)
+    assert abs(f["r5"] - ((100 + 0.4) / 99.95 - 1)) < 1e-9 and f["orb15"] == 1.0
+    assert f["up1_share"] == 1.0 and f["up3_share"] == 1.0 and f["vol_burst"] > 3

@@ -19,7 +19,9 @@ def load_all(store_dir: Path):
     universe = store.load_universe(store_dir)
     from stockpredictor.data import delivery as DL
 
-    feats = F.build_features(daily, indices, universe, DL.load(store_dir))
+    from stockpredictor.data import earnings as ER
+
+    feats = F.build_features(daily, indices, universe, DL.load(store_dir), ER.load(store_dir))
     labeled = M.add_labels(F.weekly_snapshots(feats), daily, indices)
     return daily, indices, feats, labeled
 
