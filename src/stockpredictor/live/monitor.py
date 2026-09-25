@@ -523,6 +523,8 @@ class Monitor:
                 if T.retrain_intraday(ctx, self.store_dir, self.conn,
                                       target=MI.CLOSE) is not None:
                     self._cmodel = None
+            elif config.MAC_DAILY_TRAINING:
+                self.daily_mac_train(ctx)
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
@@ -620,6 +622,17 @@ class Monitor:
         except Exception:
             log.exception("local data catch-up failed")
             return False
+
+    def daily_mac_train(self, ctx) -> None:
+        """Once a day after the close: retrain both intraday models on the Mac's history
+        (with today's session) using GitHub's tuned settings. No tuning, a few minutes.
+        The fresher of this and GitHub's model is used the next morning."""
+        for target in MI.TARGETS:
+            model = T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.on_mac(target))
+            if model is not None:
+                log.info("Daily Mac training: %s model retrained on %s days up to %s",
+                         target.label, model.train_days, model.train_to)
+        self._imodel = self._cmodel = None
 
     def angel_topup(self, now: datetime) -> None:
         settings = getattr(self.prices, "settings", None)

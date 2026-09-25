@@ -41,13 +41,23 @@ CLOSE = Target("intraday_close", "px_1515", ROOT / "intraday_close",
 TARGETS = (TRADE, CLOSE)
 
 
+def on_mac(target: Target) -> Target:
+    """The same model, trained on the Mac (its daily after-close retrain)."""
+    return Target(target.horizon, target.exit_col, LOCAL_MODELS_DIR / target.model_dir.name,
+                  target.label)
+
+
 def model_path(target: Target) -> Path | None:
-    """Where this target's trained model is: the published one, else a model the Mac trained
-    earlier (used until the first one arrives from GitHub)."""
-    for d in (target.model_dir, LOCAL_MODELS_DIR / target.model_dir.name):
-        if (d / "model.txt").exists():
-            return d
-    return None
+    """The freshest trained model for this target: GitHub's or the Mac's daily retrain."""
+    found = []
+    for d in dict.fromkeys((target.model_dir, on_mac(target).model_dir)):
+        try:
+            meta = json.loads((d / "meta.json").read_text())
+            if (d / "model.txt").exists():
+                found.append((meta.get("train_to", ""), meta.get("trained_at", ""), str(d)))
+        except (OSError, ValueError):
+            continue
+    return Path(max(found)[2]) if found else None
 
 
 def peer_of(target: Target) -> Target:
@@ -90,9 +100,10 @@ PARAMS = dict(
 
 def current_params(target: Target = TRADE) -> dict:
     """Tuned settings if the tuner saved any, else the defaults."""
-    path = target.model_dir / "params.json"
-    if path.exists():
-        return json.loads(path.read_text())
+    # The Mac's daily retrain uses the settings tuned on GitHub.
+    for d in (target.model_dir, ROOT / target.model_dir.name):
+        if (d / "params.json").exists():
+            return json.loads((d / "params.json").read_text())
     return {**PARAMS, "num_rounds": NUM_ROUNDS}
 
 

@@ -99,3 +99,19 @@ def test_rules_tuned_by_profit(tmp_path, monkeypatch):
     # the learned rules apply, capped by the Settings maximum
     r = T.rules_for(target, B.IntradayRules(n_long=1, n_short=5))
     assert (r.n_long, r.n_short, r.skip_quantile) == (1, 0, 0.5)
+
+
+def test_fresher_model_wins(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(MI, "LOCAL_MODELS_DIR", tmp_path / "mac")
+    target = MI.Target("intraday", "px_1230", tmp_path / "github" / "intraday", "until 12:30")
+    assert MI.model_path(target) is None
+    for where, to in ((target.model_dir, "2026-09-24"), (tmp_path / "mac" / "intraday", "2026-09-25")):
+        where.mkdir(parents=True)
+        (where / "model.txt").write_text("x")
+        (where / "meta.json").write_text(json.dumps({"train_to": to, "trained_at": to}))
+    assert MI.model_path(target) == tmp_path / "mac" / "intraday"   # the Mac's is newer
+    (target.model_dir / "meta.json").write_text(json.dumps({"train_to": "2026-09-26",
+                                                            "trained_at": "x"}))
+    assert MI.model_path(target) == target.model_dir                  # now GitHub's is
