@@ -156,3 +156,18 @@ def select_features(train: pd.DataFrame, cols: list[str], params: dict,
     gain = lgb.train(p, data, num_boost_round=100).feature_importance(importance_type="gain")
     keep = set(np.argsort(gain)[::-1][:k])
     return [c for i, c in enumerate(cols) if i in keep]
+
+
+def trained_time(meta: dict, from_github: bool) -> "datetime":
+    """When a model was trained, in UTC. Timestamps are written without a time zone: GitHub's
+    runners use UTC, the Mac its local time (IST), so the two can be compared fairly."""
+    from datetime import datetime, timezone
+
+    try:
+        t = datetime.fromisoformat(meta.get("trained_at") or "")
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc) if from_github else t.astimezone()
+    return t.astimezone(timezone.utc)
+

@@ -37,7 +37,10 @@ def model_path() -> Path:
         except (OSError, ValueError):
             continue
         if (d / "model.txt").exists() and meta.get("horizon", 63) == HORIZON:
-            found.append((meta.get("train_to", ""), meta.get("trained_at", ""), str(d)))
+            from stockpredictor.models.engine import trained_time
+
+            when = trained_time(meta, from_github=d != MAC_MODEL_DIR)
+            found.append((meta.get("train_to", ""), when, str(d)))
     return Path(max(found)[2]) if found else MODEL_DIR
 HORIZON = 5             # trading days: predict the next week
 EMBARGO_DAYS = 14       # calendar days between train labels and test start (> horizon)

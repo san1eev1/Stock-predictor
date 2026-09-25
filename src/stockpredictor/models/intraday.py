@@ -54,7 +54,8 @@ def model_path(target: Target) -> Path | None:
         try:
             meta = json.loads((d / "meta.json").read_text())
             if (d / "model.txt").exists():
-                found.append((meta.get("train_to", ""), meta.get("trained_at", ""), str(d)))
+                when = engine.trained_time(meta, from_github=d != on_mac(target).model_dir)
+                found.append((meta.get("train_to", ""), when, str(d)))
         except (OSError, ValueError):
             continue
     return Path(max(found)[2]) if found else None

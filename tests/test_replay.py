@@ -115,3 +115,25 @@ def test_fresher_model_wins(tmp_path, monkeypatch):
     (target.model_dir / "meta.json").write_text(json.dumps({"train_to": "2026-09-26",
                                                             "trained_at": "x"}))
     assert MI.model_path(target) == target.model_dir                  # now GitHub's is
+
+
+def test_github_evening_model_beats_mac_afternoon_model(tmp_path, monkeypatch):
+    import json
+    import os
+    import time as _t
+
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    _t.tzset()
+    try:
+        monkeypatch.setattr(MI, "LOCAL_MODELS_DIR", tmp_path / "mac")
+        target = MI.Target("intraday", "px_1230", tmp_path / "github" / "intraday", "12:30")
+        for where, at in ((target.model_dir, "2026-09-25T15:30:00"),      # 21:00 IST, UTC
+                          (tmp_path / "mac" / "intraday", "2026-09-25T16:00:00")):  # IST
+            where.mkdir(parents=True)
+            (where / "model.txt").write_text("x")
+            (where / "meta.json").write_text(json.dumps({"train_to": "2026-09-25",
+                                                         "trained_at": at}))
+        assert MI.model_path(target) == target.model_dir
+    finally:
+        os.environ.pop("TZ", None)
+        _t.tzset()
