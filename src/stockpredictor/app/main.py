@@ -184,7 +184,7 @@ def page_picks():
     st.caption("Sell these if you hold them, or avoid buying them.")
     table("down")
     sell_now(c, preds)
-    live_block(c)
+    live_block()
 
     st.subheader("📰 Latest headlines for picks")
     picks = preds.loc[preds["direction"] == "up", "symbol"].tolist()
@@ -241,8 +241,9 @@ def sell_now(c, preds: pd.DataFrame):
 
 
 @st.fragment(run_every=REFRESH)
-def live_block(c=None):
-    c = c or conn()
+def live_block():
+    # Fragments re-run in another thread: always open a fresh connection here.
+    c = conn()
     live = pd.read_sql("SELECT * FROM live_scores ORDER BY rank", c)
     if live.empty:
         return

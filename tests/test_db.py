@@ -50,3 +50,16 @@ def test_old_paper_trades_table_is_rebuilt_keeping_rows(tmp_path):
                   "VALUES ('longterm_short', 'ITC', 'short', 1, '2026-01-01', 100)")
         assert c.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0] == 2
         assert "stop_loss" in {r["name"] for r in c.execute("PRAGMA table_info(paper_trades)")}
+
+
+def test_connection_usable_from_another_thread(tmp_path):
+    """The dashboard refreshes page parts from other threads (was a crash in market hours)."""
+    import threading
+    db.init_db(tmp_path / "t.db")
+    conn = db.connect(tmp_path / "t.db")
+    result = {}
+    t = threading.Thread(target=lambda: result.update(
+        n=conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]))
+    t.start()
+    t.join()
+    assert result == {"n": 0}
