@@ -1,0 +1,77 @@
+{
+ "target": "intraday",
+ "adopted": true,
+ "rules": {
+  "n_long": 3,
+  "n_short": 1,
+  "stop_loss": 0.5,
+  "target": 1.0,
+  "skip_quantile": 0.7,
+  "min_prob": 0.0
+ },
+ "day_profit_recent": -72.22743124999958,
+ "day_profit_before": -166.65329691648773,
+ "current_day_profit_recent": -362.5566708077639,
+ "tested": 64,
+ "trade_days": 0.325,
+ "profitable": false,
+ "top": [
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 0.5,
+   "target": 1.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -72,
+   "before": -167,
+   "trade_days": 0.33
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 0.75,
+   "target": 1.5,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -84,
+   "before": -172,
+   "trade_days": 0.33
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -87,
+   "before": -184,
+   "trade_days": 0.33
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.0,
+   "target": 2.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -94,
+   "before": -177,
+   "trade_days": 0.33
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 0.75,
+   "target": 0.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -95,
+   "before": -184,
+   "trade_days": 0.33
+  }
+ ],
+ "period": "2025-10-07 to 2026-09-25",
+ "updated": "2026-09-25T23:14:31"
+}

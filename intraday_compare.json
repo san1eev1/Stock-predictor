@@ -1,0 +1,26 @@
+{
+ "intraday": {
+  "label": "until 12:30",
+  "days": 120,
+  "ic": 0.02482917851771665,
+  "avg_day_pnl": -377.32531055627527,
+  "win_days": 0.10833333333333334,
+  "return_pct": -0.4527903726675303,
+  "direction_accuracy": 0.5390763765541741,
+  "random_baseline": 0.500324608145586,
+  "trade_win_rate": 0.3046181172291297
+ },
+ "intraday_close": {
+  "label": "until the close (15:15 square-off)",
+  "days": 120,
+  "ic": 0.03453736702920012,
+  "avg_day_pnl": -432.6163406732031,
+  "win_days": 0.1,
+  "return_pct": -0.5191396088078437,
+  "direction_accuracy": 0.5271317829457365,
+  "random_baseline": 0.5001564173469519,
+  "trade_win_rate": 0.32558139534883723
+ },
+ "period": "2026-04-06 to 2026-09-25",
+ "updated": "2026-09-25T23:18:13"
+}
