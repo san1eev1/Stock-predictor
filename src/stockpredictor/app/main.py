@@ -315,7 +315,8 @@ def page_paper_longterm():
 def page_paper_intraday():
     st.title("Paper trading — Intraday")
     st.caption("Every trading day at 9:46: buys the 10 stocks expected to rise and short-sells the "
-               "10 expected to fall, with a stop-loss and target, all closed by 15:15.")
+               "10 expected to fall, with a stop-loss and target, all closed by 12:30 (the model keeps "
+               "learning from the market until the 15:30 close).")
     accuracy_now_panel("intraday")
     paper_intraday()
 
@@ -426,7 +427,7 @@ def page_intraday():
     rules, enabled = PI.get_rules(c)
     st.caption(f"At 9:45 the model ranks all Nifty 250 stocks on the first 30 minutes. "
                f"Stop-loss {rules.stop_loss}%, "
-               f"target {rules.target or 'none'}%, squared off at 15:15. It lists 10 buy and 10 sell "
+               f"target {rules.target or 'none'}%, squared off at 12:30. It lists 10 buy and 10 sell "
                f"candidates; 🧪 marks the {rules.n_long} + {rules.n_short} strongest that are "
                "paper-traded (change in Settings).")
     if not enabled:
@@ -453,22 +454,22 @@ def intraday_preview():
     st.info(f"Live picks appear at **9:46 AM** on trading days while the program runs. Meanwhile, "
             f"this is what the model would have picked on **{day:%d %b %Y}** (trained only on earlier "
             f"days) and how it turned out.")
-    for side, title in (("long", "▲ 10 Buy — expected to rise 9:45 → 15:15"),
-                        ("short", "▼ 10 Sell — expected to fall 9:45 → 15:15")):
+    for side, title in (("long", "▲ 10 Buy — expected to rise 9:45 → 12:30"),
+                        ("short", "▼ 10 Sell — expected to fall 9:45 → 12:30")):
         p = picks[picks["side"] == side].copy()
         right = (p["move"] > 0).mean()
         st.markdown(f"**{title}** · {right:.0%} moved the predicted way "
                     f"(random picks that day: {p['baseline'].iloc[0]:.0%})")
         p["Result"] = ["✅" if x > 0 else "❌" for x in p["move"]]
         p["Why"] = [reason_text(r) for r in p["reasons"]]
-        st.dataframe(p[["symbol", "confidence", "c30", "px_1515", "move", "Result", "Why"]].rename(
+        st.dataframe(p[["symbol", "confidence", "c30", "px_1230", "move", "Result", "Why"]].rename(
             columns={"symbol": "Stock", "confidence": "Confidence", "c30": "Price 9:45",
-                     "px_1515": "Price 15:15", "move": "Move (in our favour)",
+                     "px_1230": "Price 12:30", "move": "Move (in our favour)",
                      "Why": "Signals (↑ raised score, ↓ lowered it)"}),
             hide_index=True, width="stretch", column_config={
                 "Confidence": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
                 "Price 9:45": st.column_config.NumberColumn(format="₹%.2f"),
-                "Price 15:15": st.column_config.NumberColumn(format="₹%.2f"),
+                "Price 12:30": st.column_config.NumberColumn(format="₹%.2f"),
                 "Move (in our favour)": st.column_config.NumberColumn(format="percent")})
 
 
@@ -482,8 +483,8 @@ def intraday_live(day: str):
     traded = {(r[0], r[1]) for r in c.execute(
         "SELECT symbol, side FROM paper_trades WHERE horizon = 'intraday' AND entry_time LIKE ?",
         (f"{day}%",))}
-    for direction, title in (("up", "▲ 10 Buy candidates (expected to rise 9:45 → 15:15)"),
-                             ("down", "▼ 10 Sell candidates (expected to fall 9:45 → 15:15)")):
+    for direction, title in (("up", "▲ 10 Buy candidates (expected to rise 9:45 → 12:30)"),
+                             ("down", "▼ 10 Sell candidates (expected to fall 9:45 → 12:30)")):
         p = preds[preds["direction"] == direction].sort_values("rank").copy()
         if p.empty:
             continue
@@ -519,8 +520,9 @@ def paper_intraday():
     live = live_prices(c)
     v = PI.value(c, live)
     k = st.columns(4)
-    k[0].metric("Capital", rupees(v["capital"]))
-    k[1].metric("Current value", rupees(v["equity"]), C.money(v["pnl"]))
+    k[0].metric("Started today with", rupees(v["capital"]),
+                help="Every trading day starts fresh with ₹1 lakh")
+    k[1].metric("Value now", rupees(v["equity"]), C.money(v["pnl"]))
     k[2].metric("Cash", rupees(v["cash"]))
     k[3].metric("Open positions", f"{v['positions']}")
     trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'intraday' "
@@ -560,12 +562,66 @@ def paper_intraday():
             column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
                            for k_ in ["Entry 9:45", "Live/Exit", "Stop-loss", "Target", "P&L (after costs)"]}
             | {"Share move %": PCT, "Today %": PCT})
-    eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'intraday' ORDER BY date", c)
-    if len(eq) >= 2:
-        st.subheader("Value over time")
-        eq["date"] = pd.to_datetime(eq["date"])
-        st.altair_chart(C.lines(eq.assign(series="Model", value=eq["equity"]), "date", "value",
-                                "series", ",.0f", "Value (₹)"), width="stretch")
+    intraday_days(c)
+
+
+def intraday_days(c):
+    """Every day's result on a fresh ₹1 lakh, compared day by day."""
+    cap = SETTINGS.paper_capital_intraday
+    d = PI.daily_results(c, cap)
+    st.subheader("📅 Day by day (each day starts with ₹1 lakh)")
+    if d.empty:
+        st.caption("The first day's result appears after 12:30.")
+        return
+    done = d[d["open"] == 0]
+    if len(done) >= 2:
+        k = st.columns(4)
+        k[0].metric("Days traded", len(done))
+        k[1].metric("Profitable days", f"{(done['pnl'] > 0).mean():.0%}")
+        k[2].metric("Average day", C.money(done["pnl"].mean()),
+                    f"{done['pnl_pct'].mean():+.2%}")
+        acc = done.dropna(subset=["accuracy"])
+        if len(acc):
+            k[3].metric("Pick accuracy", f"{acc['accuracy'].mean():.0%}",
+                        f"{(acc['accuracy'] - acc['random']).mean() * 100:+.0f} pts vs random"
+                        if acc["random"].notna().any() else None)
+    if len(done) >= 10:        # is training making it better? recent days vs the ones before
+        n = min(10, len(done) // 2)
+        recent, before = done.tail(n), done.iloc[-2 * n:-n]
+        st.caption(f"Last {n} days vs the {n} before: average P&L "
+                   f"{C.money(recent['pnl'].mean())} vs {C.money(before['pnl'].mean())}, "
+                   f"pick accuracy {recent['accuracy'].mean():.0%} vs {before['accuracy'].mean():.0%}.")
+    t = d.iloc[::-1].copy()
+    t["Status"] = ["⏳ trading" if o else ("✅ profit" if p > 0 else "❌ loss")
+                   for o, p in zip(t["open"], t["pnl"])]
+    t["Buys right"] = [f"{r}/{n}" if n else "—" for r, n in zip(t["buy_right"], t["buy_n"])]
+    t["Sells right"] = [f"{r}/{n}" if n else "—" for r, n in zip(t["sell_right"], t["sell_n"])]
+    t["Won"] = [f"{w}/{n}" for w, n in zip(t["won"], t["trades"])]
+    t["P&L %"] = as_pct(t["pnl_pct"])
+    for k_ in ("accuracy", "random"):
+        t[k_] = (pd.to_numeric(t[k_]) * 100).round(0)
+    st.dataframe(t[["date", "Status", "end_value", "pnl", "P&L %", "Won", "Buys right",
+                    "Sells right", "accuracy", "random"]].rename(columns={
+        "date": "Day", "end_value": "Ended with", "pnl": "P&L (after costs)",
+        "accuracy": "Pick accuracy", "random": "Random picks"}), hide_index=True,
+        width="stretch", column_config={
+            "Ended with": st.column_config.NumberColumn(format="₹%.0f"),
+            "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f"),
+            "P&L %": PCT, "Pick accuracy": st.column_config.NumberColumn(format="%.0f%%"),
+            "Random picks": st.column_config.NumberColumn(format="%.0f%%")})
+    if len(done) >= 2:
+        st.altair_chart(C.bars(done.assign(Day=done["date"].str[5:]), "Day", "pnl", ",.0f",
+                               "P&L per day (₹)", ref=0), width="stretch")
+        acc = done.dropna(subset=["accuracy"])
+        if len(acc) >= 2:
+            a = pd.concat([acc.assign(series="Model picks", value=acc["accuracy"]),
+                           acc.assign(series="Random picks", value=acc["random"])])
+            a["date"] = pd.to_datetime(a["date"])
+            st.altair_chart(C.lines(a[["date", "series", "value"]].dropna(), "date", "value",
+                                    "series", ".0%", "Picks right"), width="stretch")
+    st.caption("Each day's picks and trades are kept. After 12:30 they are judged and fed "
+               "back into training — buy and sell picks, wrong calls weighted more — so later "
+               "days can be compared with earlier ones.")
 
 
 def page_portfolio():
@@ -674,7 +730,7 @@ def accuracy_now_panel(horizon: str):
                 "vs random": st.column_config.NumberColumn(format="%+d pts")})
     st.caption(("Judged after 1 week: a buy pick is right if it beat Nifty 50, a sell pick if it "
                 "lagged. 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
-                else "Judged at 15:15: a buy pick is right if it rose from 9:45, a sell pick if it "
+                else "Judged at 12:30: a buy pick is right if it rose from 9:45, a sell pick if it "
                 "fell.") + " 'Random' = picking stocks at random on the same days. "
                "Updates every minute.")
 
@@ -683,10 +739,10 @@ ACCURACY_TEXT = {
     "longterm": ("A long-term prediction is judged after 1 week: a buy pick is ✅ if it beat "
                  "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.",
                  "First results appear one week after the first prediction.", "vs Nifty"),
-    "intraday": ("An intraday pick is judged at 15:15 the same day: a long is ✅ if the price rose "
+    "intraday": ("An intraday pick is judged at 12:30 the same day: a long is ✅ if the price rose "
                  "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 250 "
                  "stocks that moved that way.", "Results appear after the first trading day.",
-                 "9:45 → 15:15"),
+                 "9:45 → 12:30"),
 }
 
 
@@ -955,7 +1011,7 @@ def page_settings():
         isl = cols[0].selectbox("Stop-loss %", levels, index=levels.index(BI.snap(irules.stop_loss)))
         itp = cols[1].selectbox("Target %", [0.0] + levels,
                                 index=([0.0] + levels).index(BI.snap(irules.target)),
-                                help="0 = no target, hold until 15:15")
+                                help="0 = no target, hold until 12:30")
         skip = cols[2].selectbox("Skip weak days", [0.0, 0.3, 0.5], index=[0.0, 0.3, 0.5].index(
             irules.skip_quantile) if irules.skip_quantile in (0.0, 0.3, 0.5) else 0,
             help="Skip days whose signal is weaker than this share of the last 60 days")

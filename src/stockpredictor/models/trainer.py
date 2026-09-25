@@ -38,6 +38,8 @@ LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
                                   ["trend", "candles"], ["trend", "statistics"],
                                   ["trend", "candles", "oscillators", "volume", "statistics"]]}
 FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
+# Intraday: also try focusing on the biggest risers and fallers (both ends = buy and sell picks).
+INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0]}
 # IC gain needed to switch settings. Re-running the same settings with another random
 # seed moves IC by about +/-0.004, so smaller "gains" are noise.
 MARGIN = 0.01
@@ -171,15 +173,24 @@ def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | N
 
 
 def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
-                  seed: int | None = None, check_years: int = 6, log_all: bool = True) -> dict:
+                  seed: int | None = None, check_years: int = 6, log_all: bool = True,
+                  cache: dict | None = None) -> dict:
     """Try variations of the current settings on history (walk-forward). A winner must beat
     the current settings over the last `years` AND not be worse over `check_years`, so a
     setting that only fits one period by luck is not adopted."""
     labeled = longterm_labeled(ctx)
     current = M.current_params()
+    cache = {} if cache is None else cache      # same data + settings -> same score
+
+    def score(params, yrs):
+        key = (json.dumps(params, sort_keys=True, default=str), yrs)
+        if key not in cache:
+            cache[key] = evaluate_longterm(labeled, params, yrs)
+        return cache[key]
+
     results = []
     for i, params in enumerate(candidates(current, n_candidates, seed, LONGTERM_GRID)):
-        res = evaluate_longterm(labeled, params, years)
+        res = score(params, years)
         results.append({"params": params, **res, "current": i == 0})
     valid = [r for r in results if not np.isnan(r["ic"])] or results
     best = max(valid, key=lambda r: -np.inf if np.isnan(r["ic"]) else r["ic"])
@@ -188,8 +199,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
                and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN))
     check = None
     if adopted and check_years > years:
-        check = {"best": evaluate_longterm(labeled, best["params"], check_years)["ic"],
-                 "current": evaluate_longterm(labeled, base["params"], check_years)["ic"]}
+        check = {"best": score(best["params"], check_years)["ic"],
+                 "current": score(base["params"], check_years)["ic"]}
         adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
                                                    or check["best"] >= check["current"])
     if adopted:
@@ -268,11 +279,29 @@ def retrain_intraday(ctx, store_dir, conn=None, force: bool = False) -> MI.Intra
     feats = intraday_feats(ctx, store_dir)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS:
         return None
+    feats = intraday_feedback(conn, feats)
     model = MI.IntradayModel.train(feats)
     model.save()
+    fb = int(feats["fb_weight"].notna().sum()) if "fb_weight" in feats else 0
     log_run(conn, "intraday", "retrain", model.train_to,
-            {"days": model.train_days, "params": MI.current_params()})
+            {"days": model.train_days, "feedback_rows": fb, "params": MI.current_params()})
     return model
+
+
+def intraday_feedback(conn, feats: pd.DataFrame) -> pd.DataFrame:
+    """Judged intraday paper picks, buy AND sell, get extra weight in training (wrong ones
+    more), so the model concentrates on the calls it actually makes."""
+    if conn is None:
+        return feats
+    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = "
+                         "'intraday' AND correct IS NOT NULL", conn)
+    if judged.empty:
+        return feats
+    judged["date"] = pd.to_datetime(judged["date"])
+    judged = judged.groupby(["symbol", "date"], as_index=False)["correct"].min()
+    out = feats.merge(judged, on=["symbol", "date"], how="left")
+    out["fb_weight"] = out["correct"].map(FEEDBACK_WEIGHT)
+    return out.drop(columns="correct")
 
 
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
@@ -284,7 +313,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
         return None
     current = MI.current_params()
     results = []
-    for i, params in enumerate(candidates(current, n_candidates, seed)):
+    for i, params in enumerate(candidates(current, n_candidates, seed, INTRADAY_GRID)):
         results.append({"params": params, **evaluate_intraday(feats, params), "current": i == 0})
     valid = [r for r in results if not np.isnan(r["ic"])]
     if not valid:

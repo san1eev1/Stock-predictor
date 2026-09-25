@@ -345,8 +345,10 @@ def cmd_cloud_train(settings, args) -> None:
         print("Backtest refreshed", flush=True)
 
     rounds = adopted = 0
+    scores: dict = {}               # settings already scored this run are not re-tested
     while time.monotonic() - started < budget:
-        r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False)
+        r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False,
+                            cache=scores)
         rounds += 1
         adopted += int(r["adopted"])
         print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f})"
@@ -429,7 +431,9 @@ def _angel_startup(settings, store_dir: Path) -> None:
     active = uni.loc[uni["active"] == 1, "symbol"].tolist()
     have = intraday.backfill_days()
     # Full download if there is little history; otherwise only stocks new to the universe.
-    todo = active if have < 200 else sorted(set(active) - intraday.backfill_symbols())
+    # (also a full download once when the history lacks the 12:30 exit prices)
+    todo = active if have < 200 or not intraday.backfill_has_exit() \
+        else sorted(set(active) - intraday.backfill_symbols())
     if not todo:
         print(f"  Angel One intraday history: {have} days available\n")
         return

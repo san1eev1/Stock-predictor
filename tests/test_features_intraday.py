@@ -18,7 +18,7 @@ def fake_summaries(daily, n_days=60, seed=1):
         row = {"symbol": sym, "date": d.strftime("%Y-%m-%d"), "open": r["open"],
                "h30": max(r["open"], c30) * 1.002, "l30": min(r["open"], c30) * 0.998,
                "c30": c30, "v30": 1000.0, "vwap30": (r["open"] + c30) / 2,
-               "high_after": r["high"], "low_after": r["low"], "px_1515": r["close"],
+               "high_after": r["high"], "low_after": r["low"], "px_1515": r["close"], "px_1230": r["close"],
                "close": r["close"], "source": "yahoo"}
         for lv in I.LEVELS:
             row[I.level_col("u", lv)] = 60 if r["high"] >= c30 * (1 + lv / 100) else np.nan
@@ -51,6 +51,7 @@ def test_target_and_ranks(data):
     assert f["r30_rank"].between(0, 1).all()
     cols = FI.feature_columns(f)
     assert "target_ret" not in cols and "px_1515" not in cols and "u100" not in cols
+    assert "px_1230" not in cols
     assert {"gap", "rel_r30", "vwap_dev", "breadth30", "rsi_14", "atr_pct"} <= set(cols)
 
 
@@ -59,7 +60,7 @@ def test_no_future_leak_in_features(data):
     daily, lt, summ, f = data
     s2 = summ.copy()
     last = s2["date"] == s2["date"].max()
-    s2.loc[last, ["px_1515", "close", "high_after", "low_after"]] *= 1.5
+    s2.loc[last, ["px_1515", "px_1230", "close", "high_after", "low_after"]] *= 1.5
     f2 = FI.build(s2, daily, lt)
     cols = FI.feature_columns(f)
     pd.testing.assert_frame_equal(f[cols], f2[cols])

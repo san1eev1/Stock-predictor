@@ -192,12 +192,15 @@ class _FakeBackground:
 def test_live_learning_after_square_off(tmp_path, ctx_model, fast_tuning, monkeypatch):
     ctx, model = ctx_model
     monkeypatch.setattr(MON.Monitor, "weekly_retrain", lambda self, now: False)
+    monkeypatch.setattr(MON.Monitor, "quarter_job", lambda self, now: None)
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 25, 15, 10))
     mon.background = bg = _FakeBackground()
     mon._imodel = "old"
     mon._last_quarter = clock["now"]                            # 15-minute job not due
-    assert "live-learn" not in mon.tick()
-    clock["now"] = ist(2026, 9, 25, 15, 17)
+    assert "square-off" in mon.tick() and "live-learn" not in mon.tick()   # 12:30 exit done
+    clock["now"] = ist(2026, 9, 25, 15, 25)
+    assert "live-learn" not in mon.tick()                      # market still open: wait
+    clock["now"] = ist(2026, 9, 25, 15, 32)
     assert "live-learn" in mon.tick() and bg.days == [clock["now"].date()]
     assert "live-learn" not in mon.tick()                       # once per day
     bg.model_changed.set()

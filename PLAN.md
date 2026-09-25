@@ -193,6 +193,25 @@ then **intraday** (needs Angel One). Telegram was dropped.
 - Long-term paper trading is buy-only; "sell" = exit holdings the model expects to fall (*Sell now* list for paper and real holdings). Intraday keeps 10 buy + 10 short a day.
 - Pages generate picks automatically when none exist; intraday shows an honest (out-of-sample) preview of the latest day until live picks start.
 
+### ✅ Nifty 250, continuous training, 12:30 intraday exit (25 Sep 2026)
+
+- Universe: both models train on and pick from the **Nifty LargeMidcap 250**.
+- Chart methods (`features/technical.py`): candlesticks, oscillators, trend systems, volume flow,
+  statistics. Walk-forward: only **trend systems** helped (top-10 weekly excess 0.67% → 0.85%),
+  so only they are on; the tuner can switch other groups on if they start helping.
+- **Training on GitHub every hour** (long-term + news, all history since 2005, continuous
+  self-tuning; published to the `models` branch). The Mac keeps 4 years of prices and trains the
+  intraday model in a background thread all day. New settings must win over 3 years and not lose
+  over 6.
+- **Intraday trades end at 12:30**; the model predicts 9:45 → 12:30 and learns from the whole
+  session after the 15:30 close.
+- Intraday paper trading **starts with ₹1 lakh every day**; day-by-day results compared.
+  Judged buy and sell picks feed back into training (wrong 2×, right 1.5×).
+- News: tips and target prices dropped; a model learns which headlines move each stock.
+- Dashboard: live prices every minute, Today % next to P&L after costs, accuracy with separate
+  UP / DOWN tables on every picks and paper page, buying and selling in separate tables.
+- Futures: considered and **left out** for now.
+
 ### Dropped
 
 - Telegram alerts (alerts are shown in the dashboard sidebar instead).
@@ -203,5 +222,5 @@ Then: **paper trade for 2–3 months** before trusting real money to the picks.
 
 - Personal use only (sharing picks publicly needs SEBI Research Analyst registration).
 - No automatic order placement — I place trades myself on Groww.
-- No paid services, no cloud compute.
+- No paid services. Free cloud only: GitHub Actions (public repo) collects data and trains.
 - The model is a decision aid, not a guarantee; realistic intraday accuracy is ~51–55%.

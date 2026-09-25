@@ -2,7 +2,7 @@
 
 Each trading day at 9:45: go long the top-ranked stocks and short the
 bottom-ranked ones, equal money each, with a stop-loss and target in % of the
-9:45 price; anything still open is squared off at 15:15. Stop/target hits are
+9:45 price; anything still open is squared off at 12:30. Stop/target hits are
 replayed from the first-hit minutes in the intraday summaries (5-minute
 resolution; if both happen in the same bar, the stop-loss is assumed first).
 """
@@ -52,12 +52,15 @@ def replay(row, side: str, rules: IntradayRules) -> tuple[float, str]:
     adverse, favourable = ("d", "u") if side == "long" else ("u", "d")
     t_sl = row[I.level_col(adverse, sl)] if sl else np.nan
     t_tp = row[I.level_col(favourable, tp)] if tp else np.nan
+    # Hits after the 12:30 square-off don't count.
+    t_sl = t_sl if t_sl <= I.EXIT_MINUTES else np.nan
+    t_tp = t_tp if t_tp <= I.EXIT_MINUTES else np.nan
     sign = 1 if side == "long" else -1
     if not np.isnan(t_sl) and (np.isnan(t_tp) or t_sl <= t_tp):
         return c30 * (1 - sign * sl / 100), "stop-loss"
     if not np.isnan(t_tp):
         return c30 * (1 + sign * tp / 100), "target"
-    return row["px_1515"], "15:15 square-off"
+    return row[I.EXIT_COL], "12:30 square-off"
 
 
 def trade_pnl(side: str, qty: int, entry: float, exit_: float,
@@ -84,7 +87,7 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
 
     trades, days = [], []
     for d, day in data.groupby("date"):
-        up_share = (day["px_1515"] > day["c30"]).mean()
+        up_share = (day[I.EXIT_COL] > day["c30"]).mean()
         if strength[d] < threshold.get(d, -np.inf):
             days.append({"date": d, "pnl": 0.0, "skipped": True})
             continue
@@ -96,7 +99,8 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
             exit_, reason = replay(p, p["side"], rules)
             pnl, c = trade_pnl(p["side"], qty, p["c30"], exit_, costs)
             pnl_day += pnl
-            correct = (p["px_1515"] > p["c30"]) if p["side"] == "long" else (p["px_1515"] < p["c30"])
+            ex = p[I.EXIT_COL]
+            correct = (ex > p["c30"]) if p["side"] == "long" else (ex < p["c30"])
             trades.append({"date": d, "symbol": p["symbol"], "side": p["side"], "qty": qty,
                            "entry": p["c30"], "exit": exit_, "reason": reason, "pnl": pnl,
                            "cost": c, "correct": correct,
@@ -132,7 +136,7 @@ def metrics(sim: dict, capital: float = 100_000) -> dict:
 def run(feats: pd.DataFrame, scores: pd.DataFrame, rules: IntradayRules = IntradayRules(),
         capital: float = 100_000) -> dict:
     """Model vs simple no-ML baselines, plus a small stop/target grid."""
-    summ = feats[["symbol", "date", "c30", "px_1515", *I.LEVEL_COLS]]
+    summ = feats[["symbol", "date", "c30", I.EXIT_COL, *I.LEVEL_COLS]]
     out = {"period": f"{scores['date'].min():%Y-%m-%d} to {scores['date'].max():%Y-%m-%d}",
            "rules": asdict(rules), "capital": capital, "strategies": {}, "grid": []}
     base = feats[feats["date"].isin(scores["date"].unique())]

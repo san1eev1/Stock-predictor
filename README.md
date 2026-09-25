@@ -1,169 +1,171 @@
 # Stock Predictor
 
-Personal AI stock predictor for the Nifty LargeMidcap 250 (Nifty 100 + Midcap 150), with two tracks, both complete:
+Personal AI stock predictor for the **Nifty LargeMidcap 250** (Nifty 100 + Midcap 150), with two
+tracks:
 
-- **Long-term:** 1-week predictions (10 buy / 10 sell candidates, judged after a week); buy-only paper portfolio
-- **Intraday:** at 9:45, 5 longs and 5 shorts from the first 30 minutes, squared off at 15:15
+- **Long-term:** 1-week predictions — 10 buy and 10 sell candidates after every close, judged
+  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio.
+- **Intraday:** at 9:45, 10 buy and 10 sell candidates from the first 30 minutes; paper trades
+  are **squared off at 12:30**; the model keeps learning from the market until the 15:30 close.
 
-Both have live monitoring, paper trading, accuracy tracking, your real portfolio and a local
-dashboard. See [PLAN.md](PLAN.md).
+Both have live prices every minute, paper trading, accuracy tracking (buy and sell picks
+separately), your real portfolio and a local dashboard. See [PLAN.md](PLAN.md) for the build
+history and [DAILY_GUIDE.md](DAILY_GUIDE.md) for step-by-step daily use.
 
 > Market data only — this project never places orders. You trade manually on Groww.
-> Runs on your Mac at zero cost; market data and news are collected free by GitHub Actions.
+> Runs free: your Mac + GitHub Actions (public repo).
 
-> 📘 **Step-by-step daily instructions: [DAILY_GUIDE.md](DAILY_GUIDE.md)**
-> (autostart at 9:00, press F5, or a one-shot quick daily run).
+## Requirements (what we have agreed so far)
 
-## Run it from VS Code (no app to install)
+| Area | Requirement |
+|---|---|
+| **Universe** | Both models **train on and pick from the Nifty LargeMidcap 250** (Nifty 100 + Midcap 150), refreshed from NSE's official list daily. |
+| **History** | Long-term model trains on **all daily history since 2005**. Intraday model trains on ~2 years of Angel One 5-minute history plus Yahoo's daily-growing summaries. |
+| **Continuous training** | Models **keep training on historical data in the background**: GitHub retrains + self-tunes the long-term and news models **every hour**; the Mac tunes the intraday model **all day, market hours included**, without pausing live prices. |
+| **Learning from the live market** | The model **learns from the market until it closes**: after 15:30 the day's full live Angel One session is added and the intraday model retrains. |
+| **Intraday trading window** | Picks at 9:45, **all intraday trades end by 12:30** (square-off); stop-loss / target exits before that. The model predicts the 9:45 → 12:30 move. |
+| **Train on buy and sell** | Both models rank every stock from strongest to weakest, so they learn both ends. Judged paper picks — **buy and sell** — feed back into training (wrong calls weigh 2×, right 1.5×); intraday tuning can also focus on the biggest risers and fallers. |
+| **Paper trading** | Intraday: **starts fresh with ₹1 lakh every day**; each day's result is saved and **compared day by day** (P&L, trades won, buy/sell accuracy vs random). Long-term: one running ₹1 lakh portfolio. Buying and selling shown in **separate tables**. |
+| **Accuracy** | Shown on every picks and paper page, for that page's model, with **predicted UP and predicted DOWN in separate tables**; always compared with random picks. Long-term pages include a live "today" row. |
+| **Live data** | Live prices **every minute** for all tradable stocks (Angel One, Yahoo fallback); the dashboard refreshes itself every minute. **Today %**, share move since entry and **P&L after costs** are shown side by side; live price on long-term picks. |
+| **Chart methods** | Candlestick patterns and classic technical / statistical methods are available to the model; only groups that improve out-of-sample accuracy are used (see below). |
+| **News** | **No buy/sell tips** (target prices, "stocks to buy/watch", broker calls, forecasts) — the model makes its own calls. A model **learns which headlines are really related to each stock** and weights news by it. |
+| **Storage** | Big history stays **on git**, not on the Mac: the Mac keeps only the last 4 years of daily prices (~13 MB) and downloads trained models (~2 MB). |
+| **Honesty** | Every change to the models is measured on data they never trained on and only kept if it helps; results always shown next to random picks. No method predicts markets with high certainty — expect a few points above 50%. |
+| **Secrets** | Angel One keys only in `.env` (git-ignored), never in `.env.example`, never logged. |
 
-Everything runs from VS Code. The dashboard is a **local web page** at
-<http://localhost:8501>: open it in any browser, or inside VS Code with
-`Cmd+Shift+P` → **Simple Browser: Show** → `http://localhost:8501`.
+## Run it from VS Code
+
+The dashboard is a **local web page** at <http://localhost:8501> (any browser, or
+`Cmd+Shift+P` → **Simple Browser: Show**).
 
 **One-time setup**
 
-1. Install tools (Terminal): `brew install python@3.12 libomp git`
-2. Get the project: `git clone https://github.com/san1eev1/Stock-predictor.git`, then in VS Code
-   **File → Open Folder… → Stock-predictor** (on branch `claude/vibrant-heisenberg-yabdry`).
+1. Terminal: `brew install python@3.12 libomp git gh`
+2. `git clone https://github.com/san1eev1/Stock-predictor.git`, then in VS Code
+   **File → Open Folder… → Stock-predictor** (branch `claude/vibrant-heisenberg-yabdry`).
 3. Install the recommended **Python** extension when VS Code asks.
-4. `Cmd+Shift+P` → **Tasks: Run Task** → **1. First-time setup**
-   (creates `.venv`, installs everything, downloads the data).
-5. Optional: put your Angel One keys in `.env` (real-time prices + intraday history), then run the
-   tasks **Angel One: check login** and **Angel One: download intraday history (one-time)**.
+4. `Cmd+Shift+P` → **Tasks: Run Task** → **1. First-time setup**.
+5. Put your Angel One keys in `.env` (real-time prices + intraday history), then run the task
+   **Angel One: check login**. The first `start` downloads ~2 years of intraday history in the
+   background (~15 min).
+6. Optional: `gh auth login` so you can start GitHub training runs from the terminal.
 
-**Every day**
+**Every day** — press **F5** (▶ *Start Stock Predictor*) or `Cmd+Shift+B`, or turn on
+**Autostart** (starts 09:00 Mon–Fri). That one command:
 
-Press **F5** (▶ *Start Stock Predictor*), or `Cmd+Shift+B`. That one command:
+- opens the dashboard and runs the live monitor (prices every minute, stop-losses, news)
+- 9:46 intraday picks → paper trades on a fresh ₹1 lakh → **12:30 square-off**
+- 15:30 close → learns from today's session → after-close long-term decision
+- background training all day; downloads the newest GitHub-trained models every 15 minutes
 
-- opens the web dashboard
-- runs the live monitor (prices, stop-losses, news, 9:46 intraday picks, 15:15 square-off)
-- makes the after-close decision and **retrains both models on the newest data**
-- **self-tunes every weekend** (tries new model settings, keeps them only if they test better)
+`Ctrl+C` stops everything. Keep the Mac awake during market hours (the task uses `caffeinate`).
 
-**Training every day, weekends included**
+**Other tasks** (`Cmd+Shift+P` → Tasks: Run Task): *Training: ON/OFF* (daily background job for
+days the app isn't open), *Keep training now*, *Get latest data*, *Backtest long-term*,
+*Backtest intraday*, *Web dashboard only*, *Run tests*.
 
-Run the task **Training: ON** once (or `python -m stockpredictor schedule install`). A macOS
-background job then runs every day at 18:00 and 21:30: on weekdays it syncs the data, makes the
-after-close decision and retrains both models; at weekends it self-tunes. If the Mac was asleep,
-it runs when the Mac wakes. It does nothing while the live monitor (`start` / autostart) is
-running, since the monitor already does this, so it works alongside autostart: autostart runs
-the trading day, this makes sure training never skips a day. Log: `logs/auto.log`.
-Turn it off with **Training: OFF** (`schedule remove`).
-
-`Ctrl+C` in the terminal stops everything. Keep the Mac awake during market hours
-(the build task uses `caffeinate`).
-
-**Other tasks** (`Cmd+Shift+P` → Tasks: Run Task): *Keep training now (retrain + self-tune)*,
-*Get latest data*, *Backtest long-term*, *Backtest intraday*, *Web dashboard only*, *Run tests*.
-
-Terminal equivalents: `python -m stockpredictor start`, `... improve --tune`, `... backtest`.
-
-## Data and continuous learning
-
-| What | How much | Where |
-|---|---|---|
-| Daily prices | **Nifty 250** since **2005** (~1M rows) | git `market-data` branch, updated 16:30 IST by GitHub Actions; the Mac keeps the last 4 years |
-| Universe | Nifty LargeMidcap 250 — both models train on it and pick from it | |
-| Intraday | Daily summaries of 5-min bars: 200 stocks, Yahoo (60 days, growing daily) + Angel One backfill (~2 years) | git + small local file |
-| News | Google News + FinBERT, 4× per trading day | git |
-
-**Chart methods the model combines** (`features/technical.py`): daily candlestick patterns
-(hammer, shooting star, engulfing, piercing / dark cloud, morning / evening star, three white
-soldiers / black crows, harami, marubozu, doji, gaps, net pattern score), oscillators
-(stochastic, Williams %R, CCI, money flow index), trend systems (Supertrend, Ichimoku, Aroon,
-Donchian breakouts, Heikin-Ashi, Keltner squeeze), volume flow (OBV, Chaikin money flow) and
-statistics (trend slope and R², autocorrelation, variance ratio, efficiency ratio, skew,
-z-score). LightGBM learns how much each is worth and how they combine; nothing is a fixed rule.
+## How the models learn
 
 ### Where training happens
 
 | Where | What | How often |
 |---|---|---|
-| **GitHub Actions** (free) | Long-term model: retrains on **all history since 2005** plus judged paper predictions (wrong ones weigh 2×, right ones 1.5×), then self-tunes for the rest of a ~45-minute run. News relevance model. Weekly backtest. Results go to the `models` branch (~1.5 MB). | **Every hour** (`.github/workflows/train-models.yml`) |
-| **Mac, background thread** | Intraday model: self-tuning rounds on its history (uses your Angel One data, which stays on the Mac) — keeps running during market hours without pausing live prices | Every ~5 minutes, all day |
-| **Mac, live market** | Right after the 15:15 square-off, today's live Angel One 5-minute session is added and the intraday model retrains on it | Every trading day, 15:17 |
-| **Mac** | Downloads the newest cloud models; sends judged paper predictions to the `paper-feedback` branch so cloud training learns from them | Every 15 min / after each close |
-
-The Mac keeps only the last **4 years** of daily prices (~13 MB; the signals need ~1 year of
-warm-up) — the full history lives on git and is only downloaded by GitHub Actions. Set
-`CLOUD_TRAINING=0` in `.env` to train everything on the Mac instead (downloads all history).
+| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~45-minute run; news relevance model; weekly backtest. Published to the `models` branch. | **Every hour** (`train-models.yml`) |
+| **Mac, background thread** | Intraday model self-tuning on its history (uses your Angel One data, which stays on the Mac) | Every ~5 minutes, all day |
+| **Mac, after the close** | Today's full live session is added; the intraday model retrains with it | Every trading day, 15:32 |
+| **Mac, after each close** | Judged paper predictions (stock, date, right/wrong) sent to the `paper-feedback` branch for cloud training | Daily |
 
 New settings are adopted only if they beat the current ones out-of-sample over the last 3 years
-**and** are not worse over 6 years (intraday: 120 and 250 days), so a setting that only fits one
-period by luck is rejected.
+**and** are not worse over 6 years (intraday: last 120 and 250 days), so a setting that only fits
+one period by luck is rejected. Each model is an **average of 3 LightGBM models** with early
+stopping. Set `CLOUD_TRAINING=0` in `.env` to train everything on the Mac instead.
 
-**Live race:** three variants — AI model, 50/50 blend with momentum, momentum only — each make
-paper predictions. After 20+ judged days, the system switches to the variant with the best
-**live** accuracy if it leads by 5+ points.
+### What they learn from
 
-**News:** buy/sell tips, target prices, "stocks to watch" lists and forecasts are ignored — the
-model makes its own calls. A LightGBM model learns from history which headlines actually move
-their stock (`nlp/relevance.py`); relevant news counts more in the news mood and bad-news exits,
-lists and namesakes count less. On unseen headlines its relevance ranks real reactions better
-than FinBERT tone alone (correlation 0.15 vs 0.11).
+- **Long-term (~100 inputs):** momentum, trend, 52-week range, volatility, RSI / MACD / ADX /
+  Bollinger, volume, relative strength vs Nifty and sector, weekly candles, market regime.
+- **Chart methods** (`features/technical.py`): trend systems (Supertrend, Ichimoku, Aroon,
+  Donchian breakouts, Heikin-Ashi, Keltner squeeze) are **on** — in walk-forward tests they
+  raised the top-10 weekly excess return (3 years: 0.67% → 0.85%; 6 years: 0.75% → 0.92%).
+  Candlestick patterns, oscillators, volume flow and statistical signals **lowered or didn't
+  change** accuracy, so they are off; hourly self-tuning keeps testing them and switches a group
+  on only if it proves itself.
+- **Intraday:** the first 30 minutes (gap, move, range, VWAP, volume) vs the whole market, plus
+  yesterday's daily context.
+- **Live race (long-term):** AI model vs 50/50 blend with momentum vs momentum only, each paper
+  predicting; after 20+ judged days the best live variant takes over if it leads by 5+ points.
 
-The training engine uses **early stopping** and an **average of 3 models** with different random
-seeds. Features are cached in `data/cache` (turn off with `FEATURE_CACHE=0` in `.env`).
+### News
 
-The **Accuracy** page shows the live race; the **Model** page shows every retrain and tuning run.
+Google News headlines for each stock, scored with FinBERT on GitHub 4× per trading day.
+Tips are dropped (~16% of headlines). A LightGBM model (`nlp/relevance.py`) learns from history
+which headlines came with real moves in their stock — on unseen headlines it matches real
+reactions better than tone alone (correlation 0.15 vs 0.11; 0.10 vs 0.04 excluding price-move
+reports). Relevant news counts more in the news mood and "sell on severe bad news"; lists,
+namesakes and noise count less. News is a live signal, not a model input yet (history only
+starts in 2026).
 
-**Angel One:** with keys in `.env`, `start` checks the login, uses real-time prices, downloads ~2
-years of intraday history in the background the first time (~15 min), and after each close saves
-the day's Angel One intraday data.
+## Data and storage
+
+| What | Where | On the Mac |
+|---|---|---|
+| Daily prices, 250 stocks since 2005 | git `market-data` branch, updated 16:30 IST by GitHub Actions | Last 4 years only (git partial clone) |
+| Intraday summaries (one row per stock per day from 5-min bars: first 30 min, 12:30 exit, stop/target hit times) | Yahoo → git; Angel One → local file | ~20 MB |
+| News + FinBERT scores | git | ~6 MB |
+| Trained long-term + news models | git `models` branch | ~2 MB (`trained-models/`) |
+| Intraday model, paper trades, your portfolio | local only (`models/`, `data/stockpredictor.db`) | small |
 
 ## Dashboard pages
 
-- **Long-term picks** — 10 buy and 10 sell candidates for the next week with **live price, Today % and Since pick %** (updated every minute), *Sell now* for your holdings, reasons, news, P/E, ROE; live intraday + long-term accuracy at the top
-- **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live Today % and share move since 9:45, result (🧪 = paper-traded); live accuracy at the top
-- **Paper trading — Long-term** — buy-only ₹1 lakh portfolio (steady version of the weekly signal)
-- **Paper trading — Intraday** — 10 buy trades and 10 sell (short) trades a day, separate sections
-- **My portfolio** — add your Groww trades; live P&L, stop-loss alerts, allocation (Long-term / Intraday tabs)
-- **Accuracy** — long-term picks judged after 3 months vs Nifty; intraday picks at 15:15; both vs random picks
-- **Model** — what each model relies on, backtest results, retrain button
-- **Settings** — long-term and intraday rules, stop-losses, paper account reset
+- **Long-term picks** — long-term accuracy (UP / DOWN tables, live today row); 10 buy and 10 sell
+  candidates with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
+- **Intraday picks** — intraday accuracy; 10 buy / 10 sell at 9:45 with entry, stop-loss,
+  target, Today %, move since 9:45, result at 12:30
+- **Paper trading — Long-term** — accuracy; **Buying** (holdings + queued buys) and **Selling**
+  (queued sells + sold) tables with P&L after costs
+- **Paper trading — Intraday** — accuracy; today on a fresh ₹1 lakh; buy trades and sell trades;
+  **Day by day** table and charts comparing every day
+- **My portfolio** — your Groww trades; live P&L, Today %, stop-loss alerts
+- **Accuracy** — both models in detail, vs random; live strategy race
+- **Model** — what the model relies on, cloud training status, backtest, every training run
+- **Settings** — paper trading rules, stop-losses, paper account reset
 
 ## Commands
 
 ```bash
-python -m stockpredictor start         # everything: web dashboard + live monitor + training
-python -m stockpredictor app           # web dashboard only
-python -m stockpredictor run           # live monitor only
-python -m stockpredictor improve --tune  # sync, retrain, self-tune now
-python -m stockpredictor daily         # run the after-close decision by hand
-python -m stockpredictor schedule install|remove|status  # automatic daily training
-python -m stockpredictor auto          # one pass of the daily background job
-python -m stockpredictor sync-data     # fetch latest data snapshot
-python -m stockpredictor train         # retrain the model now
-python -m stockpredictor backtest      # walk-forward backtest (~5 min), shown on the Model page
-python -m stockpredictor intraday-backfill / train-intraday / backtest-intraday
-python -m stockpredictor features --symbol RELIANCE
-python -m stockpredictor status
-# Angel One (after filling .env):
-python -m stockpredictor universe && python -m stockpredictor tokens
-python -m stockpredictor check-angel
+python -m stockpredictor start            # everything: dashboard + live monitor + training
+python -m stockpredictor app              # dashboard only
+python -m stockpredictor autostart [--off]         # start 09:00 Mon-Fri (macOS)
+python -m stockpredictor schedule install|remove   # daily background job (18:00, 21:30)
+python -m stockpredictor today            # one-shot daily run
+python -m stockpredictor improve --tune   # retrain + self-tune now (on the Mac)
+python -m stockpredictor cloud-train      # what GitHub runs every hour
+python -m stockpredictor backtest | backtest-intraday
+python -m stockpredictor sync-data | status | check-angel
+gh workflow run train-models.yml          # start a GitHub training run now
 ```
 
 ## Tests
 
 ```bash
-pytest
+pytest          # 98 tests
 ```
 
 ## Layout
 
 ```
 src/stockpredictor/
-  config.py, db.py, store.py, universe.py, costs.py
+  config.py, db.py, store.py (git data, models and feedback branches), universe.py, costs.py
   data/        daily.py, intraday.py (daily summaries of 5-min bars), angelone.py, news.py,
                fundamentals.py, quality.py
-  nlp/         sentiment.py (FinBERT, used in GitHub Actions)
-  features/    longterm.py (~100 features), technical.py (candlestick patterns, oscillators,
-               trend systems, statistical signals), intraday.py (9:45 features), labels.py
-  models/      longterm.py, intraday.py (LightGBM ranking models, walk-forward)
-  backtest/    portfolio.py + run.py (long-term), intraday.py (intraday rules + backtest)
-  paper/       engine.py + daily.py (long-term), intraday.py (intraday paper trading)
+  nlp/         sentiment.py (FinBERT, on GitHub), relevance.py (which news matters)
+  features/    longterm.py, technical.py (chart methods), intraday.py (9:45 features), labels.py
+  models/      longterm.py, intraday.py, engine.py (LightGBM), trainer.py (retrain + tuning)
+  backtest/    run.py + portfolio.py (long-term), intraday.py (rules + backtest, 12:30 exit)
+  paper/       engine.py + daily.py (long-term), intraday.py (daily ₹1 lakh), scoreboard.py
   portfolio/   real.py (your Groww trades)
-  live/        prices.py (Angel One / Yahoo), intraday_bars.py, monitor.py (live loop)
+  live/        prices.py, monitor.py (live loop), background.py (background training)
   app/         main.py (Streamlit dashboard), charts.py
-.github/workflows/  update-market-data.yml, update-news.yml
+.github/workflows/  update-market-data.yml, update-news.yml, train-models.yml
 ```

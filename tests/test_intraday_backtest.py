@@ -13,21 +13,24 @@ from test_features_longterm import synthetic
 
 
 def row(**hits):
-    r = {"c30": 100.0, "px_1515": 100.5, **{c: np.nan for c in I.LEVEL_COLS}}
+    r = {"c30": 100.0, "px_1230": 100.5, **{c: np.nan for c in I.LEVEL_COLS}}
     r.update(hits)
     return pd.Series(r)
 
 
 def test_replay_stop_target_and_squareoff():
     rules = B.IntradayRules(stop_loss=1.0, target=2.0)
-    assert B.replay(row(), "long", rules) == (100.5, "15:15 square-off")
+    assert B.replay(row(), "long", rules) == (100.5, "12:30 square-off")
     assert B.replay(row(d100=30, u200=60), "long", rules) == (99.0, "stop-loss")
     assert B.replay(row(d100=90, u200=60), "long", rules) == (102.0, "target")
     assert B.replay(row(d100=30, u200=30), "long", rules)[1] == "stop-loss"   # same bar: stop first
     # Short: adverse move is up.
     assert B.replay(row(u100=10), "short", rules) == (101.0, "stop-loss")
     assert B.replay(row(d200=10), "short", rules) == (98.0, "target")
-    assert B.replay(row(u200=5), "long", B.IntradayRules(target=0))[1] == "15:15 square-off"
+    assert B.replay(row(u200=5), "long", B.IntradayRules(target=0))[1] == "12:30 square-off"
+    # A stop-loss hit after the 12:30 square-off (minute 165) doesn't count.
+    assert B.replay(row(d100=200), "long", rules) == (100.5, "12:30 square-off")
+    assert B.replay(row(d100=165), "long", rules)[1] == "stop-loss"
 
 
 def test_trade_pnl_short_and_costs():

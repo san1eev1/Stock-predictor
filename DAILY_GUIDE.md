@@ -86,12 +86,14 @@ If GitHub's evening data update is late, the program downloads the day's prices 
 |---|---|---|
 | 9:15 | Starts watching live prices (Angel One real-time) | sidebar: *Live monitor 🟢* |
 | 9:20 | Fills last night's long-term paper orders at market prices | Paper trading → Long-term |
-| **9:46** | **Intraday: 10 buy + 10 sell candidates**, paper-trades all 20 | **Intraday picks** |
+| **9:46** | **Intraday: 10 buy + 10 sell candidates**, paper trades on a fresh ₹1 lakh | **Intraday picks** |
 | every minute | Stop-loss / target checks (paper) · stop-loss alerts (your portfolio) | 🔔 Alerts |
 | every 15 min | New news, live re-ranking of long-term picks | Long-term picks → *Live ranking* |
-| **15:15** | Intraday square-off and scoring | Accuracy → Intraday |
+| **12:30** | **Intraday square-off** and scoring (trading stops; learning doesn't) | Paper trading → Intraday → *Day by day* |
+| all day | Background training of the intraday model; newest GitHub-trained models downloaded every 15 min | Model → *Continuous training* |
+| **15:32** | Today's full session added to history, intraday model retrains | Model |
 | **17:15+** | Data update → **retrain** → **next week's 10 buy + 10 sell** → paper orders → light self-tuning | **Long-term picks** |
-| weekend | Full self-tuning of both models | Model → *Continuous training* |
+| every hour | GitHub retrains + self-tunes the long-term and news models on all history since 2005 | Model (☁️ status) |
 
 ## What to look at in the dashboard
 

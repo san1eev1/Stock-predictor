@@ -1,4 +1,4 @@
-"""Intraday features at 9:45 for each stock-day, plus the 9:45 -> 15:15 target.
+"""Intraday features at 9:45 for each stock-day, plus the 9:45 -> 12:30 target.
 
 Everything uses only information available at 9:45: the first 30 minutes of
 today and daily data up to yesterday's close.
@@ -16,8 +16,10 @@ DAILY_CONTEXT = ["ret_5", "ret_21", "ret_63", "rsi_14", "dist_ma50", "dist_ma200
                  "dist_52w_high", "vol_21", "bb_pctb", "vol_ratio_20_120", "beta_252",
                  "mkt_ret_63", "mkt_vol_21", "vix", "vix_pct_252", "wk_streak"]
 RANKED = ["gap", "r30", "rel_r30", "vwap_dev", "vol30_adv", "pos30", "ret_5"]
-PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close"]
+PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close",
+              I.EXIT_COL]
 EXCLUDE = {"symbol", "date", "source", "target", "target_ret", "prev_date", "prev_close", "adv20",
+           "fb_weight",
            *PRICE_COLS,
            "v30", *I.LEVEL_COLS}
 
@@ -97,7 +99,7 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     for col in RANKED:
         s[f"{col}_rank"] = s.groupby("date")[col].rank(pct=True)
 
-    s["target_ret"] = s["px_1515"] / s["c30"] - 1
+    s["target_ret"] = s[I.EXIT_COL] / s["c30"] - 1          # trades are squared off at 12:30
     s["target"] = s.groupby("date")["target_ret"].rank(pct=True)
     return s.sort_values(["date", "symbol"]).reset_index(drop=True)
 

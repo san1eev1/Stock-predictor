@@ -1,4 +1,4 @@
-"""Intraday ranking model: which stocks will do best / worst from 9:45 to 15:15."""
+"""Intraday ranking model: which stocks will do best / worst from 9:45 to 12:30."""
 
 from __future__ import annotations
 
@@ -36,9 +36,23 @@ def current_params() -> dict:
     return {**PARAMS, "num_rounds": NUM_ROUNDS}
 
 
+def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
+    """Biggest risers AND fallers count more (tail_weight; the buy and sell picks come from
+    both ends), and judged paper picks carry their feedback weight (fb_weight)."""
+    w = np.ones(len(train))
+    tail = params.get("tail_weight") or 0
+    if tail > 0:
+        w *= 1 + tail * np.abs(train["target"].to_numpy() - 0.5) * 2
+    if "fb_weight" in train:
+        w *= train["fb_weight"].fillna(1.0).to_numpy()
+    return w
+
+
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {"early_stopping": True, "n_seeds": 3, **(params or current_params())}
-    return engine.fit(train, cols, params, gap_days=1, default_rounds=NUM_ROUNDS)
+    weights = sample_weights(train, params)
+    params.pop("tail_weight", None)
+    return engine.fit(train, cols, params, weights, gap_days=1, default_rounds=NUM_ROUNDS)
 
 
 @dataclass

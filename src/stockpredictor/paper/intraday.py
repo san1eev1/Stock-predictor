@@ -1,7 +1,9 @@
-"""Intraday paper trading: 9:45 picks, stop-loss/target exits, 15:15 square-off.
+"""Intraday paper trading: 9:45 picks, stop-loss/target exits, 12:30 square-off.
 
 Uses the same rules (backtest.intraday) as the backtest. Long and short
-positions each block their full value from the paper account's cash.
+positions each block their full value from the paper account's cash. Every day
+starts fresh with the full capital (Rs 1 lakh); each day's result is kept and
+compared day by day (daily_results), and the judged picks feed back into training.
 """
 
 from __future__ import annotations
@@ -72,6 +74,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
               costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> dict:
     """Score, pick, save predictions and open paper trades at live prices."""
     E.ensure_account(conn, capital, HORIZON)
+    start_day(conn, capital)
     stamp = f"{today:%Y-%m-%d}"
     conn.executemany("INSERT OR REPLACE INTO intraday_open VALUES (?, ?, ?)",
                      [(stamp, r.symbol, float(r.c30)) for r in feats_today.itertuples()])
@@ -128,6 +131,42 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     return {"skipped": False, "strength": strength, "picks": opened}
 
 
+def start_day(conn: sqlite3.Connection, capital: float) -> bool:
+    """A new day starts with the full capital again (only when nothing is still open)."""
+    if open_trades(conn):
+        return False
+    conn.execute("UPDATE paper_accounts SET capital = ?, cash = ? WHERE horizon = ?",
+                 (capital, capital, HORIZON))
+    conn.commit()
+    return True
+
+
+def daily_results(conn: sqlite3.Connection, capital: float = 100_000) -> pd.DataFrame:
+    """One row per trading day: paper result on a fresh `capital` and how the day's 10 buy /
+    10 sell picks did (9:45 -> 12:30), next to picking stocks at random."""
+    trades = pd.read_sql("SELECT substr(entry_time, 1, 10) AS date, side, pnl, status "
+                         "FROM paper_trades WHERE horizon = ?", conn, params=(HORIZON,))
+    preds = pd.read_sql("SELECT date, direction, correct, base_rate FROM predictions "
+                        "WHERE horizon = ? AND correct IS NOT NULL", conn, params=(HORIZON,))
+    days = sorted(set(trades["date"]) | set(preds["date"]))
+    rows = []
+    for d in days:
+        t = trades[(trades["date"] == d) & (trades["status"] == "closed")]
+        p = preds[preds["date"] == d]
+        up, dn = p[p["direction"] == "up"], p[p["direction"] == "down"]
+        pnl = float(t["pnl"].sum()) if len(t) else 0.0
+        rows.append({
+            "date": d, "trades": len(t), "won": int((t["pnl"] > 0).sum()), "pnl": pnl,
+            "pnl_pct": pnl / capital, "end_value": capital + pnl,
+            "buy_right": int(up["correct"].sum()), "buy_n": len(up),
+            "sell_right": int(dn["correct"].sum()), "sell_n": len(dn),
+            "accuracy": float(p["correct"].mean()) if len(p) else None,
+            "random": float(p["base_rate"].mean()) if len(p) and p["base_rate"].notna().any()
+            else None,
+            "open": int((trades[(trades["date"] == d)]["status"] == "open").sum())})
+    return pd.DataFrame(rows)
+
+
 def open_trades(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'open'",
                         (HORIZON,)).fetchall()
@@ -162,21 +201,22 @@ def check_exits(conn, prices: dict[str, float], stamp: str) -> list[str]:
 
 
 def square_off(conn, prices: dict[str, float], stamp: str) -> list[str]:
-    log = [close_trade(conn, t, prices.get(t["symbol"], t["entry_price"]), "15:15 square-off", stamp)
+    log = [close_trade(conn, t, prices.get(t["symbol"], t["entry_price"]), "12:30 square-off", stamp)
            for t in open_trades(conn)]
     conn.commit()
     return log
 
 
-def evaluate_day(conn, day: str, prices_1515: dict[str, float]) -> int:
-    """Judge today's picks by the 9:45 -> 15:15 move, and store the random baseline."""
+def evaluate_day(conn, day: str, exit_prices: dict[str, float]) -> int:
+    """Judge today's picks by the 9:45 -> 12:30 move (prices at the square-off), and store
+    the random baseline."""
     opens = dict(conn.execute("SELECT symbol, c30 FROM intraday_open WHERE date = ?", (day,)).fetchall())
-    moves = {s: prices_1515[s] / c - 1 for s, c in opens.items() if s in prices_1515}
+    moves = {s: exit_prices[s] / c - 1 for s, c in opens.items() if s in exit_prices}
     up_share = sum(m > 0 for m in moves.values()) / len(moves) if moves else None
     n = 0
     for p in conn.execute("SELECT * FROM predictions WHERE horizon = ? AND date = ?",
                           (HORIZON, day)).fetchall():
-        px = prices_1515.get(p["symbol"])
+        px = exit_prices.get(p["symbol"])
         if px is None:
             continue
         ret = px / p["entry_price"] - 1
@@ -186,7 +226,7 @@ def evaluate_day(conn, day: str, prices_1515: dict[str, float]) -> int:
                      (px, ret, int(ret > 0 if up else ret < 0),
                       None if up_share is None else (up_share if up else 1 - up_share), p["id"]))
         n += 1
-    v = value(conn, prices_1515)
+    v = value(conn, exit_prices)
     conn.execute("INSERT OR REPLACE INTO paper_equity VALUES (?, ?, ?, ?, ?)",
                  (HORIZON, day, v["cash"], v["holdings"], v["equity"]))
     conn.commit()
@@ -212,7 +252,7 @@ def value(conn, prices: dict[str, float]) -> dict:
 
 def preview(ctx: E.MarketContext, store_dir: Path) -> tuple[pd.DataFrame, pd.Timestamp] | None:
     """The 10 buy / 10 sell picks the model would have made on the latest completed day,
-    with how they actually did (9:45 -> 15:15). Trains a model first if there is none."""
+    with how they actually did (9:45 -> 12:30). Trains a model first if there is none."""
     from stockpredictor import store
     from stockpredictor.models import trainer as T
 
@@ -236,8 +276,8 @@ def preview(ctx: E.MarketContext, store_dir: Path) -> tuple[pd.DataFrame, pd.Tim
                         [x for x in w if x.startswith("-")] + [x for x in w if x.startswith("+")]
                         for w, side in zip(why, picks["side"])]
     sign = picks["side"].map({"long": 1, "short": -1})
-    picks["move"] = sign * (picks["px_1515"] / picks["c30"] - 1)
-    up_share = float((t["px_1515"] > t["c30"]).mean())      # random-pick baseline for the day
+    picks["move"] = sign * (picks[I.EXIT_COL] / picks["c30"] - 1)
+    up_share = float((t[I.EXIT_COL] > t["c30"]).mean())      # random-pick baseline for the day
     picks["baseline"] = picks["side"].map({"long": up_share, "short": 1 - up_share})
-    return picks[["symbol", "side", "confidence", "c30", "px_1515", "move", "reasons",
+    return picks[["symbol", "side", "confidence", "c30", I.EXIT_COL, "move", "reasons",
                   "baseline"]], day

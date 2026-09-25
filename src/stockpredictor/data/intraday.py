@@ -5,7 +5,8 @@ intraday model and backtest need:
 
   first 30 minutes (9:15-9:45): open, high, low, close (= 9:45 entry price),
                                 volume, VWAP
-  after 9:45 until 15:15:       high, low, price at 15:15 (exit), day close
+  after 9:45 until 15:15:       high, low, price at 12:30 (trading exit), price at 15:15,
+                                day close
   first-hit times:              for each level in LEVELS (% from the 9:45
                                 price), minutes after 9:45 until price first
                                 reached +level (u...) or -level (d...), so any
@@ -33,12 +34,15 @@ log = logging.getLogger(__name__)
 MARKET_OPEN = (9, 15)
 MARKET_CLOSE = (15, 30)
 ENTRY_TIME = time(9, 45)
-EXIT_TIME = time(15, 15)
+EXIT_TIME = time(15, 15)          # end of the stored window (first-hit times, px_1515)
+TRADE_EXIT = time(12, 30)         # intraday trades are squared off here
+EXIT_COL = "px_1230"              # price at TRADE_EXIT: the model's target and square-off price
+EXIT_MINUTES = 165                # TRADE_EXIT minus the 9:45 entry
 BAR_MINUTES = 5
 LEVELS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)   # percent
 LEVEL_COLS = [f"{p}{int(round(lv * 100)):03d}" for p in "ud" for lv in LEVELS]
 SUMMARY_COLS = ["symbol", "date", "open", "h30", "l30", "c30", "v30", "vwap30",
-                "high_after", "low_after", "px_1515", "close", *LEVEL_COLS, "source"]
+                "high_after", "low_after", "px_1515", "close", *LEVEL_COLS, "source", EXIT_COL]
 BACKFILL_PATH = DATA_DIR / "intraday_backfill.csv"
 
 
@@ -74,8 +78,10 @@ def summarize_day(bars: pd.DataFrame) -> dict | None:
     c30 = head["c30"]
     minutes = ((after["ts"] - after["ts"].iloc[0]).dt.total_seconds() / 60 + BAR_MINUTES).to_numpy()
     highs, lows = after["high"].to_numpy(), after["low"].to_numpy()
+    to_exit = after[after["ts"].dt.time < TRADE_EXIT]      # bars ending by 12:30
     row = {**head, "high_after": float(highs.max()), "low_after": float(lows.min()),
-           "px_1515": float(after["close"].iloc[-1]), "close": float(bars["close"].iloc[-1])}
+           "px_1515": float(after["close"].iloc[-1]), "close": float(bars["close"].iloc[-1]),
+           EXIT_COL: float(to_exit["close"].iloc[-1]) if len(to_exit) else np.nan}
     for lv in LEVELS:
         up = np.nonzero(highs >= c30 * (1 + lv / 100))[0]
         dn = np.nonzero(lows <= c30 * (1 - lv / 100))[0]
@@ -183,6 +189,14 @@ def backfill_symbols(path: Path = BACKFILL_PATH) -> set[str]:
     return set(pd.read_csv(path, usecols=["symbol"])["symbol"].unique())
 
 
+def backfill_has_exit(path: Path = BACKFILL_PATH) -> bool:
+    """Does the Angel One history include the 12:30 exit price? (older downloads don't)"""
+    if not path.exists():
+        return False
+    head = pd.read_csv(path, nrows=2000)
+    return EXIT_COL in head and head[EXIT_COL].notna().mean() > 0.5
+
+
 def backfill_days(path: Path = BACKFILL_PATH) -> int:
     if not path.exists():
         return 0
@@ -193,7 +207,7 @@ def backfill_days(path: Path = BACKFILL_PATH) -> int:
 
 def _write(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    df = df.sort_values(["date", "symbol"])[SUMMARY_COLS]
+    df = df.sort_values(["date", "symbol"]).reindex(columns=SUMMARY_COLS)
     df.to_csv(path, index=False, float_format="%.4f")
 
 
@@ -232,7 +246,7 @@ def load_summaries(store_dir: Path, backfill: Path = BACKFILL_PATH) -> pd.DataFr
         parts.append(pd.read_csv(backfill, dtype={"date": str}))
     if not parts:
         return pd.DataFrame(columns=SUMMARY_COLS)
-    df = pd.concat(parts, ignore_index=True)
+    df = pd.concat(parts, ignore_index=True).reindex(columns=SUMMARY_COLS)
     df["_pref"] = (df["source"] == "angelone").astype(int)
     df = df.sort_values("_pref").drop_duplicates(["symbol", "date"], keep="last").drop(columns="_pref")
     df["date"] = pd.to_datetime(df["date"])

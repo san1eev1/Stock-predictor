@@ -37,8 +37,8 @@ AFTER_CLOSE = time(17, 15)
 LOCAL_FETCH_AFTER = time(17, 45)   # fetch prices ourselves if GitHub hasn't by then
 INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
 INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) until 14:30
-INTRADAY_SQUARE_OFF = time(15, 15)
-LIVE_LEARN = time(15, 17)         # 15:15 bar is complete: learn from today's live session
+INTRADAY_SQUARE_OFF = time(12, 30)   # intraday trades close here (data.intraday.TRADE_EXIT)
+LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -144,11 +144,7 @@ class Monitor:
             if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
                 self.square_off_job(now)
                 done.append("square-off")
-            if now.time() >= LIVE_LEARN and self.background is not None \
-                    and _setting(self.conn, "live_learn_day") != day:
-                _set(self.conn, "live_learn_day", day)
-                self.background.learn_from_today(now.date())
-                done.append("live-learn")
+
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
                 self.quarter_job(now)
                 self._last_quarter = now
@@ -162,6 +158,15 @@ class Monitor:
         elif now.weekday() >= 5:
             if self.weekly_retrain(now):
                 done.append("retrain")
+        # After the close: today's whole session (trading stopped at 12:30, but the model
+        # keeps learning from the market until 15:30) goes into the intraday history.
+        day = f"{now:%Y-%m-%d}"
+        if self.background is not None and now.weekday() < 5 and now.time() >= LIVE_LEARN \
+                and _setting(self.conn, "id_last_squareoff") == day \
+                and _setting(self.conn, "live_learn_day") != day:
+            _set(self.conn, "live_learn_day", day)
+            self.background.learn_from_today(now.date())
+            done.append("live-learn")
         # Without the background thread, tune in the monitor itself (only when idle).
         if self.background is None and self.market_idle(now) and self.idle_tune(now):
             done.append("tune")

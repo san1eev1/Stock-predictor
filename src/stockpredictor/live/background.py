@@ -6,8 +6,8 @@ so live prices keep updating every minute while it works:
   * all day, market hours included: tuning rounds for the intraday model on its history
     (the long-term and news models are trained on GitHub; see cloud-train), keeping new
     settings only when they test better out-of-sample
-  * right after the 15:15 square-off: today's live Angel One 5-minute session is added to
-    the history and the intraday model retrains on it, instead of waiting for the evening
+  * after the 15:30 close: today's whole live Angel One 5-minute session is added to the
+    history and the intraday model retrains on it (trading stops at 12:30, learning doesn't)
 """
 
 from __future__ import annotations

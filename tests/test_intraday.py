@@ -19,11 +19,14 @@ def test_summary_first30_and_exit():
     path = np.full(75, 100.0)
     path[:6] = [99, 99.5, 100, 100.5, 101, 102]   # 9:15..9:40
     path[6:] = 102
+    path[37] = 103                                  # bar 12:20-12:25
+    path[38] = 104                                  # bar 12:25-12:30: the 12:30 exit price
+    path[39] = 110                                  # after 12:30: not the trading exit
     path[72] = 105                                  # 15:15 bar (after exit)
     s = I.summarize_day(day_bars(path=path))
     assert s["open"] == 99 and s["c30"] == 102 and s["h30"] == pytest.approx(102.1)
-    assert s["px_1515"] == 102 and s["close"] == 102
-    assert s["high_after"] == pytest.approx(102.1)  # the 15:15 spike is excluded
+    assert s["px_1230"] == 104 and s["px_1515"] == 102 and s["close"] == 102
+    assert s["high_after"] == pytest.approx(110.1)  # the 15:15 spike is excluded
 
 
 def test_first_hit_minutes():
