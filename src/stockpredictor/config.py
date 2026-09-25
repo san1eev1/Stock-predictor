@@ -16,6 +16,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 # published to the `models` git branch; the Mac downloads them into trained-models/ and keeps
 # only recent prices. CLOUD_TRAINING=0 in .env trains everything on the Mac instead.
 CLOUD_TRAINING = os.getenv("CLOUD_TRAINING", "1") != "0"
+# The Mac itself trains nothing (keeps it cool): live prices, picks and paper trading only;
+# models come from GitHub. MAC_TRAINING=1 brings back background tuning on the Mac.
+MAC_TRAINING = os.getenv("MAC_TRAINING", "0" if CLOUD_TRAINING else "1") != "0"
 IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 SHARED_MODELS_DIR = PROJECT_ROOT / ("trained-models" if CLOUD_TRAINING else "models")
 LOCAL_MODELS_DIR = PROJECT_ROOT / "models"            # intraday model (uses Angel One data)

@@ -7,7 +7,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from stockpredictor import db, universe
+from stockpredictor import config, db, universe
 from stockpredictor.config import load_settings
 
 
@@ -278,8 +278,9 @@ def cmd_run(settings, args) -> None:
     mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
                           settings.paper_capital_longterm,
                           capital_intraday=settings.paper_capital_intraday)
-    mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
-    mon.background.start()
+    if config.MAC_TRAINING:
+        mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
+        mon.background.start()
     try:
         monitor.run_forever(mon)
     except KeyboardInterrupt:
@@ -494,7 +495,9 @@ def _angel_startup(settings, store_dir: Path) -> None:
         if not total:
             log.info("Angel One backfill: nothing new downloaded (will retry next start)")
             return
-        log.info("Angel One backfill: %s stock-days saved; retraining intraday models", total)
+        log.info("Angel One backfill: %s stock-days saved", total)
+        if not config.MAC_TRAINING:
+            return
         try:
             with db.connect(settings.db_path) as conn:
                 ctx = MarketContext.load(store_dir)
@@ -535,8 +538,9 @@ def cmd_start(settings, args) -> None:
     if args.until:
         from datetime import time as _t
         until = _t(*map(int, args.until.split(":")))
-    mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
-    mon.background.start()
+    if config.MAC_TRAINING:
+        mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
+        mon.background.start()
     try:
         monitor.run_forever(mon, until=until)
     except KeyboardInterrupt:

@@ -180,7 +180,8 @@ class Monitor:
                 self.background.learn_from_today(now.date())
                 done.append("live-learn")
         # Without the background thread, tune in the monitor itself (only when idle).
-        if self.background is None and self.market_idle(now) and self.idle_tune(now):
+        if self.background is None and config.MAC_TRAINING and self.market_idle(now) \
+                and self.idle_tune(now):
             done.append("tune")
         return done
 
@@ -331,12 +332,13 @@ class Monitor:
             if lt is not None:
                 self._model = lt
                 log.info("Long-term model retrained on data up to %s", lt.train_to)
-            it = T.retrain_intraday(ctx, self.store_dir, self.conn)
-            if it is not None:
-                self._imodel = it
-                log.info("Intraday model retrained on %s days", it.train_days)
-            if T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.CLOSE) is not None:
-                self._cmodel = None
+            if config.MAC_TRAINING:
+                it = T.retrain_intraday(ctx, self.store_dir, self.conn)
+                if it is not None:
+                    self._imodel = it
+                    log.info("Intraday model retrained on %s days", it.train_days)
+                if T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.CLOSE) is not None:
+                    self._cmodel = None
             results = D.run_daily(self.conn, ctx, self.capital, self.model())
             for r in results:
                 log.info("Decision for %s: buy %s; sell %s", f"{r['date']:%Y-%m-%d}",
@@ -509,11 +511,13 @@ class Monitor:
             lt = self.retrain_longterm(ctx)
             if lt is not None:
                 self._model = lt
-            it = T.retrain_intraday(ctx, self.store_dir, self.conn)
-            if it is not None:
-                self._imodel = it
-            if T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.CLOSE) is not None:
-                self._cmodel = None
+            if config.MAC_TRAINING:
+                it = T.retrain_intraday(ctx, self.store_dir, self.conn)
+                if it is not None:
+                    self._imodel = it
+                if T.retrain_intraday(ctx, self.store_dir, self.conn,
+                                      target=MI.CLOSE) is not None:
+                    self._cmodel = None
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
@@ -533,7 +537,8 @@ class Monitor:
                   f"{r['date']:%Y-%m-%d} decision - buy: {buys}; sell: {sells}")
         self.push_feedback()
         _set(self.conn, "lt_after_close_day", f"{now:%Y-%m-%d}")
-        self.evening_tune(now)
+        if config.MAC_TRAINING:
+            self.evening_tune(now)
         return True
 
     # --- cloud training (GitHub Actions) ---------------------------------------------
@@ -628,6 +633,8 @@ class Monitor:
 
     def weekly_retrain(self, now: datetime) -> bool:
         """Weekend self-tuning: try new model settings, keep them only if they test better."""
+        if not config.MAC_TRAINING:
+            return False
         last = _setting(self.conn, "last_tune")
         if last and (now.replace(tzinfo=None) - datetime.fromisoformat(last)).days < 6:
             return False

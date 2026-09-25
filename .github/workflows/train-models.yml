@@ -5,8 +5,10 @@ name: Train models
 
 on:
   schedule:
-    - cron: "5 */3 * * *"     # every 3 hours: retrain on all history since 2005, then
-                              # self-tune (~150 min per run, so training is near-continuous)
+    # Twice after each close (Mon-Fri): after the 16:30 IST data update, and again in the
+    # evening. Each run retrains on all history since 2005, then self-tunes (~150 min).
+    - cron: "15 11 * * 1-5"   # 16:45 IST
+    - cron: "30 15 * * 1-5"   # 21:00 IST
   workflow_dispatch:
     inputs:
       minutes:

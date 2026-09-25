@@ -208,3 +208,13 @@ def test_live_learning_after_square_off(tmp_path, ctx_model, fast_tuning, monkey
     assert mon._imodel is None and not bg.model_changed.is_set()  # improved model reloaded
     clock["now"] = ist(2026, 9, 26, 3, 0)                        # background thread tunes,
     assert "tune" not in mon.tick() and fast_tuning == []        # so the monitor doesn't
+
+
+def test_mac_trains_nothing_when_training_is_on_github(tmp_path, ctx_model, monkeypatch):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 26, 12, 0))  # Saturday
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(MON.config, "MAC_TRAINING", False)
+    monkeypatch.setattr(MON.T, "retrain_intraday", lambda *a, **k: pytest.fail("trained"))
+    monkeypatch.setattr(MON.T, "tune_intraday", lambda *a, **k: pytest.fail("tuned"))
+    assert "retrain" not in mon.tick() and "tune" not in mon.tick()
