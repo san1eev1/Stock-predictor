@@ -82,6 +82,14 @@ def cmd_intraday_collect(settings, args) -> None:
     print(f"Intraday summaries: {n} stock-days from {len(bars)}/{len(symbols)} stocks")
 
 
+def cmd_bhav_update(settings, args) -> None:
+    """NSE daily bhavcopy (all stocks, incl. later delisted) -> bhav/<year>.parquet (git)."""
+    from stockpredictor.data import bhav
+
+    n = bhav.update(Path(args.dir), date.fromisoformat(args.start), minutes=args.minutes)
+    print(f"Bhavcopy: {n} new days")
+
+
 def cmd_mac_train(settings, args) -> None:
     """The Mac's daily training on all history (started by the live monitor at 16:00 as its
     own process, so the memory is returned when it ends)."""
@@ -1037,6 +1045,8 @@ ARG_COMMANDS = {
     "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
     "mac-train": (cmd_mac_train, "The Mac's daily training on all history (own process)",
                   _dir_arg),
+    "bhav-update": (cmd_bhav_update, "NSE daily bhavcopy since 2005 (survivorship-free history)",
+                    _delivery_args),
 }
 
 COMMANDS = {

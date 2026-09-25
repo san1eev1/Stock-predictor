@@ -29,7 +29,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -70,6 +70,9 @@ jobs:
           # NSE delivery share: newest days first, then history back to 2005 in chunks.
           python -m stockpredictor delivery-update --dir market-data --minutes 25 \
             || echo "::warning::delivery data failed"
+          # Every NSE stock since 2005, incl. later delisted (survivorship-free research).
+          python -m stockpredictor bhav-update --dir market-data --minutes 25 \
+            || echo "::warning::bhavcopy failed"
           # Fundamentals snapshot once a week (Fridays) or on manual runs.
           if [ "$(date -u +%u)" = "5" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python -m stockpredictor fundamentals-update --dir market-data || echo "::warning::fundamentals failed"
