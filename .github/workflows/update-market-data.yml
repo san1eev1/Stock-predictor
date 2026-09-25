@@ -71,7 +71,7 @@ jobs:
           python -m stockpredictor delivery-update --dir market-data --minutes 25 \
             || echo "::warning::delivery data failed"
           # Every NSE stock since 2005, incl. later delisted (survivorship-free research).
-          python -m stockpredictor bhav-update --dir market-data --minutes 25 \
+          python -m stockpredictor bhav-update --dir market-data --minutes 40 \
             || echo "::warning::bhavcopy failed"
           # Fundamentals snapshot once a week (Fridays) or on manual runs.
           if [ "$(date -u +%u)" = "5" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
