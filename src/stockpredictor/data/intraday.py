@@ -20,6 +20,8 @@ by GitHub Actions into market-data/intraday/<YEAR>.csv) and Angel One
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time as _time
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -46,6 +48,8 @@ LEVEL_COLS = [f"{p}{int(round(lv * 100)):03d}" for p in "ud" for lv in LEVELS]
 SUMMARY_COLS = ["symbol", "date", "open", "h30", "l30", "c30", "v30", "vwap30",
                 "high_after", "low_after", "px_1515", "close", *LEVEL_COLS, "source", EXIT_COL]
 BACKFILL_PATH = DATA_DIR / "intraday_backfill.csv"
+# Read-modify-write of the summary files is done under this lock (several threads write).
+WRITE_LOCK = threading.RLock()
 
 
 def level_col(side: str, pct: float) -> str:
@@ -221,9 +225,13 @@ def backfill_days(path: Path = BACKFILL_PATH) -> int:
 # --- Storage ---------------------------------------------------------------------
 
 def _write(df: pd.DataFrame, path: Path) -> None:
+    """Write to a temporary file and swap it in: a crash or stop mid-write can never leave
+    a cut-off file behind."""
     path.parent.mkdir(parents=True, exist_ok=True)
     df = df.sort_values(["date", "symbol"]).reindex(columns=SUMMARY_COLS)
-    df.to_csv(path, index=False, float_format="%.4f")
+    tmp = path.with_name(path.name + ".tmp")
+    df.to_csv(tmp, index=False, float_format="%.4f")
+    os.replace(tmp, path)
 
 
 def upsert_store(store_dir: Path, rows: list[dict]) -> int:
@@ -231,6 +239,12 @@ def upsert_store(store_dir: Path, rows: list[dict]) -> int:
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=SUMMARY_COLS)
+    with WRITE_LOCK:
+        _upsert_years(store_dir, new)
+    return len(new)
+
+
+def _upsert_years(store_dir: Path, new: pd.DataFrame) -> None:
     for year, part in new.groupby(new["date"].str[:4]):
         path = store_dir / "intraday" / f"{year}.csv"
         if path.exists():
@@ -239,19 +253,27 @@ def upsert_store(store_dir: Path, rows: list[dict]) -> int:
             old = old[[k not in key for k in zip(old["symbol"], old["date"])]]
             part = pd.concat([old, part], ignore_index=True)
         _write(part, path)
-    return len(new)
 
 
 def upsert_backfill(rows: list[dict], path: Path = BACKFILL_PATH) -> int:
     if not rows:
         return 0
     new = pd.DataFrame(rows, columns=SUMMARY_COLS)
-    if path.exists():
-        old = pd.read_csv(path, dtype={"date": str})
-        key = set(zip(new["symbol"], new["date"]))
-        new = pd.concat([old[[k not in key for k in zip(old["symbol"], old["date"])]], new])
-    _write(new, path)
+    with WRITE_LOCK:
+        if path.exists():
+            old = pd.read_csv(path, dtype={"date": str})
+            key = set(zip(new["symbol"], new["date"]))
+            new = pd.concat([old[[k not in key for k in zip(old["symbol"], old["date"])]], new])
+        _write(new, path)
     return len(rows)
+
+
+def backfill_incomplete(path: Path = BACKFILL_PATH, share: float = 0.8) -> set[str]:
+    """Stocks with clearly fewer days than the others (e.g. rows lost), to download again."""
+    if not path.exists():
+        return set()
+    counts = pd.read_csv(path, usecols=["symbol"])["symbol"].value_counts()
+    return set(counts[counts < share * counts.quantile(0.9)].index)
 
 
 def load_summaries(store_dir: Path, backfill: Path = BACKFILL_PATH) -> pd.DataFrame:

@@ -436,7 +436,8 @@ def _angel_startup(settings, store_dir: Path) -> None:
     # Full download if there is little history; otherwise only stocks new to the universe.
     # (and again for stocks whose history lacks the 12:30 exit prices; resumes if interrupted)
     todo = active if have < 200 else sorted(
-        (set(active) - intraday.backfill_symbols()) | (set(active) & intraday.backfill_missing_exit()))
+        (set(active) - intraday.backfill_symbols())
+        | (set(active) & (intraday.backfill_missing_exit() | intraday.backfill_incomplete())))
     if not todo:
         print(f"  Angel One intraday history: {have} days available\n")
         return
@@ -464,8 +465,8 @@ def _angel_startup(settings, store_dir: Path) -> None:
                     progress=lambda m: failed.append(m) if "error" in m else log.debug(m))
             except Exception:
                 log.exception("Angel One backfill failed")
-            missing = (set(active) - intraday.backfill_symbols()) | \
-                (set(active) & intraday.backfill_missing_exit())
+            missing = (set(active) - intraday.backfill_symbols()) | (set(active) & (
+                intraday.backfill_missing_exit() | intraday.backfill_incomplete()))
             remaining = [s_ for s_ in remaining if s_ in missing]
             if not remaining:
                 break

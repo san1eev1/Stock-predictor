@@ -64,3 +64,21 @@ def test_split_factor():
     ca = pd.DataFrame([{"symbol": "ABC", "date": "2024-06-01", "kind": "split", "value": 2.0}])
     assert I.split_factor(ca, "ABC", date(2024, 5, 1)) == 0.5
     assert I.split_factor(ca, "ABC", date(2024, 7, 1)) == 1.0
+
+
+def test_backfill_writes_are_atomic_and_incomplete_stocks_found(tmp_path, monkeypatch):
+    path = tmp_path / "bf.csv"
+    rows = [{"symbol": s, "date": f"2026-01-{d:02d}", "c30": 1.0, "source": "angelone"}
+            for s in ("A", "B") for d in range(1, 21)]
+    rows += [{"symbol": "C", "date": "2026-01-01", "c30": 1.0, "source": "angelone"}]
+    I.upsert_backfill(rows, path)
+    assert not path.with_name(path.name + ".tmp").exists()      # swapped in, no leftovers
+
+    def crash(*a, **k):
+        raise KeyboardInterrupt                                  # app stopped mid-write
+    monkeypatch.setattr(pd.DataFrame, "to_csv", crash)
+    with pytest.raises(KeyboardInterrupt):
+        I.upsert_backfill([{"symbol": "A", "date": "2026-02-01", "c30": 2.0}], path)
+    monkeypatch.undo()
+    assert len(pd.read_csv(path)) == 41                          # old file intact
+    assert I.backfill_incomplete(path) == {"C"}
