@@ -29,6 +29,7 @@ GRID = {
     "feature_fraction": [0.6, 0.7, 0.8],
     "lambda_l2": [1.0, 5.0, 10.0],
     "num_rounds": [200, 300, 400, 600],
+    "linear_blend": [0.0, 0.2, 0.4],     # mix in a ridge model (a different kind of model)
 }
 LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
                  "recency_half_life": [0.0, 3.0, 5.0, 10.0], "tail_weight": [0.0, 1.0, 2.0],
@@ -42,7 +43,9 @@ MIN_STOCKS_PER_DAY = 50      # intraday days with fewer known outcomes are not u
 # Intraday: also try focusing on the biggest risers and fallers (both ends = buy and sell picks).
 # Learning from each other: blend in the other intraday model's ranking (peer_weight).
 INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0], "peer_weight": [0.0, 0.25, 0.5],
-                 "label": ["move", "trade"]}      # trade: learn the stop/target trade outcome
+                 "label": ["move", "trade"],      # trade: learn the stop/target trade outcome
+                 "recency_half_life_days": [0, 120, 250, 500],
+                 "rank_objective": [False, True]}
 # IC gain needed to switch settings. Re-running the same settings with another random
 # seed moves IC by about +/-0.004, so smaller "gains" are noise.
 MARGIN = 0.01
@@ -83,7 +86,8 @@ def candidates(current: dict, n: int, seed: int | None = None,
         if len(out) > n:
             break
         c = dict(current)
-        for key in rng.sample(list(grid), rng.choice([1, 2])):
+        # mostly small steps; sometimes a bigger jump (3-4 settings) to explore further
+        for key in rng.sample(list(grid), min(len(grid), rng.choice([1, 1, 2, 2, 3, 4]))):
             c[key] = rng.choice(grid[key])
         k = json.dumps(c, sort_keys=True)
         if k not in seen:

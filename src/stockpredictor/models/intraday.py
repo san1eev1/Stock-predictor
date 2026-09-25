@@ -112,6 +112,10 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
     """Biggest risers AND fallers count more (tail_weight; the buy and sell picks come from
     both ends), and judged paper picks carry their feedback weight (fb_weight)."""
     w = np.ones(len(train))
+    hl = params.get("recency_half_life_days") or 0      # recent days count more
+    if hl > 0:
+        age = (train["date"].max() - train["date"]).dt.days.to_numpy()
+        w *= 0.5 ** (age / hl)
     tail = params.get("tail_weight") or 0
     if tail > 0:
         w *= 1 + tail * np.abs(train["target"].to_numpy() - 0.5) * 2
@@ -127,6 +131,7 @@ def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> En
         train = train.assign(target=train["target_trade"]).dropna(subset=["target"])
     weights = sample_weights(train, params)
     params.pop("tail_weight", None)
+    params.pop("recency_half_life_days", None)
     params.pop("peer_weight", None)            # used when scoring (Blended), not by LightGBM
     return engine.fit(train, cols, params, weights, gap_days=1, default_rounds=NUM_ROUNDS)
 

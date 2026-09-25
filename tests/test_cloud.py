@@ -67,3 +67,23 @@ def test_relevance_weights_news_signals(tmp_path):
     assert s["bad_news_3d"] == 0            # bad headlines below the relevance bar don't count
     uni = pd.DataFrame({"symbol": ["A"], "name": ["A Ltd"]})
     assert (R.add_relevance(news.drop(columns="relevance"), uni, tmp_path)["relevance"] == 1).all()
+
+
+def test_linear_blend_mixes_a_ridge_model(tmp_path):
+    import numpy as np
+    import pandas as pd
+
+    from stockpredictor.models import engine
+
+    rng = np.random.default_rng(1)
+    n = 3000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n),
+                       "date": pd.to_datetime("2024-01-01") + pd.to_timedelta(np.arange(n) // 30, "D")})
+    df["target"] = (df["a"] * 0.5 + rng.normal(size=n) * 0.5).rank(pct=True)
+    m = engine.fit(df, ["a", "b"], {"objective": "regression", "verbose": -1, "num_rounds": 50,
+                                   "early_stopping": False, "linear_blend": 0.4})
+    assert m.linear and abs(m.linear["coef"][0]) > abs(m.linear["coef"][1])
+    p = m.predict(df[["a", "b"]])
+    assert np.corrcoef(p, df["a"])[0, 1] > 0.8
+    m.save(tmp_path)
+    assert np.allclose(engine.Ensemble.load(tmp_path).predict(df[["a", "b"]]), p)

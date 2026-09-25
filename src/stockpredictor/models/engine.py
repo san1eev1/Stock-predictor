@@ -19,17 +19,20 @@ MAX_ROUNDS = 1500
 PATIENCE = 50
 HOLDOUT = 0.15
 ENGINE_KEYS = ("num_rounds", "early_stopping", "n_seeds", "rank_objective", "top_features",
-               "horizon")
+               "horizon", "linear_blend")
+RIDGE_ALPHA = 0.01      # ridge penalty per training row (features are standardised)
 RANK_BINS = 10          # relevance levels for the ranking objective
 
 
 class Ensemble:
     """Average of one or more LightGBM boosters, with one interface for all callers."""
 
-    def __init__(self, boosters: list, rounds: int | None = None, used: list[str] | None = None):
+    def __init__(self, boosters: list, rounds: int | None = None, used: list[str] | None = None,
+                 linear: dict | None = None):
         self.boosters = boosters
         self.rounds = rounds
         self.used = used          # feature subset the boosters were trained on (None = all)
+        self.linear = linear      # optional ridge model mixed in (different kind of model)
 
     def _select(self, X, all_cols: list[str] | None = None):
         if self.used is None or not hasattr(X, "columns"):
@@ -40,6 +43,8 @@ class Ensemble:
         Xs = self._select(X)
         preds = [b.predict(Xs, pred_contrib=pred_contrib) for b in self.boosters]
         out = np.mean(preds, axis=0)
+        if self.linear and not pred_contrib:
+            out = mix(out, ridge_predict(self.linear, Xs), self.linear)
         if pred_contrib and self.used is not None and hasattr(X, "columns"):
             # Expand contributions back to all columns (unused features contribute 0).
             full = np.zeros((out.shape[0], X.shape[1] + 1))
@@ -67,6 +72,11 @@ class Ensemble:
         for i, b in enumerate(self.boosters):
             b.save_model(str(path / ("model.txt" if i == 0 else f"model_{i}.txt")))
         (path / "used_features.json").write_text(json.dumps(self.used))
+        lin = path / "linear.json"
+        if self.linear:
+            lin.write_text(json.dumps(self.linear))
+        elif lin.exists():
+            lin.unlink()
 
     @classmethod
     def load(cls, path: Path) -> "Ensemble":
@@ -77,11 +87,40 @@ class Ensemble:
         files = [path / "model.txt", *sorted(path.glob("model_*.txt"))]
         used_file = path / "used_features.json"
         used = json.loads(used_file.read_text()) if used_file.exists() else None
-        return cls([lgb.Booster(model_file=str(f)) for f in files], used=used)
+        lin = path / "linear.json"
+        linear = json.loads(lin.read_text()) if lin.exists() else None
+        return cls([lgb.Booster(model_file=str(f)) for f in files], used=used, linear=linear)
 
     @property
     def booster_(self):   # backwards compatibility
         return self.boosters[0]
+
+
+def ridge_fit(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> dict:
+    """Weighted ridge regression on standardised features (missing values -> the mean)."""
+    mean = np.nanmean(X, axis=0)
+    std = np.nanstd(X, axis=0)
+    std[~(std > 0)] = 1.0
+    mean = np.nan_to_num(mean)
+    Z = np.nan_to_num((X - mean) / std)
+    sw = np.sqrt(w)[:, None]
+    A = (Z * sw).T @ (Z * sw) + RIDGE_ALPHA * len(Z) * np.eye(Z.shape[1])
+    ym = float(np.average(y, weights=w))
+    coef = np.linalg.solve(A, (Z * sw).T @ ((y - ym) * sw[:, 0]))
+    return {"mean": mean.tolist(), "std": std.tolist(), "coef": coef.tolist(), "intercept": ym}
+
+
+def ridge_predict(lin: dict, X) -> np.ndarray:
+    X = np.asarray(X, dtype=np.float64)
+    Z = np.nan_to_num((X - np.array(lin["mean"])) / np.array(lin["std"]))
+    return Z @ np.array(lin["coef"]) + lin["intercept"]
+
+
+def mix(gbm: np.ndarray, lin: np.ndarray, info: dict) -> np.ndarray:
+    """(1 - blend) x LightGBM + blend x ridge, each on its training scale (z-scores)."""
+    zg = (gbm - info["gbm_mean"]) / info["gbm_std"]
+    zl = (lin - info["lin_mean"]) / info["lin_std"]
+    return (1 - info["blend"]) * zg + info["blend"] * zl
 
 
 def _dataset(lgb, X, y, w, dates, rank: bool, reference=None):
@@ -112,6 +151,7 @@ def fit(train: pd.DataFrame, cols: list[str], params: dict, weights: np.ndarray 
     early = params.pop("early_stopping", True)
     seeds = int(params.pop("n_seeds", 1))
     rank = bool(params.pop("rank_objective", False))
+    linear_blend = float(params.pop("linear_blend", 0) or 0)
     params.setdefault("verbose", -1)
     params.setdefault("force_col_wise", True)
     if rank:
@@ -141,7 +181,14 @@ def fit(train: pd.DataFrame, cols: list[str], params: dict, weights: np.ndarray 
     base_seed = params.pop("seed", 42)
     boosters = [lgb.train({**params, "seed": base_seed + i}, data, num_boost_round=rounds)
                 for i in range(max(1, seeds))]
-    return Ensemble(boosters, rounds, cols)
+    linear = None
+    if linear_blend > 0:
+        linear = ridge_fit(X, y.astype(float), w)
+        g = np.mean([b.predict(X) for b in boosters], axis=0)
+        r = ridge_predict(linear, X)
+        linear.update(blend=linear_blend, gbm_mean=float(g.mean()), gbm_std=float(g.std() or 1),
+                      lin_mean=float(r.mean()), lin_std=float(r.std() or 1))
+    return Ensemble(boosters, rounds, cols, linear)
 
 
 def select_features(train: pd.DataFrame, cols: list[str], params: dict,
