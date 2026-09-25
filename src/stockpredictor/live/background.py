@@ -3,7 +3,7 @@
 A separate thread (own database connection; LightGBM trains in C++ outside Python's lock)
 so live prices keep updating every minute while it works:
 
-  * all day, market hours included: tuning rounds for the intraday model on its history
+  * all day, market hours included (back to back after the close): tuning rounds for the intraday model on its history
     (the long-term and news models are trained on GitHub; see cloud-train), keeping new
     settings only when they test better out-of-sample
   * after the 15:30 close: today's whole live Angel One 5-minute session is added to the
@@ -24,7 +24,8 @@ from stockpredictor.models import intraday as MI
 from stockpredictor.models import trainer as T
 
 log = logging.getLogger(__name__)
-PAUSE_MIN = 5            # rest between tuning rounds
+PAUSE_MIN = 5            # rest between tuning rounds while the market is open
+AFTER_HOURS_PAUSE_S = 20  # after the close nothing live needs the CPU: tune back to back
 REPLAY_AFTER = time(15, 40)   # weekdays: historical replays once the close work is done
 CANDIDATES = 3           # new settings tried per round
 
@@ -68,8 +69,13 @@ class BackgroundTrainer(threading.Thread):
                 self._replay(conn)
             else:
                 self._tune(conn)
-            self.wake.wait(self.pause)
+            self.wake.wait(self._pause())
             self.wake.clear()
+
+    def _pause(self) -> float:
+        from stockpredictor.live.prices import in_market_hours
+
+        return self.pause if in_market_hours() else min(self.pause, AFTER_HOURS_PAUSE_S)
 
     def _ctx(self):
         from stockpredictor import store
