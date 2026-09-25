@@ -44,6 +44,7 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
     raw_scores = scores
     scores = M.smooth_scores(scores, feats)          # the steadier score paper trading uses
     close = daily.pivot(index="date", columns="symbol", values="close").sort_index()
+    risk_off = P.risk_off_days(indices)            # rules.regime (Nifty below 200-day average)
 
     ic = M.information_coefficient(raw_scores, labeled)
     report = {
@@ -65,7 +66,7 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
 
     curves = {}
     for reb in rebalances:
-        res = P.simulate(scores, close, rules, capital, reb)
+        res = P.simulate(scores, close, rules, capital, reb, risk_off=risk_off)
         curves[f"model_{reb}"] = res.equity
         report["strategies"][reb] = {**P.performance(res.equity),
                                      **P.trade_stats(res.trades, res.equity),
@@ -77,14 +78,14 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
                 "weekly, both": P.Rules(**{**rules.__dict__, "max_per_sector": 2,
                                            "vol_sizing": True})}
     for name, r in variants.items():
-        res = P.simulate(scores, close, r, capital, "weekly", sectors=sectors)
+        res = P.simulate(scores, close, r, capital, "weekly", sectors=sectors, risk_off=risk_off)
         curves[f"model_{name}"] = res.equity
         report["strategies"][name] = {**P.performance(res.equity),
                                       **P.trade_stats(res.trades, res.equity),
                                       "total_costs": res.total_costs}
     if rules.n_hold != 10:           # same strategy with 10 holdings, for comparison
         wide = P.Rules(**{**rules.__dict__, "n_hold": 10})
-        res = P.simulate(scores, close, wide, capital, "weekly")
+        res = P.simulate(scores, close, wide, capital, "weekly", risk_off=risk_off)
         curves["model_weekly_10_holdings"] = res.equity
         report["strategies"]["weekly, 10 holdings"] = {
             **P.performance(res.equity), **P.trade_stats(res.trades, res.equity),
@@ -93,7 +94,7 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
     base = feats.loc[feats["date"] >= scores["date"].min(), ["symbol", "date", "mom_12_1"]] \
         .merge(point_in_time_universe(feats, universe_size), on=["symbol", "date"])
     res = P.simulate(base.rename(columns={"mom_12_1": "score"}).dropna(), close, rules,
-                     capital, "weekly")
+                     capital, "weekly", risk_off=risk_off)
     curves["momentum_only"] = res.equity
     report["strategies"]["momentum only (weekly)"] = {
         **P.performance(res.equity), **P.trade_stats(res.trades, res.equity),

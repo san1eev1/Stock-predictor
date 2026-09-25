@@ -368,7 +368,9 @@ def rules_for(target: MI.Target, base=None):
                            n_short=min(base.n_short, int(r["n_short"])),
                            stop_loss=float(r["stop_loss"]), target=float(r["target"]),
                            skip_quantile=float(r["skip_quantile"]),
-                           min_prob=float(r.get("min_prob", 0.0)))
+                           min_prob=float(r.get("min_prob", 0.0)),
+                           avoid_results=bool(r.get("avoid_results", False)),
+                           avoid_expiry=bool(r.get("avoid_expiry", False)))
 
 
 def day_profit(days: pd.DataFrame) -> float:
@@ -434,6 +436,9 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     best = best_of([best, *(replace(best, stop_loss=sl, target=tp) for sl, tp in RULE_EXITS)])
     if take_ok:
         best = best_of([best, *(replace(best, min_prob=p) for p in RULE_PROBS)])
+    # Known traps: skip results-day stocks / monthly expiry days - only if that earns more.
+    best = best_of([best, *(replace(best, avoid_results=a, avoid_expiry=e)
+                            for a in (False, True) for e in (False, True))])
     (new_late, new_early, new_days), (cur_late, cur_early, _) = run(best), run(now)
     adopted = (best != now and new_late > cur_late and new_early >= cur_early
                and new_days >= MIN_TRADE_DAYS)
@@ -443,7 +448,9 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     report = {"target": target.horizon, "adopted": adopted,
               "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
                         "stop_loss": chosen.stop_loss, "target": chosen.target,
-                        "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob},
+                        "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob,
+                        "avoid_results": chosen.avoid_results,
+                        "avoid_expiry": chosen.avoid_expiry},
               "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
               "current_day_profit_recent": cur_late, "tested": len(results),
               "trade_days": run(chosen)[2],

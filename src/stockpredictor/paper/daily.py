@@ -32,7 +32,8 @@ def get_rules(conn: sqlite3.Connection) -> tuple[Rules, str]:
     s = dict(conn.execute("SELECT key, value FROM app_settings").fetchall())
     rules = Rules(n_hold=int(s.get("lt_n_hold", Rules.n_hold)), exit_rank=int(s.get("lt_exit_rank", 50)),
                   stop_loss=float(s.get("lt_stop_loss", 0.15)),
-                  news_exit=s.get("lt_news_exit", "1") == "1")
+                  news_exit=s.get("lt_news_exit", "1") == "1",
+                  regime=s.get("lt_regime", Rules.regime))
     return rules, s.get("lt_rebalance", "weekly")
 
 

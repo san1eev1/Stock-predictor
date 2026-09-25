@@ -24,9 +24,10 @@ class Rules:
     news_exit: bool = True      # sell on strongly negative news
     max_per_sector: int = 0     # at most this many holdings from one sector (0 = no limit)
     vol_sizing: bool = False    # size positions by volatility (calmer stocks get more)
-    regime: str = "off"         # when Nifty 50 is below its 200-day average (a falling
-                                # market): "no_buys", "exit" (sell all, hold cash) or
-                                # "half" (half-size new positions); "off" = ignore
+    regime: str = "half"        # when Nifty 50 is below its 200-day average (a falling
+                                # market): "half" (half-size new positions; backtest: same
+                                # return, smaller falls), "no_buys", "exit" (sell all, hold
+                                # cash) or "off" (ignore)
 
 
 @dataclass

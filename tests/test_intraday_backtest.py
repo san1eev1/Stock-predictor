@@ -58,7 +58,7 @@ def test_walk_forward_and_backtest(feats):
     assert not scores.empty
     first_test = scores["date"].min()
     assert first_test > sorted(feats["date"].unique())[39]
-    r = B.run(feats, scores, B.IntradayRules(n_long=3, n_short=3))
+    r = B.run(feats, scores, B.IntradayRules(n_long=3, n_short=3, skip_quantile=0))
     m = r["strategies"]["model"]
     assert m["trading_days"] == scores["date"].nunique()
     assert 0 <= m["direction_accuracy"] <= 1 and m["total_costs"] > 0

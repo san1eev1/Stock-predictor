@@ -223,7 +223,10 @@ def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules
                 _set_order(conn, o["id"], "cancelled", when, None)
                 continue
             equity = value(conn, prices, horizon)["equity"]
-            qty = int(min(equity / rules.n_hold, cash(conn, horizon)) / (price * 1.003))
+            size = equity / rules.n_hold
+            if rules.regime == "half" and _get_setting(conn, "lt_risk_off") == "1":
+                size *= 0.5                   # falling market: half-size new positions
+            qty = int(min(size, cash(conn, horizon)) / (price * 1.003))
             if qty <= 0:
                 _set_order(conn, o["id"], "cancelled", when, None)
                 continue
@@ -237,6 +240,13 @@ def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules
         _set_order(conn, o["id"], "filled", when, price)
     conn.commit()
     return log
+
+
+def market_risk_off(indices: pd.DataFrame, date: pd.Timestamp, window: int = 200) -> bool:
+    """True when Nifty 50's close on `date` is below its `window`-day average."""
+    n = indices[(indices["symbol"] == F.MARKET_INDEX) & (indices["date"] <= date)] \
+        .sort_values("date")["close"]
+    return bool(len(n) >= window and n.iloc[-1] < n.tail(window).mean())
 
 
 def _set_order(conn, oid, status, when, price):
@@ -299,10 +309,18 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     save_predictions(conn, today, model, date, ctx.nifty_close(date))
     save_shadow(conn, today, model, date, ctx.nifty_close(date))
 
-    # 5. Decide and queue orders for the next fill.
+    # 5. Decide and queue orders for the next fill. Market regime: is Nifty 50 below its
+    #    200-day average at this close? (used when the orders are filled; rules.regime)
+    risk_off = market_risk_off(ctx.indices, date)
+    _set_setting(conn, "lt_risk_off", "1" if risk_off else "0")
     rebalance = is_rebalance_day(conn, date, rebalance_mode)
     sells, buys = decide(holdings(conn), scores, prices, rules, rebalance,
                          negative_news=negative, severe_news=severe)
+    if risk_off and rules.regime in ("no_buys", "exit"):
+        buys = []
+    if risk_off and rules.regime == "exit":
+        sold = {s for s, _ in sells}
+        sells = sells + [(s, "risk-off") for s in holdings(conn) if s not in sold]
     queue_orders(conn, sells, buys, f"{date:%Y-%m-%d} 18:00")
     shorts, covers = [], []           # long-term paper trading is buy-only
     if rebalance:

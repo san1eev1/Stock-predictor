@@ -27,10 +27,15 @@ class IntradayRules:
     n_short: int = 5            # 10 + 10 candidates are still judged and learned from)
     stop_loss: float = 1.0      # % from the 9:45 price (one of intraday.LEVELS)
     target: float = 2.0         # % (one of LEVELS), 0 = no target
-    skip_quantile: float = 0.0  # skip days whose signal strength is below this
-                                # quantile of the previous 60 days (0 = never skip)
+    skip_quantile: float = 0.7  # trade only on strong days: skip days whose signal strength
+                                # (gap between the top buys' and top sells' scores) is below
+                                # this quantile of the previous 60 days (0 = never skip)
     min_prob: float = 0.0       # trade a pick only if the 'take this trade?' model gives it
                                 # at least this chance of profit after costs (0 = off)
+    avoid_results: bool = False  # known traps: no trade in a stock on its results day ...
+    avoid_expiry: bool = False   # ... nor on monthly F&O expiry days (picks still judged);
+                                 # off until the profit tuning (trainer.tune_rules) shows
+                                 # that avoiding them earns more
 
 
 def snap(pct: float) -> float:
@@ -89,13 +94,37 @@ def trade_exits(df: pd.DataFrame, side: str, stop_loss: float, target: float,
 SLIP_RANGE_SHARE = 0.05   # slippage = 5% of the stock's first-30-minute range ...
 SLIP_MIN, SLIP_MAX = 0.0003, 0.002   # ... between 0.03% and 0.2% per order
 LIQUIDITY_SHARE = 0.01    # a position is at most 1% of the stock's first-30-minute volume
+RISK_PER_TRADE = 0.01     # a stop-loss hit loses at most 1% of the book's capital
+
+
+def is_trap(row, rules: IntradayRules) -> str | None:
+    """Why this pick should not be traded today (results day, expiry day), or None."""
+    get = row.get if hasattr(row, "get") else (lambda k, d=None: d)
+    if rules.avoid_results and get("results_today", 0) == 1:
+        return "results day"
+    if rules.avoid_expiry and get("is_expiry", 0) == 1:
+        return "F&O expiry day"
+    return None
+
+
+def position_qty(slot: float, entry: float, rules: IntradayRules, capital: float,
+                 v30: float | None = None) -> int:
+    """Shares for one trade: the slot's worth, but never so many that the stop-loss would
+    lose more than RISK_PER_TRADE of the capital, nor more than 1% of the stock's volume."""
+    qty = int(slot / entry)
+    sl = snap(rules.stop_loss)
+    if sl:
+        qty = min(qty, int(RISK_PER_TRADE * capital / (entry * sl / 100)))
+    if v30 is not None and v30 == v30 and v30 > 0:
+        qty = min(qty, int(LIQUIDITY_SHARE * v30))
+    return max(qty, 0)
 
 
 def summary_columns(feats: pd.DataFrame, exit_col: str) -> pd.DataFrame:
     """What the simulation needs from the intraday features (with range and volume for
     realistic slippage and position limits when available)."""
     cols = ["symbol", "date", "c30", exit_col, *I.LEVEL_COLS,
-            *[c for c in ("h30", "l30", "v30") if c in feats]]
+            *[c for c in ("h30", "l30", "v30", "results_today", "is_expiry") if c in feats]]
     return feats[list(dict.fromkeys(cols))]
 
 
@@ -140,10 +169,9 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
             continue
         pnl_day = 0.0
         for _, p in pick(day, rules).iterrows():
-            qty = int(slot / p["c30"])
-            v30 = p.get("v30", np.nan)
-            if v30 == v30 and v30 > 0:               # no position bigger than 1% of volume
-                qty = min(qty, int(LIQUIDITY_SHARE * v30))
+            if is_trap(p, rules):
+                continue
+            qty = position_qty(slot, p["c30"], rules, capital, p.get("v30", np.nan))
             if qty <= 0:
                 continue
             if rules.min_prob > 0:
