@@ -126,7 +126,7 @@ class Monitor:
     # --- helpers -----------------------------------------------------------
     def ctx(self, reload: bool = False) -> E.MarketContext:
         if self._ctx is None or reload:
-            self._ctx = E.MarketContext.load(self.store_dir)
+            self._ctx = E.MarketContext.load(self.store_dir, years=config.LIVE_CONTEXT_YEARS)
         return self._ctx
 
     def model(self) -> M.LongTermModel:
@@ -675,11 +675,28 @@ class Monitor:
             log.exception("local data catch-up failed")
             return False
 
-    def daily_mac_train(self, ctx) -> None:
-        """Once a day after the close: retrain the long-term model (on the Mac's recent
-        history) and both intraday models (with today's session), using GitHub's tuned
-        settings. No tuning, a few minutes. GitHub's evening run then trains again on all
-        history since 2005; the freshest model is always used."""
+    def daily_mac_train(self, ctx=None) -> None:
+        """Once a day after the close: retrain the long-term model and both intraday models
+        (with today's session) on ALL history, using GitHub's tuned settings. Runs as its
+        own short-lived process (`mac-train`) so its memory (~1.5 GB for 2005-2026) goes back
+        to the Mac as soon as it finishes; the live monitor keeps only recent data."""
+        import subprocess
+        import sys
+
+        try:
+            r = subprocess.run([sys.executable, "-m", "stockpredictor", "mac-train",
+                                "--dir", str(self.store_dir)], timeout=45 * 60,
+                               capture_output=True, text=True)
+            for line in (r.stdout or "").splitlines():
+                log.info("%s", line)
+            if r.returncode != 0:
+                log.warning("daily Mac training failed: %s", (r.stderr or "")[-500:])
+        except Exception:
+            log.exception("daily Mac training failed")
+        self._imodel = self._cmodel = self._model = None
+
+    def mac_train_here(self, ctx) -> None:
+        """The work of `mac-train` (full-history context, this process)."""
         try:
             lt = T.retrain_longterm(ctx, self.conn, model_dir=M.MAC_MODEL_DIR)
             if lt is not None:

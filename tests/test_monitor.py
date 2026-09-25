@@ -81,7 +81,7 @@ def test_tick_routing(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
     last = ctx.daily["date"].max()
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 26, 12, 0))  # Saturday
-    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     model.trained_at = "2000-01-01T00:00:00"
     monkeypatch.setattr(MON.M.LongTermModel, "save", lambda self, p: None)
     assert mon.tick() == ["retrain", "tune"]     # weekend: weekly retrain + a tuning round
@@ -115,7 +115,7 @@ def test_startup_trains_decides_and_prints_scoreboard(tmp_path, ctx_model, monke
     import logging
     ctx, model = ctx_model
     last = ctx.daily["date"].max()
-    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.T, "retrain_longterm", lambda ctx, conn: None)
     monkeypatch.setattr(MON.T, "retrain_intraday", lambda ctx, d, conn: None)
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(last.year, last.month, last.day, 20, 0))
@@ -213,7 +213,7 @@ def test_live_learning_after_square_off(tmp_path, ctx_model, fast_tuning, monkey
 def test_mac_trains_nothing_when_training_is_on_github(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 26, 12, 0))  # Saturday
-    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "MAC_TRAINING", False)
     monkeypatch.setattr(MON.T, "retrain_intraday", lambda *a, **k: pytest.fail("trained"))
     monkeypatch.setattr(MON.T, "tune_intraday", lambda *a, **k: pytest.fail("tuned"))
@@ -223,7 +223,7 @@ def test_mac_trains_nothing_when_training_is_on_github(tmp_path, ctx_model, monk
 def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 15, 50))  # Monday
-    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "MAC_TRAINING", False)
     monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", True)
     calls = []
@@ -239,7 +239,7 @@ def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
 def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
     mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 20, 59))  # Monday
-    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "CLOUD_TRAINING", True)
     monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", False)
     started = []

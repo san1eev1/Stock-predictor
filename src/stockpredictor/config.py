@@ -19,9 +19,12 @@ CLOUD_TRAINING = os.getenv("CLOUD_TRAINING", "1") != "0"
 # The Mac itself trains nothing (keeps it cool): live prices, picks and paper trading only;
 # models come from GitHub. MAC_TRAINING=1 brings back background tuning on the Mac.
 MAC_TRAINING = os.getenv("MAC_TRAINING", "0" if CLOUD_TRAINING else "1") != "0"
-# ...except one light retrain of both intraday models a day after the close, on the Mac's
-# own Angel One data including today's session (a few minutes; no tuning).
-MAC_DAILY_TRAINING = os.getenv("MAC_DAILY_TRAINING", "1") != "0"
+# All learning runs on GitHub (all history since 2005, twice every evening). MAC_DAILY_TRAINING=1
+# adds one retrain a day on the Mac at 16:00, in its own short-lived process.
+MAC_DAILY_TRAINING = os.getenv("MAC_DAILY_TRAINING", "0") != "0"
+# The live monitor and dashboard keep only this many recent years in memory (predictions
+# need recent data; training loads everything in its own short-lived process). 0 = all.
+LIVE_CONTEXT_YEARS = 0 if MAC_TRAINING else int(os.getenv("LIVE_CONTEXT_YEARS", "3"))
 IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 SHARED_MODELS_DIR = PROJECT_ROOT / ("trained-models" if CLOUD_TRAINING else "models")
 LOCAL_MODELS_DIR = PROJECT_ROOT / "models"            # intraday model (uses Angel One data)

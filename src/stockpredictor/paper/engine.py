@@ -46,7 +46,9 @@ class MarketContext:
     news: pd.DataFrame
 
     @classmethod
-    def load(cls, store_dir) -> "MarketContext":
+    def load(cls, store_dir, years: int | None = None) -> "MarketContext":
+        """All data, or only the last `years` years (the live monitor and dashboard: much
+        less memory; indicators are still computed on the full history, then cut)."""
         from stockpredictor import store
 
         from stockpredictor.data import delivery as DL
@@ -57,10 +59,16 @@ class MarketContext:
 
         from stockpredictor.data import earnings as ER
 
+        since = pd.Timestamp.now().normalize() - pd.DateOffset(years=years) if years else None
         feats = cached_features(store_dir, daily, indices, universe, DL.load(store_dir),
-                                ER.load(store_dir))
-        return cls(daily, indices, universe, feats,
-                   R.add_relevance(N.load_news(store_dir), universe))
+                                ER.load(store_dir), since=since)
+        news = N.load_news(store_dir)
+        if since is not None:
+            daily = daily[daily["date"] >= since].reset_index(drop=True)
+            indices = indices[indices["date"] >= since].reset_index(drop=True)
+            if "published" in news and not news.empty:
+                news = news[news["published"] >= since.tz_localize("UTC")]
+        return cls(daily, indices, universe, feats, R.add_relevance(news, universe))
 
     def closes_on(self, date: pd.Timestamp) -> dict[str, float]:
         d = self.daily[self.daily["date"] <= date]
@@ -75,7 +83,7 @@ FEATURE_CACHE_VERSION = 4     # 4: cleaned prices (data/clean.py)
 
 
 def cached_features(store_dir, daily, indices, universe, delivery=None,
-                    earnings=None) -> pd.DataFrame:
+                    earnings=None, since: pd.Timestamp | None = None) -> pd.DataFrame:
     """Build features once per data update and reuse them (~0.3 s instead of ~30 s per load).
     Stored as Parquet + zstd with values rounded to 4 significant digits (at most 0.05%
     change - far finer than the model's ~255 value bins): ~180 MB instead of ~300 MB for
@@ -86,8 +94,11 @@ def cached_features(store_dir, daily, indices, universe, delivery=None,
 
     from stockpredictor.config import DATA_DIR
 
+    def cut(f: pd.DataFrame) -> pd.DataFrame:
+        return f if since is None else f[f["date"] >= since].reset_index(drop=True)
+
     if os.getenv("FEATURE_CACHE", "1") == "0":
-        return F.build_features(daily, indices, universe, delivery, earnings)
+        return cut(F.build_features(daily, indices, universe, delivery, earnings))
     from stockpredictor.store import local_overlay_path
 
     files = sorted(Path(store_dir).glob("daily/*.csv")) + sorted(Path(store_dir).glob("indices/*.csv")) \
@@ -98,8 +109,9 @@ def cached_features(store_dir, daily, indices, universe, delivery=None,
     cache_dir = DATA_DIR / "cache"
     path = cache_dir / f"longterm_features_{key}.parquet"
     if path.exists():
-        try:
-            return pd.read_parquet(path).copy()
+        try:     # with `since`, only the recent rows are read from disk at all
+            filters = [("date", ">=", since)] if since is not None else None
+            return pd.read_parquet(path, filters=filters).reset_index(drop=True)
         except Exception:
             path.unlink(missing_ok=True)
     feats = F.build_features(daily, indices, universe, delivery, earnings)
@@ -112,7 +124,7 @@ def cached_features(store_dir, daily, indices, universe, delivery=None,
     rounded = pd.DataFrame({c: round_significant(feats[c]) for c in floats}, index=feats.index)
     stored = pd.concat([feats.drop(columns=floats), rounded], axis=1)[list(feats.columns)]
     stored.to_parquet(path, compression="zstd", compression_level=9)
-    return stored
+    return cut(stored)
 
 
 def round_significant(x: pd.Series, digits: int = 4) -> np.ndarray:

@@ -82,6 +82,22 @@ def cmd_intraday_collect(settings, args) -> None:
     print(f"Intraday summaries: {n} stock-days from {len(bars)}/{len(symbols)} stocks")
 
 
+def cmd_mac_train(settings, args) -> None:
+    """The Mac's daily training on all history (started by the live monitor at 16:00 as its
+    own process, so the memory is returned when it ends)."""
+    import logging
+
+    from stockpredictor.live import monitor as MON
+    from stockpredictor.paper.engine import MarketContext
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    db.init_db(settings.db_path)
+    conn = db.connect(settings.db_path)
+    mon = MON.Monitor(conn, Path(args.dir), None, settings.paper_capital_longterm)
+    mon.mac_train_here(MarketContext.load(Path(args.dir)))
+    print("Daily Mac training finished", flush=True)
+
+
 def cmd_delivery_update(settings, args) -> None:
     """NSE delivery share per stock and day -> delivery/<year>.csv in the git store."""
     from stockpredictor import store
@@ -1019,6 +1035,8 @@ ARG_COMMANDS = {
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
     "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
+    "mac-train": (cmd_mac_train, "The Mac's daily training on all history (own process)",
+                  _dir_arg),
 }
 
 COMMANDS = {
