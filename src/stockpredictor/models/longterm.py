@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from stockpredictor.models.engine import model_inputs
 from stockpredictor.features import longterm as F
 from stockpredictor.features import technical
 from stockpredictor.models import engine
@@ -100,7 +101,7 @@ def trading_scores(model: "LongTermModel", feats: pd.DataFrame, date: pd.Timesta
     blended with momentum. Index = symbol."""
     days = sorted(d for d in feats["date"].unique() if d <= date)[-smooth_days:]
     rows = feats[feats["date"].isin(days) & feats["symbol"].isin(symbols)]
-    raw = pd.Series(model.model.predict(rows[model.features].astype(np.float32)), index=rows.index)
+    raw = pd.Series(model.model.predict(model_inputs(rows, model.features)), index=rows.index)
     avg = raw.groupby(rows["symbol"]).mean()
     today = feats[(feats["date"] == date) & feats["symbol"].isin(avg.index)].set_index("symbol")
     avg = avg.reindex(today.index)
@@ -182,13 +183,13 @@ class LongTermModel:
                    metrics={"mom_weight": params.get("mom_weight", 0.0)})
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
-        raw = pd.Series(self.model.predict(feats[self.features].astype(np.float32)),
+        raw = pd.Series(self.model.predict(model_inputs(feats, self.features)),
                         index=feats.index)
         return blend(raw, feats, self.metrics.get("mom_weight", 0.0))
 
     def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
         """Top positive and negative feature contributions per row, as readable text."""
-        contrib = self.model.predict(feats[self.features].astype(np.float32),
+        contrib = self.model.predict(model_inputs(feats, self.features),
                                      pred_contrib=True)[:, :-1]
         reasons = []
         for row in contrib:

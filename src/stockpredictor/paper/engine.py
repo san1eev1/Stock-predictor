@@ -19,6 +19,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from stockpredictor.models.engine import model_inputs
 from stockpredictor.backtest.portfolio import Position, Rules, decide
 from stockpredictor.store import tradable as store_tradable
 from stockpredictor.costs import DEFAULT_COSTS, DeliveryCosts
@@ -352,7 +353,7 @@ def save_trading_scores(conn, date: pd.Timestamp, scores: pd.Series) -> None:
 
 def save_shadow(conn, today: pd.DataFrame, model: M.LongTermModel, date: pd.Timestamp,
                 nifty: float) -> None:
-    raw = pd.Series(model.model.predict(today[model.features].astype(np.float32)),
+    raw = pd.Series(model.model.predict(model_inputs(today, model.features)),
                     index=today.index)
     rows = []
     for name, w in SHADOW_VARIANTS.items():

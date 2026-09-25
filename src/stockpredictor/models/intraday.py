@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from stockpredictor.models.engine import model_inputs
 from stockpredictor import config
 from stockpredictor.config import LOCAL_MODELS_DIR, SHARED_MODELS_DIR
 from stockpredictor.data import intraday as I
@@ -154,11 +155,11 @@ class IntradayModel:
                    f"{train['date'].max():%Y-%m-%d}", int(train["date"].nunique()))
 
     def score(self, feats: pd.DataFrame) -> pd.Series:
-        return pd.Series(self.model.predict(feats[self.features].astype(np.float32)),
+        return pd.Series(self.model.predict(model_inputs(feats, self.features)),
                          index=feats.index)
 
     def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
-        contrib = self.model.predict(feats[self.features].astype(np.float32),
+        contrib = self.model.predict(model_inputs(feats, self.features),
                                      pred_contrib=True)[:, :-1]
         out = []
         for row in contrib:

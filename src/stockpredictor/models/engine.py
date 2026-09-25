@@ -218,3 +218,16 @@ def trained_time(meta: dict, from_github: bool) -> "datetime":
         t = t.replace(tzinfo=timezone.utc) if from_github else t.astimezone()
     return t.astimezone(timezone.utc)
 
+
+def model_inputs(feats: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """The model's input columns as float32. An input missing here (e.g. a data file the
+    model was trained with is not on this machine yet) becomes blank (NaN, which the trees
+    handle) with a warning, instead of stopping the predictions."""
+    missing = [c for c in cols if c not in feats.columns]
+    if missing:
+        import logging
+
+        logging.getLogger(__name__).warning("model inputs missing here, left blank: %s",
+                                            ", ".join(missing[:8]))
+    return feats.reindex(columns=cols).astype(np.float32)
+
