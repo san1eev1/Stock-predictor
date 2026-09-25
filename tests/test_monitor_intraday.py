@@ -34,6 +34,14 @@ class FakePrices:
         return None
 
 
+
+@pytest.fixture(autouse=True)
+def fast_tuning(monkeypatch):
+    """Tuning rounds train many models; tests only check when they run."""
+    calls = []
+    monkeypatch.setattr(MON.Monitor, "_tune_round", lambda self, now, n, label: calls.append(label))
+    return calls
+
 def test_intraday_day_cycle(tmp_path, monkeypatch):
     daily, indices, universe = synthetic(n_days=400, symbols=[f"S{i:02d}" for i in range(20)])
     universe = universe.assign(active=1, name=universe["symbol"])

@@ -136,7 +136,10 @@ def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | N
 
 
 def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
-                  seed: int | None = None) -> dict:
+                  seed: int | None = None, check_years: int = 6) -> dict:
+    """Try variations of the current settings on history (walk-forward). A winner must beat
+    the current settings over the last `years` AND not be worse over `check_years`, so a
+    setting that only fits one period by luck is not adopted."""
     labeled = longterm_labeled(ctx)
     current = M.current_params()
     results = []
@@ -148,14 +151,22 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
     base = results[0]
     adopted = (not best["current"] and not np.isnan(best["ic"])
                and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN))
+    check = None
+    if adopted and check_years > years:
+        check = {"best": evaluate_longterm(labeled, best["params"], check_years)["ic"],
+                 "current": evaluate_longterm(labeled, base["params"], check_years)["ic"]}
+        adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
+                                                   or check["best"] >= check["current"])
     if adopted:
         _save_params(M.MODEL_DIR, best["params"])
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"], "top10_hit": chosen["top10_hit"],
               "top10_excess": chosen["top10_excess"], "previous_ic": base["ic"],
-              "tested": len(results), "params": chosen["params"], "all": results}
+              "tested": len(results), "params": chosen["params"], "all": results,
+              "long_check": check}
     log_run(conn, "longterm", "tune", f"{labeled['date'].max():%Y-%m-%d}", report)
-    retrain_longterm(ctx, conn, force=True)
+    if adopted:
+        retrain_longterm(ctx, conn, force=True)
     return report
 
 
@@ -229,7 +240,8 @@ def retrain_intraday(ctx, store_dir, conn=None, force: bool = False) -> MI.Intra
 
 
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
-                  seed: int | None = None) -> dict | None:
+                  seed: int | None = None, check_days: int = 250) -> dict | None:
+    """Like tune_longterm: must win on the last 120 days and not lose on the last `check_days`."""
     feats = intraday_feats(ctx, store_dir)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS + 10:
         return None
@@ -243,14 +255,20 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
     base = results[0]
     best = max(valid, key=lambda r: r["ic"])
     adopted = not best["current"] and best["ic"] >= base["ic"] + MARGIN
+    check = None
+    if adopted and feats["date"].nunique() >= check_days + MI.MIN_TRAIN_DAYS:
+        check = {"best": evaluate_intraday(feats, best["params"], check_days)["ic"],
+                 "current": evaluate_intraday(feats, base["params"], check_days)["ic"]}
+        adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
+                                                   or check["best"] >= check["current"])
     if adopted:
         _save_params(MI.MODEL_DIR, best["params"])
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
-              "all": results}
+              "all": results, "long_check": check}
     log_run(conn, "intraday", "tune", f"{feats['date'].max():%Y-%m-%d}", report)
-    model = MI.IntradayModel.train(feats)
-    model.save()
+    if adopted:
+        MI.IntradayModel.train(feats).save()
     return report

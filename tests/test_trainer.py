@@ -40,7 +40,8 @@ def test_retrain_only_when_new_outcomes(env):
 
 def test_tune_logs_and_adopts_only_with_margin(env, monkeypatch):
     ctx, conn = env
-    scores = iter([0.02, 0.021, 0.05])   # current, small gain, clear gain
+    # 3 years: current, small gain, clear gain; then the 6-year check: winner, current
+    scores = iter([0.02, 0.021, 0.05, 0.04, 0.03])
     monkeypatch.setattr(T, "evaluate_longterm",
                         lambda lab, p, years=3: {"ic": next(scores), "top10_hit": 0.5,
                                                  "top10_excess": 0.0})
@@ -50,6 +51,17 @@ def test_tune_logs_and_adopts_only_with_margin(env, monkeypatch):
     assert json.loads((M.MODEL_DIR / "params.json").read_text()) == r["params"]
     kinds = [x[0] for x in conn.execute("SELECT train_from FROM model_runs")]
     assert kinds == ["tune", "retrain"]
+
+
+def test_tune_rejects_winner_that_fails_longer_check(env, monkeypatch):
+    ctx, conn = env
+    scores = iter([0.02, 0.05, 0.01, 0.02, 0.03])   # wins on 3 years, loses on 6 years
+    monkeypatch.setattr(T, "evaluate_longterm",
+                        lambda lab, p, years=3: {"ic": next(scores), "top10_hit": 0.5,
+                                                 "top10_excess": 0.0})
+    r = T.tune_longterm(ctx, conn, n_candidates=2, seed=3)
+    assert not r["adopted"] and r["long_check"] == {"best": 0.02, "current": 0.03}
+    assert not (M.MODEL_DIR / "params.json").exists()
 
 
 def test_tune_keeps_current_when_no_real_gain(env, monkeypatch):

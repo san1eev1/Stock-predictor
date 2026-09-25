@@ -38,6 +38,10 @@ LOCAL_FETCH_AFTER = time(17, 45)   # fetch prices ourselves if GitHub hasn't by 
 INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
 INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) until 14:30
 INTRADAY_SQUARE_OFF = time(15, 15)
+PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
+TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
+TUNE_CANDIDATES = 3               # new settings tried per model in each round
+SCHEDULED_TUNE_ROUNDS = 10        # background job (monitor off): at most 10 rounds / 30 min
 FIRST_FILL = time(9, 20)       # skip the opening minutes' noise
 LIVE_HISTORY_DAYS = 400        # enough history for 12-month features
 
@@ -145,7 +149,55 @@ class Monitor:
         elif now.weekday() >= 5:
             if self.weekly_retrain(now):
                 done.append("retrain")
+        if self.market_idle(now) and self.idle_tune(now):
+            done.append("tune")
         return done
+
+    def market_idle(self, now: datetime) -> bool:
+        """Nothing to do for the market: nights, weekends, holidays, and weekday evenings
+        once the after-close decision is made."""
+        t = now.time()
+        if now.weekday() >= 5 or t < PRE_MARKET:
+            return True
+        if in_market_hours(now):
+            return not self.trading_today(now)
+        return t >= AFTER_CLOSE and _setting(self.conn, "lt_after_close_day") == f"{now:%Y-%m-%d}"
+
+    def idle_tune(self, now: datetime, force: bool = False) -> bool:
+        """Keep learning from history while the market is closed: every hour, try new model
+        settings (walk-forward on all history) and keep them only if they test better."""
+        last = _setting(self.conn, "last_idle_tune")
+        if not force and last and (now.replace(tzinfo=None) - datetime.fromisoformat(last)
+                                   ).total_seconds() < TUNE_EVERY_MIN * 60:
+            return False
+        _set(self.conn, "last_idle_tune", now.replace(tzinfo=None).isoformat(timespec="seconds"))
+        self._tune_round(now, TUNE_CANDIDATES, "background")
+        return True
+
+    def _tune_round(self, now: datetime, n: int, label: str) -> None:
+        try:
+            ctx = self.ctx()
+            lt = T.tune_longterm(ctx, self.conn, n_candidates=n)
+            msg = f"long-term IC {lt['ic']:.3f}"
+            if lt["adopted"]:
+                self._model = None
+                alert(self.conn, "model", "info", None,
+                      f"{now:%Y-%m-%d %H:%M} {label} tuning improved long-term IC "
+                      f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
+                msg += " (improved - new settings adopted)"
+            it = T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=n)
+            if it:
+                msg += f", intraday IC {it['ic']:.3f}"
+                if it["adopted"]:
+                    self._imodel = None
+                    alert(self.conn, "model", "info", None,
+                          f"{now:%Y-%m-%d %H:%M} {label} tuning improved intraday IC "
+                          f"{it['previous_ic']:.3f} -> {it['ic']:.3f}")
+                    msg += " (improved - new settings adopted)"
+            log.info("Training on history (%s round, %d new settings per model): %s",
+                     label, n, msg)
+        except Exception:
+            log.exception("%s tuning failed", label)
 
     def scheduled_run(self, now: datetime) -> list[str]:
         """One headless pass for the daily background job (when the live monitor is off)."""
@@ -159,6 +211,14 @@ class Monitor:
                 done.append("after-close")
         elif now.weekday() >= 5 and self.weekly_retrain(now):
             done.append("retrain")
+        if self.market_idle(now):
+            # The live monitor is off: spend up to 30 minutes learning from history.
+            import time as _time
+            end = _time.monotonic() + 30 * 60
+            for _ in range(SCHEDULED_TUNE_ROUNDS):
+                if _time.monotonic() >= end or not self.idle_tune(now, force=True):
+                    break
+                done.append("tune")
         return done
 
     def minute_job(self, now: datetime) -> None:
@@ -428,22 +488,7 @@ class Monitor:
         if _setting(self.conn, "last_light_tune") == f"{now:%Y-%m-%d}":
             return
         _set(self.conn, "last_light_tune", f"{now:%Y-%m-%d}")
-        try:
-            ctx = self.ctx()
-            lt = T.tune_longterm(ctx, self.conn, n_candidates=2)
-            if lt["adopted"]:
-                self._model = None
-                alert(self.conn, "model", "info", None,
-                      f"{now:%Y-%m-%d} evening tuning improved long-term IC "
-                      f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
-            it = T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=2)
-            if it and it["adopted"]:
-                self._imodel = None
-                alert(self.conn, "model", "info", None,
-                      f"{now:%Y-%m-%d} evening tuning improved intraday IC "
-                      f"{it['previous_ic']:.3f} -> {it['ic']:.3f}")
-        except Exception:
-            log.exception("evening tuning failed")
+        self._tune_round(now, 2, "evening")
 
     def local_catchup(self, now: datetime) -> bool:
         """Download recent daily prices (and intraday summaries) directly from Yahoo."""

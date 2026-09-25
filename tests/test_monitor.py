@@ -24,6 +24,14 @@ class FakePrices:
         return self.live
 
 
+
+@pytest.fixture(autouse=True)
+def fast_tuning(monkeypatch):
+    """Tuning rounds train many models; tests only check when they run."""
+    calls = []
+    monkeypatch.setattr(MON.Monitor, "_tune_round", lambda self, now, n, label: calls.append(label))
+    return calls
+
 def make(tmp_path, ctx, model, prices, when):
     db.init_db(tmp_path / "t.db")
     conn = db.connect(tmp_path / "t.db")
@@ -74,7 +82,7 @@ def test_tick_routing(tmp_path, ctx_model, monkeypatch):
     monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
     model.trained_at = "2000-01-01T00:00:00"
     monkeypatch.setattr(MON.M.LongTermModel, "save", lambda self, p: None)
-    assert mon.tick() == ["retrain"]
+    assert mon.tick() == ["retrain", "tune"]     # weekend: weekly retrain + a tuning round
 
     # After close on a weekday whose data is not yet published: wait.
     clock["now"] = ist(last.year, last.month, last.day, 17, 30) + pd.Timedelta(days=1)
@@ -140,7 +148,7 @@ def test_scheduled_run(tmp_path, ctx_model, monkeypatch):
     clock["now"] = ist(2026, 9, 25, 21, 30)
     assert mon.scheduled_run(clock["now"]) == ["after-close"]
     clock["now"] = ist(2026, 9, 26, 18, 0)                # Saturday
-    assert mon.scheduled_run(clock["now"]) == ["retrain"]
+    assert mon.scheduled_run(clock["now"]) == ["retrain"] + ["tune"] * MON.SCHEDULED_TUNE_ROUNDS
     assert calls == ["ac", "wr"]
 
 
@@ -150,3 +158,20 @@ def test_schedule_plist():
     p = scheduler.build_plist("/x/python")
     assert p["ProgramArguments"][-4:] == ["/x/python", "-m", "stockpredictor", "auto"]
     assert {"Hour": 18, "Minute": 0} in p["StartCalendarInterval"]
+
+
+def test_idle_tuning_hourly_only_when_market_closed(tmp_path, ctx_model, fast_tuning):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 25, 11, 0))   # Friday
+    assert not mon.market_idle(clock["now"])                  # market open: never tune
+    clock["now"] = ist(2026, 9, 25, 18, 0)
+    assert not mon.market_idle(clock["now"])                  # after-close decision not made yet
+    MON._set(conn, "lt_after_close_day", "2026-09-25")
+    assert mon.market_idle(clock["now"])
+    assert mon.idle_tune(clock["now"]) is True
+    clock["now"] = ist(2026, 9, 25, 18, 30)
+    assert mon.idle_tune(clock["now"]) is False               # less than an hour since the last
+    clock["now"] = ist(2026, 9, 25, 19, 1)
+    assert mon.idle_tune(clock["now"]) is True
+    assert fast_tuning == ["background", "background"]
+    assert mon.market_idle(ist(2026, 9, 26, 3, 0))            # Saturday night
