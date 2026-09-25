@@ -7,9 +7,8 @@ name: Train models
 
 on:
   schedule:
-    # Twice after each close (Mon-Fri): after the 16:30 IST data update, and again in the
-    # evening. Each run retrains on all history since 2005, then self-tunes (~150 min).
-    - cron: "15 11 * * 1-5"   # 16:45 IST
+    # Once each evening (Mon-Fri), after the Mac's own after-close training: all history
+    # since 2005, both intraday models, replays, then self-tuning (~150 min).
     - cron: "30 15 * * 1-5"   # 21:00 IST
   workflow_dispatch:
     inputs:

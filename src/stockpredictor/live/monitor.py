@@ -96,7 +96,7 @@ class Monitor:
 
     def model(self) -> M.LongTermModel:
         if self._model is None:
-            self._model = D.load_or_train(self.ctx())
+            self._model = D.load_or_train(self.ctx(), M.model_path())
         return self._model
 
     def intraday_model(self) -> MI.IntradayModel | None:
@@ -525,6 +525,7 @@ class Monitor:
                     self._cmodel = None
             elif config.MAC_DAILY_TRAINING:
                 self.daily_mac_train(ctx)
+                self._model = None
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
@@ -624,9 +625,16 @@ class Monitor:
             return False
 
     def daily_mac_train(self, ctx) -> None:
-        """Once a day after the close: retrain both intraday models on the Mac's history
-        (with today's session) using GitHub's tuned settings. No tuning, a few minutes.
-        The fresher of this and GitHub's model is used the next morning."""
+        """Once a day after the close: retrain the long-term model (on the Mac's recent
+        history) and both intraday models (with today's session), using GitHub's tuned
+        settings. No tuning, a few minutes. GitHub's evening run then trains again on all
+        history since 2005; the freshest model is always used."""
+        try:
+            lt = T.retrain_longterm(ctx, self.conn, model_dir=M.MAC_MODEL_DIR)
+            if lt is not None:
+                log.info("Daily Mac training: long-term model retrained up to %s", lt.train_to)
+        except Exception:
+            log.exception("daily Mac long-term training failed")
         for target in MI.TARGETS:
             model = T.retrain_intraday(ctx, self.store_dir, self.conn, target=MI.on_mac(target))
             if model is not None:

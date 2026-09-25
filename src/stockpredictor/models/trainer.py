@@ -165,16 +165,18 @@ def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> di
             "top5_excess": float(best["fwd_excess"].mean()), "weeks": int(len(ic))}
 
 
-def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | None:
+def retrain_longterm(ctx, conn=None, force: bool = False,
+                     model_dir: Path | None = None) -> M.LongTermModel | None:
     """Daily retrain on all history + judged paper predictions (once per day)."""
-    if not force and (M.MODEL_DIR / "meta.json").exists():
-        meta = json.loads((M.MODEL_DIR / "meta.json").read_text())
+    model_dir = model_dir or M.MODEL_DIR
+    if not force and (model_dir / "meta.json").exists():
+        meta = json.loads((model_dir / "meta.json").read_text())
         if meta["trained_at"][:10] == datetime.now().strftime("%Y-%m-%d") \
                 and meta.get("horizon", 63) == M.HORIZON:
             return None
     labeled = paper_feedback(ctx, conn, longterm_labeled(ctx))
     model = M.LongTermModel.train(labeled)
-    model.save(M.MODEL_DIR)
+    model.save(model_dir)
     fb = int(labeled["fb_weight"].notna().sum()) if "fb_weight" in labeled else 0
     log_run(conn, "longterm", "retrain", model.train_to,
             {"rows": int(labeled["target"].notna().sum()), "feedback_rows": fb,

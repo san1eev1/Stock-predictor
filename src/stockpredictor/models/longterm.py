@@ -20,9 +20,25 @@ from stockpredictor.features import technical
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
-from stockpredictor.config import SHARED_MODELS_DIR
+from stockpredictor.config import LOCAL_MODELS_DIR, SHARED_MODELS_DIR
 
 MODEL_DIR = SHARED_MODELS_DIR / "longterm"   # trained on GitHub (see config.py)
+MAC_MODEL_DIR = LOCAL_MODELS_DIR / "longterm"   # the Mac's daily after-close retrain
+
+
+def model_path() -> Path:
+    """The freshest long-term model for the current horizon: GitHub's or the Mac's."""
+    import json as _json
+
+    found = []
+    for d in dict.fromkeys((MODEL_DIR, MAC_MODEL_DIR)):
+        try:
+            meta = _json.loads((d / "meta.json").read_text())
+        except (OSError, ValueError):
+            continue
+        if (d / "model.txt").exists() and meta.get("horizon", 63) == HORIZON:
+            found.append((meta.get("train_to", ""), meta.get("trained_at", ""), str(d)))
+    return Path(max(found)[2]) if found else MODEL_DIR
 HORIZON = 5             # trading days: predict the next week
 EMBARGO_DAYS = 14       # calendar days between train labels and test start (> horizon)
 MIN_TRAIN_ROWS = 5000
