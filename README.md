@@ -98,10 +98,37 @@ stopping. Set `CLOUD_TRAINING=0` in `.env` to train everything on the Mac instea
   Candlestick patterns, oscillators, volume flow and statistical signals **lowered or didn't
   change** accuracy, so they are off; hourly self-tuning keeps testing them and switches a group
   on only if it proves itself.
-- **Intraday:** the first 30 minutes (gap, move, range, VWAP, volume) vs the whole market, plus
-  yesterday's daily context.
+- **Intraday:** the first 30 minutes (gap, move, range, VWAP, volume) vs the whole market
+  **and vs the stock's own sector**, plus yesterday's daily context.
 - **Live race (long-term):** AI model vs 50/50 blend with momentum vs momentum only, each paper
   predicting; after 20+ judged days the best live variant takes over if it leads by 5+ points.
+
+### Accuracy and profit work (Sep 2026)
+
+Every change below was checked walk-forward (each period predicted by a model trained only
+on earlier data) before it was kept.
+
+| Change | Result |
+|---|---|
+| **Price-data cleaning** (`data/clean.py`): bad rows dropped, 22 unadjusted splits/bonuses/demergers (TMPV, VEDL, TRENT…) back-adjusted, real crashes kept; intraday prices put on the same basis | Long-term IC over 6 years 0.037 → 0.039 |
+| **Sector-relative and event-calendar features** (intraday): move vs own sector at 9:45, F&O expiry days (Thu → Tue from Sep 2025), ex-dividend days | Intraday IC 12:30 0.025 → 0.033, close 0.032 → 0.038 |
+| **Long-term trading score: 90% momentum + 10% model** (was 50/50) | Backtest 2015–2026, 5 holdings, costs: **13.9% → 22.6% a year** (Sharpe 0.58 → 0.83) vs Nifty 9.0%; momentum alone 22.2% (0.73) |
+| **Intraday trading rules chosen by profit** (trades per side, skip weak days, stop/target; must trade on ≥1 day in 5) | History: 12:30 book −₹381 → −₹114/day, close book −₹394 → −₹37/day. **Not yet profitable.** |
+| **Realistic paper trading**: slippage from each stock's first-30-min range, positions ≤1% of volume, daily loss limit 1.5% per book | Paper results closer to what real trading would give |
+| Trade-outcome label, "take this trade?" meta-model, sector caps, volatility sizing | Tested; not better yet. They stay as options the tuner can pick if they start winning |
+
+New inputs (most start mattering once their data has built up on GitHub):
+
+- **NSE delivery %** (`data/delivery.py`, history back to 2005, downloaded in chunks).
+- **Results dates** (`data/earnings.py`, ~20 years): days since/to results, results day, and
+  **post-results drift** (how the stock reacted to its last results, kept for a quarter).
+- **Overnight cues**: S&P 500, Nasdaq, US VIX, Nikkei, Hang Seng, USD/INR, crude. Long-term
+  uses only closes before the decision day; intraday uses the last close before 9:15.
+- **1-minute and 3-minute opening features** (`data/fine.py`): first 5/15-minute moves,
+  first-15-minute range breakout, volume burst, up-minute share, last 3-minute move.
+- **NSE pre-open auction** (`data/preopen.py`): auction price, buy vs sell order imbalance,
+  auction volume. NSE keeps no history, so it is collected daily from now on.
+- **Ridge model mixed into LightGBM**, recency weighting and ranking objective as tuning options.
 
 ### News
 
