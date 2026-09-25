@@ -6,10 +6,14 @@
 name: Train models
 
 on:
+  # GitHub runs twice each evening (Mon-Fri), after the Mac's own 16:00 training:
+  #  21:00 IST - data update (update-market-data.yml), then this training right after it;
+  #  23:00 IST - a second training run. All history since 2005, both intraday models,
+  #  replays, then self-tuning (~110 min each).
+  workflow_run:
+    workflows: ["Update market data"]
+    types: [completed]
   schedule:
-    # Twice each evening (Mon-Fri), after the Mac's own 16:00 training: all history since
-    # 2005, both intraday models, replays, then self-tuning (~110 min each).
-    - cron: "30 15 * * 1-5"   # 21:00 IST
     - cron: "30 17 * * 1-5"   # 23:00 IST
   workflow_dispatch:
     inputs:

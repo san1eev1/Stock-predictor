@@ -41,10 +41,10 @@ INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.int
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 21:00 IST)
-# GitHub's own schedules often start hours late, so the Mac starts the runs on time (the
-# schedules stay as a backup). Weekdays: data update, then two training runs.
-GITHUB_RUNS = ((time(16, 30), "update-market-data.yml"), (time(21, 0), "train-models.yml"),
-               (time(23, 0), "train-models.yml"))
+# GitHub runs only twice each weekday evening; its own schedules often start hours late,
+# so the Mac starts them on time (the schedules stay as a backup):
+#   21:00 data update -> training follows automatically; 23:00 second training run.
+GITHUB_RUNS = ((time(21, 0), "update-market-data.yml"), (time(23, 0), "train-models.yml"))
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -87,8 +87,9 @@ def start_github_run(workflow: str) -> bool:
         busy = subprocess.run([gh, "run", "list", "--workflow", workflow, "--limit", "5",
                                "--json", "status", "-q", ".[].status"], cwd=cwd, timeout=60,
                               capture_output=True, text=True).stdout.split()
-        if any(s in ("queued", "in_progress", "pending", "waiting") for s in busy):
-            log.info("GitHub: %s already queued/running", workflow)
+        # One waiting run is enough; a run in progress is fine (the new one queues after it).
+        if any(s in ("queued", "pending", "waiting") for s in busy):
+            log.info("GitHub: %s already queued", workflow)
             return False
         r = subprocess.run([gh, "workflow", "run", workflow], cwd=cwd, timeout=60,
                            capture_output=True, text=True)
@@ -224,9 +225,9 @@ class Monitor:
         if config.CLOUD_TRAINING and now.weekday() < 5:
             for at, workflow in GITHUB_RUNS:
                 key = f"gh_run_{at:%H%M}"
-                if now.time() >= at and _setting(self.conn, key) != day \
-                        and now.time() < (datetime.combine(now.date(), at)
-                                          + timedelta(hours=1)).time():
+                slot = datetime.combine(now.date(), at)
+                clock = now.replace(tzinfo=None)
+                if slot <= clock < slot + timedelta(hours=1) and _setting(self.conn, key) != day:
                     _set(self.conn, key, day)
                     if start_github_run(workflow):
                         done.append(f"github-{workflow.split('.')[0]}")

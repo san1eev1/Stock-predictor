@@ -92,6 +92,8 @@ def recent_strengths(model: MI.IntradayModel, store_dir: Path, ctx: E.MarketCont
     if hist.empty:
         return pd.Series(dtype=float)
     f = FI.build_for(hist, ctx, store_dir)
+    if f.empty:                    # no usable recent days: no skipping decision possible
+        return pd.Series(dtype=float)
     f = f.assign(score=model.score(f))
     return f.groupby("date")["score"].apply(lambda s: B.signal_strength(s, rules)).tail(days)
 

@@ -245,11 +245,12 @@ def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
     started = []
     monkeypatch.setattr(MON, "start_github_run", lambda w: started.append(w) or True)
     mon._started = True
-    for key in ("gh_run_1630",):
-        MON._set(conn, key, "2026-09-28")           # the data run was started earlier
     mon.tick()
-    assert started == []                             # 20:59: too early for training
-    clock["now"] = ist(2026, 9, 28, 21, 2)
-    assert "github-train-models" in mon.tick() and started == ["train-models.yml"]
+    assert started == []                             # 20:59: too early
+    clock["now"] = ist(2026, 9, 28, 21, 2)           # 21:00: data update (training follows)
+    assert "github-update-market-data" in mon.tick() and started == ["update-market-data.yml"]
     mon.tick()
-    assert started == ["train-models.yml"]           # once per slot
+    assert started == ["update-market-data.yml"]     # once per slot
+    clock["now"] = ist(2026, 9, 28, 23, 1)           # 23:00: second training run
+    mon.tick()
+    assert started == ["update-market-data.yml", "train-models.yml"]
