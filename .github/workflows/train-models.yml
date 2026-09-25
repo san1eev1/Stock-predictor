@@ -7,14 +7,15 @@ name: Train models
 
 on:
   schedule:
-    # Once each evening (Mon-Fri), after the Mac's own after-close training: all history
-    # since 2005, both intraday models, replays, then self-tuning (~150 min).
+    # Twice each evening (Mon-Fri), after the Mac's own 16:00 training: all history since
+    # 2005, both intraday models, replays, then self-tuning (~110 min each).
     - cron: "30 15 * * 1-5"   # 21:00 IST
+    - cron: "30 17 * * 1-5"   # 23:00 IST
   workflow_dispatch:
     inputs:
       minutes:
         description: "Time budget in minutes (retrain + self-tuning)"
-        default: "150"
+        default: "110"
       backtest:
         description: "Refresh the long-term backtest now"
         type: boolean
@@ -67,7 +68,7 @@ jobs:
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: |
           python -m stockpredictor cloud-train --dir market-data --feedback feedback \
-            --minutes "${{ inputs.minutes || '150' }}" ${{ inputs.backtest && '--backtest' || '' }}
+            --minutes "${{ inputs.minutes || '110' }}" ${{ inputs.backtest && '--backtest' || '' }}
 
       - name: Save Angel One intraday history
         if: always() && hashFiles('data/intraday_backfill.csv') != ''
