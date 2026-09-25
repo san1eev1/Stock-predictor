@@ -22,7 +22,7 @@ def cmd_universe(settings) -> None:
     with db.connect(settings.db_path) as conn:
         universe.save_universe(conn, stocks)
     n_trade = sum(s["tradable"] for s in stocks)
-    print(f"Saved {len(stocks)} stocks for training, {n_trade} tradable (Nifty 100).")
+    print(f"Saved {len(stocks)} stocks for training, {n_trade} tradable (Nifty LargeMidcap 250).")
 
 
 def cmd_tokens(settings) -> None:
@@ -362,26 +362,30 @@ def _angel_startup(settings, store_dir: Path) -> None:
     except Exception as exc:
         print(f"  Angel One: login FAILED ({exc}) - using Yahoo. Check the keys in .env.\n")
         return
+    from stockpredictor import store
+
+    uni = store.load_universe(store_dir)
+    active = uni.loc[uni["active"] == 1, "symbol"].tolist()
     have = intraday.backfill_days()
-    if have >= 200:
+    # Full download if there is little history; otherwise only stocks new to the universe.
+    todo = active if have < 200 else sorted(set(active) - intraday.backfill_symbols())
+    if not todo:
         print(f"  Angel One intraday history: {have} days available\n")
         return
-    print("  Angel One intraday history: downloading ~2 years in the background "
-          "(about 15 minutes); the intraday model retrains when it finishes.\n")
+    print(f"  Angel One intraday history: downloading ~2 years for {len(todo)} stocks in the "
+          f"background (~{max(1, len(todo) * 15 // 200)} min); the intraday model retrains when it "
+          "finishes.\n")
 
     def job():
         import logging
 
-        from stockpredictor import store
         from stockpredictor.models import trainer as T
         from stockpredictor.paper.engine import MarketContext
 
         log = logging.getLogger("backfill")
         try:
-            uni = store.load_universe(store_dir)
-            symbols = uni.loc[uni["active"] == 1, "symbol"].tolist()
             tokens = angelone.fetch_nse_equity_tokens()
-            n = intraday.angel_backfill(client, tokens, symbols, date.today() - timedelta(days=730),
+            n = intraday.angel_backfill(client, tokens, todo, date.today() - timedelta(days=730),
                                         date.today() - timedelta(days=1),
                                         progress=lambda m: log.debug(m))
             log.info("Angel One backfill finished: %s stock-days; retraining intraday model", n)
@@ -486,7 +490,7 @@ def cmd_status(settings) -> None:
 
 # Commands that take extra arguments: name -> (handler, help, argument setup)
 def _symbols_arg(p):
-    p.add_argument("--symbols", nargs="+", help="Only these NSE symbols (default: all Nifty 100)")
+    p.add_argument("--symbols", nargs="+", help="Only these NSE symbols (default: all Nifty 250)")
 
 
 def _prices_args(p):
@@ -670,7 +674,7 @@ ARG_COMMANDS = {
 
 COMMANDS = {
     "init": (cmd_init, "Create the local SQLite database"),
-    "universe": (cmd_universe, "Download the Nifty 100 constituents from NSE"),
+    "universe": (cmd_universe, "Download the Nifty LargeMidcap 250 constituents from NSE"),
     "tokens": (cmd_tokens, "Map stocks to Angel One instrument tokens"),
     "check-angel": (cmd_check_angel, "Test Angel One login and fetch one live price"),
     "status": (cmd_status, "Show configuration and database status"),

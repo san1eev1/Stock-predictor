@@ -31,7 +31,11 @@ GRID = {
 }
 LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
                  "recency_half_life": [0.0, 3.0, 5.0, 10.0], "tail_weight": [0.0, 1.0, 2.0],
-                 "rank_objective": [False, True], "top_features": [0, 25, 35]}
+                 "rank_objective": [False, True], "top_features": [0, 25, 35],
+                 # which chart-method groups (features/technical.py) the model may use
+                 "chart_groups": [["trend"], ["trend", "volume"], ["trend", "oscillators"],
+                                  ["trend", "candles"], ["trend", "statistics"],
+                                  ["trend", "candles", "oscillators", "volume", "statistics"]]}
 FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
 # IC gain needed to switch settings. Re-running the same settings with another random
 # seed moves IC by about +/-0.004, so smaller "gains" are noise.

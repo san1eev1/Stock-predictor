@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 SCHEMA = """
--- Stock universe (Nifty 100)
+-- Stock universe (Nifty LargeMidcap 250)
 CREATE TABLE IF NOT EXISTS stocks (
     symbol        TEXT PRIMARY KEY,          -- NSE symbol, e.g. RELIANCE
     name          TEXT,

@@ -146,7 +146,7 @@ def load_universe(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
 
 
 def tradable(universe: pd.DataFrame) -> list[str]:
-    """Stocks the app trades and shows (Nifty 100); training uses all active stocks."""
+    """Stocks the app trades and shows (Nifty 250); training uses all active stocks."""
     flag = universe["tradable"] if "tradable" in universe else universe["active"]
     return sorted(universe.loc[(universe["active"] == 1) & (flag == 1), "symbol"])
 

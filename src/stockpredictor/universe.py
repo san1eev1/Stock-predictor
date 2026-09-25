@@ -1,4 +1,4 @@
-"""Nifty 100 stock universe, downloaded from the official NSE constituents list."""
+"""Nifty LargeMidcap 250 stock universe (Nifty 100 + Midcap 150), from the official NSE lists."""
 
 from __future__ import annotations
 
@@ -12,8 +12,10 @@ LIST_URLS = [
     "https://archives.nseindia.com/content/indices/{name}.csv",
     "https://www.niftyindices.com/IndexConstituent/{name}.csv",
 ]
-# Training universe (more stocks = more examples to learn from) and trading universe.
-TRAINING_LIST, TRADING_LIST = "ind_nifty200list", "ind_nifty100list"
+# Both models train on, and pick from, the same 250 stocks. If that list can't be
+# downloaded, fall back to smaller lists (each is a subset of the 250).
+UNIVERSE_LISTS = [("ind_niftylargemidcap250list", 250), ("ind_nifty200list", 200),
+                  ("ind_nifty100list", 100)]
 # NSE rejects requests without a browser-like User-Agent.
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 
@@ -50,20 +52,16 @@ def fetch_list(name: str, expected: int) -> list[dict]:
     raise RuntimeError(f"Could not download {name}:\n" + "\n".join(errors))
 
 
-def fetch_nifty100() -> list[dict]:
-    return fetch_list(TRADING_LIST, 100)
-
-
 def fetch_universe() -> list[dict]:
-    """Nifty 200 for training, each stock flagged `tradable` if it is in the Nifty 100."""
-    trading = fetch_nifty100()
-    tradable = {s["symbol"] for s in trading}
-    try:
-        training = fetch_list(TRAINING_LIST, 200)
-    except RuntimeError:
-        training = trading          # fall back to Nifty 100 only
-    by_symbol = {s["symbol"]: s for s in training + trading}
-    return [{**s, "tradable": int(sym in tradable)} for sym, s in sorted(by_symbol.items())]
+    """Nifty LargeMidcap 250: every stock is used for training and is tradable."""
+    errors = []
+    for name, expected in UNIVERSE_LISTS:
+        try:
+            stocks = fetch_list(name, expected)
+            return [{**s, "tradable": 1} for s in sorted(stocks, key=lambda s: s["symbol"])]
+        except RuntimeError as exc:
+            errors.append(str(exc))
+    raise RuntimeError("\n".join(errors))
 
 
 def save_universe(conn: sqlite3.Connection, stocks: list[dict]) -> None:

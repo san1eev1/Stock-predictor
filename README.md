@@ -1,6 +1,6 @@
 # Stock Predictor
 
-Personal AI stock predictor for the Nifty 100, with two tracks, both complete:
+Personal AI stock predictor for the Nifty LargeMidcap 250 (Nifty 100 + Midcap 150), with two tracks, both complete:
 
 - **Long-term:** 1-week predictions (10 buy / 10 sell candidates, judged after a week); buy-only paper portfolio
 - **Intraday:** at 9:45, 5 longs and 5 shorts from the first 30 minutes, squared off at 15:15
@@ -62,10 +62,18 @@ Terminal equivalents: `python -m stockpredictor start`, `... improve --tune`, `.
 
 | What | How much | Where |
 |---|---|---|
-| Daily prices | **Nifty 200** (training) since **2005**, ~830k rows | git `market-data` branch, updated 16:30 IST by GitHub Actions |
-| Trading universe | Nifty 100 (picks, paper trading, news) | |
+| Daily prices | **Nifty 250** since **2005** (~1M rows) | git `market-data` branch, updated 16:30 IST by GitHub Actions |
+| Universe | Nifty LargeMidcap 250 — both models train on it and pick from it | |
 | Intraday | Daily summaries of 5-min bars: 200 stocks, Yahoo (60 days, growing daily) + Angel One backfill (~2 years) | git + small local file |
 | News | Google News + FinBERT, 4× per trading day | git |
+
+**Chart methods the model combines** (`features/technical.py`): daily candlestick patterns
+(hammer, shooting star, engulfing, piercing / dark cloud, morning / evening star, three white
+soldiers / black crows, harami, marubozu, doji, gaps, net pattern score), oscillators
+(stochastic, Williams %R, CCI, money flow index), trend systems (Supertrend, Ichimoku, Aroon,
+Donchian breakouts, Heikin-Ashi, Keltner squeeze), volume flow (OBV, Chaikin money flow) and
+statistics (trend slope and R², autocorrelation, variance ratio, efficiency ratio, skew,
+z-score). LightGBM learns how much each is worth and how they combine; nothing is a fixed rule.
 
 How the long-term model keeps learning:
 
@@ -90,8 +98,8 @@ the day's Angel One intraday data.
 
 ## Dashboard pages
 
-- **Long-term picks** — 10 buy and 10 sell candidates for the next week, *Sell now* for your holdings, reasons, news, P/E, ROE
-- **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live move and result (🧪 = paper-traded)
+- **Long-term picks** — 10 buy and 10 sell candidates for the next week with **live price, Today % and Since pick %** (updated every minute), *Sell now* for your holdings, reasons, news, P/E, ROE; live intraday + long-term accuracy at the top
+- **Intraday picks** — 10 buy and 10 sell candidates at 9:45 with entry, stop-loss, target, live Today % and share move since 9:45, result (🧪 = paper-traded); live accuracy at the top
 - **Paper trading — Long-term** — buy-only ₹1 lakh portfolio (steady version of the weekly signal)
 - **Paper trading — Intraday** — 10 buy trades and 10 sell (short) trades a day, separate sections
 - **My portfolio** — add your Groww trades; live P&L, stop-loss alerts, allocation (Long-term / Intraday tabs)
@@ -134,7 +142,8 @@ src/stockpredictor/
   data/        daily.py, intraday.py (daily summaries of 5-min bars), angelone.py, news.py,
                fundamentals.py, quality.py
   nlp/         sentiment.py (FinBERT, used in GitHub Actions)
-  features/    longterm.py (51 features), intraday.py (9:45 features), labels.py
+  features/    longterm.py (~100 features), technical.py (candlestick patterns, oscillators,
+               trend systems, statistical signals), intraday.py (9:45 features), labels.py
   models/      longterm.py, intraday.py (LightGBM ranking models, walk-forward)
   backtest/    portfolio.py + run.py (long-term), intraday.py (intraday rules + backtest)
   paper/       engine.py + daily.py (long-term), intraday.py (intraday paper trading)

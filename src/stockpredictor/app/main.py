@@ -29,7 +29,7 @@ st.set_page_config(page_title="Stock Predictor", page_icon="📈", layout="wide"
 
 SETTINGS = load_settings()
 STORE = store.DEFAULT_STORE_DIR
-REFRESH = "60s" if in_market_hours() else None
+REFRESH = "60s"   # always: a page opened before 9:15 must still go live
 
 
 # --- Shared data ------------------------------------------------------------------
@@ -65,6 +65,31 @@ def current_prices(c) -> dict[str, float]:
     m = ctx()
     base = m.closes_on(m.daily["date"].max()) if m else {}
     return {**base, **live_prices(c)}
+
+
+@st.cache_data(show_spinner=False)
+def _prev_closes(version: float, day: str) -> dict[str, float]:
+    m = market(version)
+    if m is None:
+        return {}
+    d = m.daily[m.daily["date"] < pd.Timestamp(day)].sort_values("date")
+    return d.groupby("symbol")["close"].last().to_dict()
+
+
+def prev_closes() -> dict[str, float]:
+    """Yesterday's close per stock (the base for today's % up/down)."""
+    return _prev_closes(_store_version(), f"{now_ist():%Y-%m-%d}")
+
+
+def pct(new: pd.Series, base: pd.Series) -> pd.Series:
+    return pd.to_numeric(new, errors="coerce") / pd.to_numeric(base, errors="coerce") - 1
+
+
+PCT = st.column_config.NumberColumn(format="%+.2f%%")
+
+
+def as_pct(x: pd.Series) -> pd.Series:
+    return (x * 100).round(2)
 
 
 def setting(c, key, default):
@@ -150,39 +175,15 @@ def page_picks():
         return
     c, m = conn(), ctx()
     last = ensure_longterm_picks(c, m)
+    accuracy_now_panel("longterm")
     preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'longterm' AND date = ? "
                         "AND horizon_days = ?", c, params=(last, M.HORIZON))
     summary = N.news_summary(m.news, pd.Timestamp(now_ist())).set_index("symbol")
     fund = FUND.load_latest(STORE).set_index("symbol")
     st.caption(f"Predictions for the **next week** (5 trading days), made after the close of "
-               f"**{pd.Timestamp(last):%d %b %Y}**. Each is judged after one week against Nifty 50.")
-
-    def table(direction):
-        p = preds[preds["direction"] == direction].sort_values("confidence", ascending=False)
-        rows = []
-        for r in p.itertuples():
-            sent = summary["sent_mean_7d"].get(r.symbol)
-            rows.append({
-                "Stock": r.symbol,
-                "Confidence": r.confidence, "Price": r.entry_price,
-                "Why": reason_text(json.loads(r.reasons or "[]")),
-                "News (7d)": "—" if pd.isna(sent) else
-                ("🟢 positive" if sent > 0.2 else "🔴 negative" if sent < -0.2 else "⚪ neutral"),
-                "P/E": fund["pe"].get(r.symbol), "ROE": fund["roe"].get(r.symbol),
-            })
-        df = pd.DataFrame(rows).rename(columns={"Why": "Signals (↑ raised score, ↓ lowered it)"})
-        df["P/E"] = dash(pd.to_numeric(df["P/E"], errors="coerce"), "{:.1f}")
-        df["ROE"] = dash(pd.to_numeric(df["ROE"], errors="coerce"), "{:.1%}")
-        st.dataframe(df, hide_index=True, width="stretch", column_config={
-            "Confidence": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
-            "Price": st.column_config.NumberColumn(format="₹%.2f"),
-            "Signals (↑ raised score, ↓ lowered it)": st.column_config.TextColumn(width="large")})
-
-    st.subheader("▲ 10 Buy candidates — expected to rise more than Nifty next week")
-    table("up")
-    st.subheader("▼ 10 Sell candidates — expected to fall behind Nifty next week")
-    st.caption("Sell these if you hold them, or avoid buying them.")
-    table("down")
+               f"**{pd.Timestamp(last):%d %b %Y}**. Each is judged after one week against Nifty 50. "
+               f"Live price, Today % and Since pick % update every minute.")
+    picks_tables(preds, summary, fund)
     sell_now(c, preds)
     live_block()
 
@@ -196,6 +197,45 @@ def page_picks():
         st.markdown(f"{mood} **{h.symbol}** — [{h.title}]({h.url}) "
                     f"<span style='opacity:.6'>· {h.source} · {h.published:%d %b %H:%M}</span>",
                     unsafe_allow_html=True)
+
+
+@st.fragment(run_every=REFRESH)
+def picks_tables(preds: pd.DataFrame, summary: pd.DataFrame, fund: pd.DataFrame):
+    c = conn()
+    live, prev = current_prices(c), prev_closes()
+
+    def table(direction):
+        p = preds[preds["direction"] == direction].sort_values("confidence", ascending=False)
+        rows = []
+        for r in p.itertuples():
+            sent = summary["sent_mean_7d"].get(r.symbol)
+            now = live.get(r.symbol)
+            rows.append({
+                "Stock": r.symbol,
+                "Confidence": r.confidence, "Pick price": r.entry_price,
+                "Live price": now,
+                "Today %": as_pct(pct(pd.Series([now]), pd.Series([prev.get(r.symbol)])))[0],
+                "Since pick %": as_pct(pct(pd.Series([now]), pd.Series([r.entry_price])))[0],
+                "Why": reason_text(json.loads(r.reasons or "[]")),
+                "News (7d)": "—" if pd.isna(sent) else
+                ("🟢 positive" if sent > 0.2 else "🔴 negative" if sent < -0.2 else "⚪ neutral"),
+                "P/E": fund["pe"].get(r.symbol), "ROE": fund["roe"].get(r.symbol),
+            })
+        df = pd.DataFrame(rows).rename(columns={"Why": "Signals (↑ raised score, ↓ lowered it)"})
+        df["P/E"] = dash(pd.to_numeric(df["P/E"], errors="coerce"), "{:.1f}")
+        df["ROE"] = dash(pd.to_numeric(df["ROE"], errors="coerce"), "{:.1%}")
+        st.dataframe(df, hide_index=True, width="stretch", column_config={
+            "Confidence": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+            "Pick price": st.column_config.NumberColumn(format="₹%.2f"),
+            "Live price": st.column_config.NumberColumn(format="₹%.2f"),
+            "Today %": PCT, "Since pick %": PCT,
+            "Signals (↑ raised score, ↓ lowered it)": st.column_config.TextColumn(width="large")})
+
+    st.subheader("▲ 10 Buy candidates — expected to rise more than Nifty next week")
+    table("up")
+    st.subheader("▼ 10 Sell candidates — expected to fall behind Nifty next week")
+    st.caption("Sell these if you hold them, or avoid buying them.")
+    table("down")
 
 
 def ensure_longterm_picks(c, m) -> str:
@@ -267,6 +307,7 @@ def page_paper_longterm():
                "Decisions after the close, orders filled at the next market price.")
     if need_data():
         return
+    accuracy_now_panel("longterm")
     paper_longterm()
 
 
@@ -274,6 +315,7 @@ def page_paper_intraday():
     st.title("Paper trading — Intraday")
     st.caption("Every trading day at 9:46: buys the 10 stocks expected to rise and short-sells the "
                "10 expected to fall, with a stop-loss and target, all closed by 15:15.")
+    accuracy_now_panel("intraday")
     paper_intraday()
 
 
@@ -321,16 +363,20 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
         pos["Live price"] = pos["symbol"].map(prices).fillna(pos["entry_price"])
         pos["P&L"] = sign * (pos["Live price"] - pos["entry_price"]) * pos["qty"] - pos["costs"]
         pos["P&L %"] = sign * (pos["Live price"] / pos["entry_price"] - 1)
+        pos["Today %"] = as_pct(pct(pos["Live price"], pos["symbol"].map(prev_closes())))
+        pos["Since entry %"] = as_pct(pct(pos["Live price"], pos["entry_price"]))
         pos["Stop-loss"] = pos["entry_price"] * (1 - sign * rules.stop_loss)
         pos["Since"] = pd.to_datetime(pos["entry_time"]).dt.strftime("%d %b %Y")
         entry = "Buy price" if sign > 0 else "Short price"
-        st.dataframe(pos[["symbol", "qty", "entry_price", "Live price", "P&L", "P&L %",
-                          "Stop-loss", "Since"]].rename(
-            columns={"symbol": "Stock", "qty": "Qty", "entry_price": entry}),
+        st.dataframe(pos[["symbol", "qty", "entry_price", "Live price", "Today %", "Since entry %",
+                          "P&L", "P&L %", "Stop-loss", "Since"]].rename(
+            columns={"symbol": "Stock", "qty": "Qty", "entry_price": entry,
+                     "P&L": "P&L (after costs)"}),
             hide_index=True, width="stretch", column_config={
                 c_: st.column_config.NumberColumn(format="₹%.2f")
-                for c_ in [entry, "Live price", "P&L", "Stop-loss"]} | {
-                "P&L %": st.column_config.NumberColumn(format="percent")})
+                for c_ in [entry, "Live price", "P&L (after costs)", "Stop-loss"]} | {
+                "P&L %": st.column_config.NumberColumn(format="percent"),
+                "Today %": PCT, "Since entry %": PCT})
     pending = pd.read_sql("SELECT created, symbol, side, reason FROM paper_orders "
                           "WHERE horizon = ? AND status = 'pending'", c, params=(h,))
     if not pending.empty:
@@ -357,9 +403,10 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
 
 def page_intraday():
     st.title("Intraday picks")
+    accuracy_now_panel("intraday")
     c = conn()
     rules, enabled = PI.get_rules(c)
-    st.caption(f"At 9:45 the model ranks all Nifty 100 stocks on the first 30 minutes. "
+    st.caption(f"At 9:45 the model ranks all Nifty 250 stocks on the first 30 minutes. "
                f"Stop-loss {rules.stop_loss}%, "
                f"target {rules.target or 'none'}%, squared off at 15:15. It lists 10 buy and 10 sell "
                f"candidates; 🧪 marks the {rules.n_long} + {rules.n_short} strongest that are "
@@ -427,6 +474,8 @@ def intraday_live(day: str):
                             for s_, x in zip(p["symbol"], p["actual_exit"])], index=p.index, dtype=float)
         p["Now"] = dash(now_px, "₹{:,.2f}")
         p["Move"] = dash(sign * (now_px / p["entry_price"] - 1), "{:+.2%}")
+        p["Today %"] = as_pct(pct(now_px, p["symbol"].map(prev_closes())))
+        p["Share since 9:45"] = as_pct(pct(now_px, p["entry_price"]))
         p["target"] = dash(p["target"], "₹{:,.2f}")
         p["Result"] = ["⏳" if pd.isna(x) else "✅" if x else "❌" for x in p["correct"]]
         p["Why"] = [reason_text(json.loads(r or "[]")) for r in p["reasons"]]
@@ -434,12 +483,13 @@ def intraday_live(day: str):
         p["Paper"] = ["🧪" if (s_, side) in traded else "" for s_ in p["symbol"]]
         st.markdown(f"**{title}**")
         st.dataframe(p[["symbol", "Paper", "confidence", "entry_price", "stop_loss", "target", "Now",
-                        "Move", "Result", "Why"]].rename(columns={
+                        "Today %", "Share since 9:45", "Move", "Result", "Why"]].rename(columns={
             "symbol": "Stock", "confidence": "Confidence", "entry_price": "Entry 9:45",
             "stop_loss": "Stop-loss", "target": "Target", "Move": "Move (in our favour)",
             "Why": "Signals (↑ raised score, ↓ lowered it)"}), hide_index=True, width="stretch",
             column_config={"Confidence": st.column_config.ProgressColumn(
                 format="percent", min_value=0, max_value=1),
+                "Today %": PCT, "Share since 9:45": PCT,
                 **{k_: st.column_config.NumberColumn(format="₹%.2f")
                    for k_ in ["Entry 9:45", "Stop-loss"]}})
 
@@ -479,14 +529,19 @@ def paper_intraday():
         t["P&L"] = [p if st_ == "closed" else sg * (lv - e) * q - cst
                     for p, st_, sg, lv, e, q, cst in zip(t["pnl"], t["status"], t["sign"], t["Live/Exit"],
                                                         t["entry_price"], t["qty"], t["costs"])]
+        t["Share move %"] = as_pct(pct(t["Live/Exit"], t["entry_price"]))
+        t["Today %"] = [as_pct(pct(pd.Series([lv]), pd.Series([prev_closes().get(s_)])))[0]
+                        if st_ == "open" else None
+                        for s_, lv, st_ in zip(t["symbol"], t["Live/Exit"], t["status"])]
         t["Status"] = ["⏳ open" if x == "open" else ("✅ " if p > 0 else "❌ ") + (r or "")
                        for x, p, r in zip(t["status"], t["P&L"], t["exit_reason"])]
-        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Live/Exit", "stop_loss", "target",
-                        "P&L", "Status"]].rename(columns={
+        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Live/Exit", "Share move %", "Today %",
+                        "stop_loss", "target", "P&L", "Status"]].rename(columns={
             "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45", "stop_loss": "Stop-loss",
             "target": "Target", "P&L": "P&L (after costs)"}), hide_index=True, width="stretch",
             column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
-                           for k_ in ["Entry 9:45", "Live/Exit", "Stop-loss", "Target", "P&L (after costs)"]})
+                           for k_ in ["Entry 9:45", "Live/Exit", "Stop-loss", "Target", "P&L (after costs)"]}
+            | {"Share move %": PCT, "Today %": PCT})
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'intraday' ORDER BY date", c)
     if len(eq) >= 2:
         st.subheader("Value over time")
@@ -552,14 +607,15 @@ def portfolio_live(h: str):
         return
     t = s.table
     t["Alert"] = ["🛑 below stop-loss" if p <= sl else "" for p, sl in zip(t["price"], t["stop_loss"])]
-    st.dataframe(t[["symbol", "qty", "avg_cost", "price", "value", "unrealized", "unrealized_pct",
+    t["Today %"] = as_pct(pct(t["price"], t["symbol"].map(prev_closes())))
+    st.dataframe(t[["symbol", "qty", "avg_cost", "price", "Today %", "value", "unrealized", "unrealized_pct",
                     "stop_loss", "Alert"]].rename(columns={
         "symbol": "Stock", "qty": "Qty", "avg_cost": "Avg cost", "price": "Price",
         "value": "Value", "unrealized": "P&L", "unrealized_pct": "P&L %", "stop_loss": "Stop-loss"}),
         hide_index=True, width="stretch", column_config={
             k_: st.column_config.NumberColumn(format="₹%.2f")
             for k_ in ["Avg cost", "Price", "Value", "P&L", "Stop-loss"]} | {
-            "P&L %": st.column_config.NumberColumn(format="percent")})
+            "P&L %": st.column_config.NumberColumn(format="percent"), "Today %": PCT})
     st.caption("Allocation")
     st.altair_chart(C.hbars(t.assign(w=t["weight"]), "symbol", "w", ".0%"),
                     width="stretch")
@@ -567,37 +623,42 @@ def portfolio_live(h: str):
 
 def page_accuracy():
     st.title("Accuracy")
-    accuracy_now_panel()
     tab_lt, tab_id = st.tabs(["Long-term", "Intraday"])
     with tab_lt:
+        accuracy_now_panel("longterm")
         accuracy_tab("longterm")
         strategy_race()
     with tab_id:
+        accuracy_now_panel("intraday")
         accuracy_tab("intraday")
 
 
 @st.fragment(run_every=REFRESH)
-def accuracy_now_panel():
-    sb = SB.compute(conn(), now_ist().replace(tzinfo=None))
-    it, ij, lo, lj = (sb["intraday_today"], sb["intraday_judged"], sb["longterm_open"],
-                      sb["longterm_judged"])
-    st.subheader(f"📊 Right now · {sb['time'][11:]}")
-    k = st.columns(4)
-    if it["buy_n"] + it["sell_n"]:
-        k[0].metric("Intraday today", f"{it['right']:.0%}",
-                    f"{(it['right'] - (it['random'] or 0)) * 100:+.0f} pts vs random"
-                    if it["random"] is not None else None,
-                    help=f"Buys {it['buy_right']}/{it['buy_n']} up, sells {it['sell_right']}/"
-                         f"{it['sell_n']} down since 9:45 (live prices)")
-    else:
-        k[0].metric("Intraday today", "—", help="Picks are made at 9:46 on trading days")
-    k[1].metric("Intraday, all judged days", f"{ij['accuracy']:.0%}" if ij["n"] else "—",
-                f"{(ij['accuracy'] - ij['random']) * 100:+.0f} pts vs random" if ij["n"] else None)
-    k[2].metric("Long-term on track this week", f"{lo['on_track']}/{lo['n']}" if lo["n"] else "—")
-    k[3].metric("Long-term, all judged", f"{lj['accuracy']:.0%}" if lj["n"] else "—",
-                f"{(lj['accuracy'] - lj['random']) * 100:+.0f} pts vs random" if lj["n"] else None)
-    st.caption("Refreshes every minute while the market is open. 'vs random' compares with picking "
-               "stocks at random on the same days.")
+def accuracy_now_panel(horizon: str):
+    """This model's accuracy, predicted-UP and predicted-DOWN picks in separate tables."""
+    now = now_ist().replace(tzinfo=None)
+    name = "Long-term" if horizon == "longterm" else "Intraday"
+    st.subheader(f"📊 {name} accuracy · {now:%H:%M}")
+    c = conn()
+    acc = SB.by_direction(c, horizon, now, live_prices(c), prev_closes())
+    cols = st.columns(2)
+    for col, (d, title) in zip(cols, (("up", "▲ Predicted UP (buy picks)"),
+                                      ("down", "▼ Predicted DOWN (sell picks)"))):
+        df = pd.DataFrame(acc[d])
+        df["vs random"] = ((pd.to_numeric(df["Accuracy"]) - pd.to_numeric(df["Random"])) * 100).round()
+        for k_ in ("Accuracy", "Random"):
+            df[k_] = (pd.to_numeric(df[k_]) * 100).round(1)
+        with col:
+            st.markdown(f"**{title}**")
+            st.dataframe(df, hide_index=True, width="stretch", column_config={
+                "Accuracy": st.column_config.NumberColumn(format="%.0f%%"),
+                "Random": st.column_config.NumberColumn(format="%.0f%%"),
+                "vs random": st.column_config.NumberColumn(format="%+d pts")})
+    st.caption(("Judged after 1 week: a buy pick is right if it beat Nifty 50, a sell pick if it "
+                "lagged. 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
+                else "Judged at 15:15: a buy pick is right if it rose from 9:45, a sell pick if it "
+                "fell.") + " 'Random' = picking stocks at random on the same days. "
+               "Updates every minute.")
 
 
 ACCURACY_TEXT = {
@@ -605,7 +666,7 @@ ACCURACY_TEXT = {
                  "Nifty 50, a weakest-stock pick is ✅ if it lagged Nifty 50.",
                  "First results appear one week after the first prediction.", "vs Nifty"),
     "intraday": ("An intraday pick is judged at 15:15 the same day: a long is ✅ if the price rose "
-                 "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 100 "
+                 "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 250 "
                  "stocks that moved that way.", "Results appear after the first trading day.",
                  "9:45 → 15:15"),
 }
@@ -696,13 +757,13 @@ def page_model():
         return
     r = json.loads(bt.read_text())
     st.caption(f"{r['period']} · out-of-sample: each year predicted by a model trained only on "
-               "earlier data. ⚠️ Uses today's Nifty 100 members for the whole period "
+               "earlier data. ⚠️ Uses today's Nifty 250 members for the whole period "
                "(survivorship bias), so absolute returns are overstated — compare against the "
                "equal-weight line, which has the same bias.")
     rows = {**{("Model (" + k + ")" if not k.startswith("momentum") else "Momentum only"): v
                for k, v in r["strategies"].items()},
             "Nifty 50": r["benchmarks"]["nifty50"],
-            "Equal-weight Nifty 100": r["benchmarks"]["equal_weight_nifty100"]}
+            "Equal-weight Nifty 250": r["benchmarks"]["equal_weight_nifty100"]}
     st.dataframe(pd.DataFrame([{"Strategy": k, "Yearly return": v["cagr"], "Volatility": v["volatility"],
                                 "Sharpe": v["sharpe"], "Worst fall": v["max_drawdown"]}
                                for k, v in rows.items()]), hide_index=True, width="stretch",
@@ -718,7 +779,7 @@ def page_model():
     if curves.exists():
         cv = pd.read_csv(curves, index_col=0, parse_dates=True)
         names = {"model_weekly": "Model", "nifty50": "Nifty 50",
-                 "equal_weight_nifty100": "Equal-weight Nifty 100", "momentum_only": "Momentum only"}
+                 "equal_weight_nifty100": "Equal-weight Nifty 250", "momentum_only": "Momentum only"}
         cv = cv[[c_ for c_ in names if c_ in cv]].rename(columns=names)
         long = cv.reset_index(names="date").melt("date", var_name="series", value_name="value").dropna()
         st.altair_chart(C.lines(long, "date", "value", "series", ",.0f", "₹ (from ₹1 lakh)"),

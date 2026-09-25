@@ -162,7 +162,9 @@ class Monitor:
         return done
 
     def minute_job(self, now: datetime) -> None:
-        symbols = self.watched_symbols()
+        # Every tradable stock gets a fresh price each minute (Angel One: 50 per request),
+        # so the dashboard's picks move live, not only the stocks we hold.
+        symbols = self.watched_symbols() | set(store.tradable(self.ctx().universe))
         if not symbols:
             return
         prices = self.prices.get(sorted(symbols))

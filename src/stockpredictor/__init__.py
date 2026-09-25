@@ -1,1 +1,1 @@
-"""Personal Nifty 100 intraday and long-term stock predictor."""
+"""Personal Nifty 250 intraday and long-term stock predictor."""

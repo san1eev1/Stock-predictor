@@ -1,4 +1,4 @@
-"""Long-term ranking model: which Nifty 100 stocks will beat Nifty over ~3 months.
+"""Long-term ranking model: which Nifty 250 stocks will beat Nifty over ~3 months.
 
 Target: each stock's cross-sectional percentile of its forward 63-trading-day
 return in excess of Nifty 50. A LightGBM regressor learns to score stocks so
@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from stockpredictor.features import longterm as F
+from stockpredictor.features import technical
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
@@ -134,7 +135,8 @@ def sample_weights(train: pd.DataFrame, params: dict) -> np.ndarray:
 def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> Ensemble:
     params = {**TRAINING_DEFAULTS, **(params or current_params())}
     weights = sample_weights(train, params)
-    for key in ("mom_weight", "recency_half_life", "tail_weight", "wf_seeds", "horizon"):
+    for key in ("mom_weight", "recency_half_life", "tail_weight", "wf_seeds", "horizon",
+                "chart_groups"):
         params.pop(key, None)
     return engine.fit(train, cols, params, weights, gap_days=EMBARGO_DAYS,
                       default_rounds=NUM_ROUNDS)
@@ -151,8 +153,8 @@ class LongTermModel:
     @classmethod
     def train(cls, labeled_weekly: pd.DataFrame, params: dict | None = None) -> "LongTermModel":
         train = labeled_weekly.dropna(subset=["target"])
-        cols = _model_columns(train)
         params = params or current_params()
+        cols = _model_columns(train, params)
         return cls(model=_fit(train, cols, params), features=cols,
                    trained_at=datetime.now().isoformat(timespec="seconds"),
                    train_to=f"{train['date'].max():%Y-%m-%d}",
@@ -194,8 +196,10 @@ class LongTermModel:
                    train_to=meta["train_to"], metrics=meta.get("metrics", {}))
 
 
-def _model_columns(df: pd.DataFrame) -> list[str]:
-    skip = F.FEATURE_COLUMNS_EXCLUDE | {"fwd_ret", "fwd_excess", "target", "fb_weight"}
+def _model_columns(df: pd.DataFrame, params: dict | None = None) -> list[str]:
+    """Model inputs; chart-signal groups not switched on (params['chart_groups']) are left out."""
+    skip = F.FEATURE_COLUMNS_EXCLUDE | {"fwd_ret", "fwd_excess", "target", "fb_weight"} \
+        | technical.excluded_columns((params or current_params()).get("chart_groups"))
     return [c for c in df.columns if c not in skip]
 
 
@@ -205,7 +209,7 @@ def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,
     """Out-of-sample scores: for each year, train only on data that ended
     before that year (with an embargo so no label overlaps the test period)."""
     end_year = end_year or feats_daily["date"].dt.year.max()
-    cols = _model_columns(labeled_weekly)
+    cols = _model_columns(labeled_weekly, params)
     out = []
     for year in range(start_year, end_year + 1):
         test_start = pd.Timestamp(year=year, month=1, day=1)

@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m stockpredictor init
           python -m stockpredictor import-store --dir market-data
-          python -m stockpredictor universe || echo "::warning::Nifty 100 list download failed; using stored list"
+          python -m stockpredictor universe || echo "::warning::Nifty 250 list download failed; using stored list"
           python -m stockpredictor prices --start "${{ inputs.start || '2005-01-01' }}" \
             ${{ inputs.extend_back && '--extend-back' || '' }}
           python -m stockpredictor export-store --dir market-data

@@ -11,7 +11,7 @@ import streamlit as st
 SERIES = {
     "Model": ("#2a78d6", "#3987e5"),
     "Nifty 50": ("#eb6834", "#d95926"),
-    "Equal-weight Nifty 100": ("#1baf7a", "#199e70"),
+    "Equal-weight Nifty 250": ("#1baf7a", "#199e70"),
     "Momentum only": ("#eda100", "#c98500"),
     "Long-term": ("#2a78d6", "#3987e5"),
     "Intraday": ("#eb6834", "#d95926"),

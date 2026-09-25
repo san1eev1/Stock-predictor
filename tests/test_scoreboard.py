@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from stockpredictor import db
+from stockpredictor.models import longterm as M
 from stockpredictor.paper import scoreboard as SB
 
 
@@ -21,3 +22,30 @@ def test_intraday_today_and_lines(tmp_path):
                                "intraday_today": it}))
     assert "buys 1/2 up, sells 2/2 down -> 75% right (random picks: 50%)" in text
     assert "Long-term judged: first results one week" in text
+
+
+def test_by_direction_splits_up_and_down(tmp_path):
+    db.init_db(tmp_path / "t.db")
+    c = db.connect(tmp_path / "t.db")
+    rows = [("A", "up", 1), ("B", "up", 0), ("C", "down", 1)]
+    c.executemany("INSERT INTO predictions (date, horizon, symbol, direction, confidence, "
+                  "entry_price, correct, base_rate) VALUES ('2026-09-01', 'intraday', ?, ?, 0.6, "
+                  "100, ?, 0.5)", rows)
+    c.commit()
+    out = SB.by_direction(c, "intraday", datetime(2026, 9, 25, 11, 0), prices={})
+    up, down = out["up"][1], out["down"][1]
+    assert (up["Accuracy"], up["Right"]) == (0.5, "1/2")
+    assert (down["Accuracy"], down["Right"]) == (1.0, "1/1")
+
+
+def test_longterm_today_uses_yesterdays_close(tmp_path):
+    db.init_db(tmp_path / "t.db")
+    c = db.connect(tmp_path / "t.db")
+    c.executemany("INSERT INTO predictions (date, horizon, symbol, direction, confidence, "
+                  "entry_price, horizon_days) VALUES ('2026-09-24', 'longterm', ?, ?, 0.6, 100, ?)",
+                  [("A", "up", M.HORIZON), ("B", "up", M.HORIZON), ("C", "down", M.HORIZON)])
+    c.commit()
+    prices, prev = {"A": 102.0, "B": 99.0, "C": 98.0, "D": 101.0}, {s: 100.0 for s in "ABCD"}
+    out = SB.by_direction(c, "longterm", datetime(2026, 9, 25, 11, 0), prices, prev)
+    assert out["up"][0]["Right"] == "1/2" and out["up"][0]["Random"] == 0.5
+    assert out["down"][0]["Right"] == "1/1"

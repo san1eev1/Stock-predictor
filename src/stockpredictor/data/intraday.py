@@ -177,6 +177,12 @@ def angel_backfill(client, tokens: dict[str, str], symbols: list[str], start: da
     return total
 
 
+def backfill_symbols(path: Path = BACKFILL_PATH) -> set[str]:
+    if not path.exists():
+        return set()
+    return set(pd.read_csv(path, usecols=["symbol"])["symbol"].unique())
+
+
 def backfill_days(path: Path = BACKFILL_PATH) -> int:
     if not path.exists():
         return 0

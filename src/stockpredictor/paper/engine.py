@@ -63,7 +63,7 @@ class MarketContext:
         return float(n["close"].iloc[-1])
 
 
-FEATURE_CACHE_VERSION = 2
+FEATURE_CACHE_VERSION = 3
 
 
 def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:
@@ -241,7 +241,7 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     #    live monitor did not fill them earlier in the day.
     fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules)
 
-    # 2. Score today's tradable stocks (current Nifty 100 members; training uses Nifty 200).
+    # 2. Score today's tradable stocks (current Nifty 250 members).
     active = set(store_tradable(ctx.universe))
     today = ctx.feats[(ctx.feats["date"] == date) & ctx.feats["symbol"].isin(active)].copy()
     if today.empty:

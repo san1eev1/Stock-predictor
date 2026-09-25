@@ -112,7 +112,7 @@ def format_report(r: dict) -> str:
     rows = {**{(k if k.startswith("momentum") else f"Model ({k})"): v
                for k, v in r["strategies"].items()},
             "Nifty 50": r["benchmarks"]["nifty50"],
-            "Equal-weight Nifty 100": r["benchmarks"]["equal_weight_nifty100"]}
+            "Equal-weight Nifty 250": r["benchmarks"]["equal_weight_nifty100"]}
     for name, s in rows.items():
         lines.append(f"{name:26}{pct(s['cagr']):>8}{pct(s['volatility']):>8}"
                      f"{s['sharpe']:8.2f}{pct(s['max_drawdown']):>8}")

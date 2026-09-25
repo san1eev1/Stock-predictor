@@ -2,7 +2,8 @@
 
 Groups: momentum, trend, 52-week range, volatility/risk, technical indicators,
 volume/liquidity, relative strength vs Nifty and sector, weekly candle
-patterns, market regime, and cross-sectional ranks.
+patterns, market regime, cross-sectional ranks, and the classic chart methods in
+technical.py (daily candlestick patterns, oscillators, trend systems, statistics).
 """
 
 from __future__ import annotations
@@ -10,12 +11,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from stockpredictor.features import technical
+
 MIN_HISTORY_DAYS = 200
 
 MARKET_INDEX = "NIFTY50"
 
 RANKED = ["ret_5", "ret_10", "ret_21", "ret_63", "ret_126", "mom_12_1", "dist_52w_high", "vol_63",
-          "rs_nifty_63", "rs_sector_63", "vol_ratio_20_120", "rsi_14", "dist_ma20", "pos_5"]
+          "rs_nifty_63", "rs_sector_63", "vol_ratio_20_120", "rsi_14", "dist_ma20", "pos_5",
+          "stoch_k", "cmf_20", "trend_slope_63", "supertrend_dist"]
 
 
 # --- Indicator helpers (per single-stock series) ------------------------------
@@ -171,7 +175,7 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
 
     parts = []
     for _, g in daily.groupby("symbol", sort=False):
-        f = pd.concat([_stock_features(g), _weekly_candles(g)], axis=1)
+        f = pd.concat([_stock_features(g), _weekly_candles(g), technical.build(g)], axis=1)
         parts.append(pd.concat([g[["symbol", "date", "close"]], f], axis=1))
     feats = pd.concat(parts, ignore_index=True)
 
@@ -185,7 +189,7 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
     feats["beta_252"] = _rolling_beta(feats)
 
     # Relative strength vs sector peers: average 3-month return of the other
-    # Nifty 100 stocks in the same NSE industry (Yahoo lacks most sector indices).
+    # universe stocks in the same NSE industry (Yahoo lacks most sector indices).
     industry = pd.Series("", index=feats.index)
     if universe is not None and "industry" in universe:
         industry = feats["symbol"].map(universe.set_index("symbol")["industry"]).fillna("")

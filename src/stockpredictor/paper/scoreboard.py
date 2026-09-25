@@ -49,10 +49,13 @@ def intraday_today(conn: sqlite3.Connection, day: str, prices: dict[str, float] 
 
 
 def judged(conn: sqlite3.Connection, horizon: str, horizon_days: int | None = None,
-           last_days: int | None = None) -> dict:
-    """Accuracy of all judged predictions (optionally only the most recent days)."""
+           last_days: int | None = None, direction: str | None = None) -> dict:
+    """Accuracy of all judged predictions (optionally only the most recent days / one side)."""
     q = "SELECT date, correct, base_rate FROM predictions WHERE horizon = ? AND correct IS NOT NULL"
     args: list = [horizon]
+    if direction is not None:
+        q += " AND direction = ?"
+        args.append(direction)
     if horizon_days is not None:
         q += " AND horizon_days = ?"
         args.append(horizon_days)
@@ -65,11 +68,13 @@ def judged(conn: sqlite3.Connection, horizon: str, horizon_days: int | None = No
             "random": float(df["base_rate"].mean())}
 
 
-def longterm_open(conn: sqlite3.Connection) -> dict:
+def longterm_open(conn: sqlite3.Connection, direction: str | None = None) -> dict:
     """1-week predictions still running: how many are on track so far (updated daily)."""
     df = pd.read_sql("SELECT direction, actual_return FROM predictions WHERE horizon = 'longterm' "
                      "AND correct IS NULL AND horizon_days = ? AND actual_return IS NOT NULL",
                      conn, params=(M.HORIZON,))
+    if direction is not None:
+        df = df[df["direction"] == direction]
     if df.empty:
         return {"n": 0}
     on_track = ((df["direction"] == "up") & (df["actual_return"] > 0)) | \
@@ -88,6 +93,67 @@ def compute(conn: sqlite3.Connection, now: datetime | None = None) -> dict:
         "longterm_open": longterm_open(conn),
         "longterm_judged": judged(conn, "longterm", horizon_days=M.HORIZON),
     }
+
+
+def longterm_today(conn: sqlite3.Connection, prices: dict[str, float],
+                   prev_close: dict[str, float]) -> dict:
+    """Today's move of the current long-term picks: a buy pick is right if it is up on
+    yesterday's close, a sell pick if it is down. Random = share of all stocks up today."""
+    last = conn.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'longterm' "
+                        "AND horizon_days = ?", (M.HORIZON,)).fetchone()[0]
+    preds = conn.execute("SELECT symbol, direction FROM predictions WHERE horizon = 'longterm' "
+                         "AND horizon_days = ? AND date = ?", (M.HORIZON, last)).fetchall()
+    moves = {s: prices[s] / prev_close[s] - 1 for s in prices if prev_close.get(s)}
+    out = {"up_n": 0, "up_right": 0, "down_n": 0, "down_right": 0}
+    for p in preds:
+        m = moves.get(p["symbol"])
+        if m is None:
+            continue
+        out[f"{p['direction']}_n"] += 1
+        out[f"{p['direction']}_right"] += int(m > 0 if p["direction"] == "up" else m < 0)
+    out["random_up"] = sum(m > 0 for m in moves.values()) / len(moves) if moves else None
+    return out
+
+
+def _row(what, right, n, random, empty):
+    return {"What": what, "Accuracy": right / n if n else None,
+            "Right": f"{right}/{n}" if n else empty, "Random": random if n else None}
+
+
+def _judged_row(what, j, empty):
+    return {"What": what, "Accuracy": j.get("accuracy"), "Random": j.get("random"),
+            "Right": f"{round(j['accuracy'] * j['n'])}/{j['n']}" if j["n"] else empty}
+
+
+def by_direction(conn: sqlite3.Connection, horizon: str, now: datetime | None = None,
+                 prices: dict[str, float] | None = None,
+                 prev_close: dict[str, float] | None = None) -> dict[str, list[dict]]:
+    """One model's accuracy, split into predicted-UP and predicted-DOWN picks.
+    Rows: {"What", "Accuracy", "Right", "Random"} (Accuracy/Random are fractions or None)."""
+    now = now or datetime.now()
+    prices = prices if prices is not None else _live_prices(conn)
+    out = {}
+    if horizon == "intraday":
+        it = intraday_today(conn, f"{now:%Y-%m-%d}", prices)
+        ru = it["random_up"]
+        for d, key in (("up", "buy"), ("down", "sell")):
+            rnd = None if ru is None else (ru if d == "up" else 1 - ru)
+            out[d] = [_row("Today (live, since 9:45)", it[f"{key}_right"], it[f"{key}_n"], rnd,
+                           "picks at 9:46"),
+                      _judged_row("All judged days", judged(conn, "intraday", direction=d),
+                                  "none yet")]
+        return out
+    lt = longterm_today(conn, prices, prev_close or {})
+    ru = lt["random_up"]
+    for d in ("up", "down"):
+        lo = longterm_open(conn, direction=d)
+        out[d] = [_row("Today (live, vs yesterday's close)", lt[f"{d}_right"], lt[f"{d}_n"],
+                       None if ru is None else (ru if d == "up" else 1 - ru), "no live prices"),
+                  _row("This week so far (on track)", lo.get("on_track", 0), lo["n"], None, "—"),
+                  _judged_row("All judged weeks",
+                              judged(conn, "longterm", horizon_days=M.HORIZON, direction=d),
+                              "after 1 week")]
+    return out
 
 
 def _pct(x) -> str:
