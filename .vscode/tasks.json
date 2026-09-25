@@ -62,6 +62,18 @@
       "problemMatcher": []
     },
     {
+      "label": "Training: ON (every day incl. weekends, even if autostart is off)",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor schedule install",
+      "problemMatcher": []
+    },
+    {
+      "label": "Training: OFF",
+      "type": "shell",
+      "command": ".venv/bin/python -m stockpredictor schedule remove",
+      "problemMatcher": []
+    },
+    {
       "label": "Backtest long-term",
       "type": "shell",
       "command": ".venv/bin/python -m stockpredictor backtest",

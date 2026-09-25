@@ -284,6 +284,37 @@ def cmd_run(settings, args) -> None:
         print("Stopped.")
 
 
+def cmd_auto(settings, args) -> None:
+    """One background pass (run daily by `schedule install`): decide + retrain, tune at weekends."""
+    import logging
+    from datetime import datetime
+
+    from stockpredictor.live import monitor, prices
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    db.init_db(settings.db_path)
+    with db.connect(settings.db_path) as conn:
+        mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
+                              settings.paper_capital_longterm,
+                              capital_intraday=settings.paper_capital_intraday)
+        done = mon.scheduled_run(mon.clock())
+    print(f"{datetime.now():%Y-%m-%d %H:%M} auto: {', '.join(done) or 'nothing to do'}", flush=True)
+
+
+def cmd_schedule(settings, args) -> None:
+    from stockpredictor import scheduler
+
+    if args.action == "install":
+        scheduler.install()
+        times = " and ".join(f"{h:02d}:{m:02d}" for h, m in scheduler.RUN_TIMES)
+        print(f"Daily training scheduled at {times} (log: {scheduler.LOG_PATH}).")
+    elif args.action == "remove":
+        scheduler.remove()
+        print("Daily training schedule removed.")
+    else:
+        print("Daily training schedule:", "ON" if scheduler.is_installed() else "OFF")
+
+
 WEB_PORT = 8501
 
 
@@ -508,6 +539,10 @@ def _improve_args(p):
     p.add_argument("--no-sync", action="store_true")
 
 
+def _schedule_args(p):
+    p.add_argument("action", choices=["install", "remove", "status"], nargs="?", default="status")
+
+
 def _start_args(p):
     _dir_arg(p)
     p.add_argument("--no-browser", action="store_true", help="Don't open a browser tab")
@@ -607,6 +642,10 @@ ARG_COMMANDS = {
     "start": (cmd_start, "Start everything: web dashboard + live monitor + training", _start_args),
     "improve": (cmd_improve, "Sync data, retrain both models, optionally self-tune",
                 _improve_args),
+    "auto": (cmd_auto, "One background pass: after-close decision, retrain, weekend tuning",
+             _dir_arg),
+    "schedule": (cmd_schedule, "Install/remove the daily background training job (macOS)",
+                 _schedule_args),
     "train-intraday": (cmd_train_intraday, "Train the intraday model", _dir_arg),
     "backtest-intraday": (cmd_backtest_intraday, "Walk-forward backtest of the intraday model",
                           _dir_arg),

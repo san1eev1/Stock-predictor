@@ -127,3 +127,26 @@ def test_unknown_market_state_counts_as_open_and_rechecks(tmp_path, ctx_model):
     assert mon.trading_today(clock["now"]) is True             # not re-asked within 30 min
     clock["now"] = ist(2026, 9, 25, 10, 45)
     assert mon.trading_today(clock["now"]) is False            # re-asked: holiday
+
+
+def test_scheduled_run(tmp_path, ctx_model, monkeypatch):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 25, 18, 0))  # Friday
+    calls = []
+    monkeypatch.setattr(mon, "after_close_job", lambda now: calls.append("ac") or True)
+    monkeypatch.setattr(mon, "weekly_retrain", lambda now: calls.append("wr") or True)
+    MON._set(conn, "monitor_heartbeat", ist(2026, 9, 25, 17, 58).isoformat())
+    assert mon.scheduled_run(clock["now"]) == []          # live monitor is running
+    clock["now"] = ist(2026, 9, 25, 21, 30)
+    assert mon.scheduled_run(clock["now"]) == ["after-close"]
+    clock["now"] = ist(2026, 9, 26, 18, 0)                # Saturday
+    assert mon.scheduled_run(clock["now"]) == ["retrain"]
+    assert calls == ["ac", "wr"]
+
+
+def test_schedule_plist():
+    from stockpredictor import scheduler
+
+    p = scheduler.build_plist("/x/python")
+    assert p["ProgramArguments"][-4:] == ["/x/python", "-m", "stockpredictor", "auto"]
+    assert {"Hour": 18, "Minute": 0} in p["StartCalendarInterval"]

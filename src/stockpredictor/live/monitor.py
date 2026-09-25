@@ -147,6 +147,20 @@ class Monitor:
                 done.append("retrain")
         return done
 
+    def scheduled_run(self, now: datetime) -> list[str]:
+        """One headless pass for the daily background job (when the live monitor is off)."""
+        beat = _setting(self.conn, "monitor_heartbeat")
+        if beat and (now - datetime.fromisoformat(beat)).total_seconds() < 300:
+            return []   # the live monitor is running and does all of this itself
+        done = []
+        if now.weekday() < 5 and now.time() >= AFTER_CLOSE \
+                and _setting(self.conn, "lt_after_close_day") != f"{now:%Y-%m-%d}":
+            if self.after_close_job(now):
+                done.append("after-close")
+        elif now.weekday() >= 5 and self.weekly_retrain(now):
+            done.append("retrain")
+        return done
+
     def minute_job(self, now: datetime) -> None:
         symbols = self.watched_symbols()
         if not symbols:

@@ -40,6 +40,16 @@ Press **F5** (▶ *Start Stock Predictor*), or `Cmd+Shift+B`. That one command:
 - makes the after-close decision and **retrains both models on the newest data**
 - **self-tunes every weekend** (tries new model settings, keeps them only if they test better)
 
+**Training every day, weekends included**
+
+Run the task **Training: ON** once (or `python -m stockpredictor schedule install`). A macOS
+background job then runs every day at 18:00 and 21:30: on weekdays it syncs the data, makes the
+after-close decision and retrains both models; at weekends it self-tunes. If the Mac was asleep,
+it runs when the Mac wakes. It does nothing while the live monitor (`start` / autostart) is
+running, since the monitor already does this, so it works alongside autostart: autostart runs
+the trading day, this makes sure training never skips a day. Log: `logs/auto.log`.
+Turn it off with **Training: OFF** (`schedule remove`).
+
 `Ctrl+C` in the terminal stops everything. Keep the Mac awake during market hours
 (the build task uses `caffeinate`).
 
@@ -97,6 +107,8 @@ python -m stockpredictor app           # web dashboard only
 python -m stockpredictor run           # live monitor only
 python -m stockpredictor improve --tune  # sync, retrain, self-tune now
 python -m stockpredictor daily         # run the after-close decision by hand
+python -m stockpredictor schedule install|remove|status  # automatic daily training
+python -m stockpredictor auto          # one pass of the daily background job
 python -m stockpredictor sync-data     # fetch latest data snapshot
 python -m stockpredictor train         # retrain the model now
 python -m stockpredictor backtest      # walk-forward backtest (~5 min), shown on the Model page
