@@ -64,6 +64,9 @@ jobs:
           python -m stockpredictor data-check | tail -1
           python -m stockpredictor intraday-collect --dir market-data --period "${{ inputs.intraday_period || '7d' }}" \
             || echo "::warning::intraday collection failed"
+          # NSE delivery share: newest days first, then history back to 2005 in chunks.
+          python -m stockpredictor delivery-update --dir market-data --minutes 25 \
+            || echo "::warning::delivery data failed"
           # Fundamentals snapshot once a week (Fridays) or on manual runs.
           if [ "$(date -u +%u)" = "5" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python -m stockpredictor fundamentals-update --dir market-data || echo "::warning::fundamentals failed"

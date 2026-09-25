@@ -87,8 +87,10 @@ SNAPSHOT_STEP = 5       # use every 5th trading day, counted back from the newes
 # How the paper portfolio turns weekly predictions into trades. Trading on the raw weekly
 # signal churns too much (costs ate everything in the backtest); averaging each stock's
 # score over 20 days and blending in 12-month momentum kept the edge after costs.
+# Backtest 2015-2026, 5 holdings, costs: momentum weight 0.5 -> 13.9%/yr (Sharpe 0.58),
+# 0.75 -> 21.0% (0.80), 0.9 -> 22.6% (0.83); momentum alone 22.2% (0.73); Nifty 9.0%.
 TRADE_SMOOTH_DAYS = 20
-TRADE_MOM_WEIGHT = 0.5
+TRADE_MOM_WEIGHT = 0.9
 
 
 def trading_scores(model: "LongTermModel", feats: pd.DataFrame, date: pd.Timestamp,
@@ -219,7 +221,8 @@ def _model_columns(df: pd.DataFrame, params: dict | None = None) -> list[str]:
     """Model inputs; chart-signal groups not switched on (params['chart_groups']) are left out."""
     skip = F.FEATURE_COLUMNS_EXCLUDE | {"fwd_ret", "fwd_excess", "target", "fb_weight"} \
         | technical.excluded_columns((params or current_params()).get("chart_groups"))
-    return [c for c in df.columns if c not in skip]
+    # *_asof overseas cues include the same evening's US close: intraday only (no look-ahead)
+    return [c for c in df.columns if c not in skip and not c.endswith("_asof")]
 
 
 def walk_forward(labeled_weekly: pd.DataFrame, feats_daily: pd.DataFrame,

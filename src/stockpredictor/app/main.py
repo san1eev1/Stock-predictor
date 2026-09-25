@@ -477,10 +477,10 @@ def paper_longterm():
         st.write("The buy candidates are the model's best guesses for **next week**. Trading on "
                  "them directly would change most holdings every week, and in the backtest the "
                  "charges ate all the profit. The paper portfolio therefore buys the stocks whose "
-                 "weekly prediction has been strong **over the last 20 days** (blended with "
-                 "12-month momentum) and holds them until they fall out of the top half. In the "
-                 "2015-2026 backtest (10 holdings) this earned ~20% a year after costs vs ~9% "
-                 "for Nifty 50.")
+                 "12-month momentum is strongest, with the model's 20-day average prediction as "
+                 "a tie-breaker (90% momentum, 10% model), and holds them until they fall out "
+                 "of the top half. In the 2015-2026 backtest (5 holdings) this earned ~22.6% a "
+                 "year after costs vs ~9% for Nifty 50, with falls of up to ~50% along the way.")
     paper_book(c, E.HORIZON, "Holdings", prices)
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = ? ORDER BY date",
                      c, params=(E.HORIZON,))

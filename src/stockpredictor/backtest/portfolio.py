@@ -22,6 +22,8 @@ class Rules:
     stop_loss: float = 0.15     # sell when price falls this far below entry
     cooldown_days: int = 7      # don't re-buy a stopped-out stock for this long
     news_exit: bool = True      # sell on strongly negative news
+    max_per_sector: int = 0     # at most this many holdings from one sector (0 = no limit)
+    vol_sizing: bool = False    # size positions by volatility (calmer stocks get more)
 
 
 @dataclass
@@ -35,7 +37,7 @@ def decide(holdings: dict[str, Position], scores: pd.Series, prices: dict[str, f
            rules: Rules, rebalance: bool, blocked: set[str] = frozenset(),
            negative_news: set[str] = frozenset(),
            severe_news: set[str] = frozenset(),
-           side: str = "long") -> tuple[list[tuple[str, str]], list[str]]:
+           side: str = "long", sectors: dict | None = None) -> tuple[list[tuple[str, str]], list[str]]:
     """Return (sells [(symbol, reason)], buys [symbols in priority order]).
 
     negative_news: never buy these. severe_news: also sell them if held.
@@ -58,12 +60,24 @@ def decide(holdings: dict[str, Position], scores: pd.Series, prices: dict[str, f
     if rebalance:
         sold = {s for s, _ in sells}
         slots = rules.n_hold - (len(holdings) - len(sold))
+        per_sector: dict = {}
+        if rules.max_per_sector and sectors:
+            for s in holdings:
+                if s not in sold:
+                    per_sector[sectors.get(s)] = per_sector.get(sectors.get(s), 0) + 1
+        # With a sector limit, look a little further down the list for a stock from
+        # another sector (up to 2x the holdings).
+        depth = rules.n_hold * (2 if rules.max_per_sector and sectors else 1)
         for sym in ranks.sort_values().index:
-            if slots <= 0 or ranks[sym] > rules.n_hold:
+            if slots <= 0 or ranks[sym] > depth:
                 break
             if sym in holdings or sym in blocked or sym in negative_news or sym not in prices:
                 continue
+            sec = sectors.get(sym) if sectors else None
+            if rules.max_per_sector and sectors and per_sector.get(sec, 0) >= rules.max_per_sector:
+                continue
             buys.append(sym)
+            per_sector[sec] = per_sector.get(sec, 0) + 1
             slots -= 1
     return sells, buys
 
@@ -78,7 +92,8 @@ class SimResult:
 
 def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
              capital: float = 100_000, rebalance: str = "daily",
-             costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1) -> SimResult:
+             costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1,
+             sectors: dict | None = None) -> SimResult:
     """scores: symbol/date/score rows. close: date x symbol close prices.
 
     lag=1: scores computed after a day's close are traded on the next day's
@@ -93,6 +108,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
     rebalance_days = set(dates) if rebalance == "daily" else \
         set(pd.Series(dates).groupby(week).max())
 
+    vol = close.pct_change().rolling(63, min_periods=20).std() if rules.vol_sizing else None
     cash, holdings, cooldown = capital, {}, {}
     equity, trades, total_costs = {}, [], 0.0
     last_price: dict[str, float] = {}
@@ -102,7 +118,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         last_price.update(row.dropna().to_dict())
         blocked = {s for s, until in cooldown.items() if d < until}
         sells, buys = decide(holdings, score_by_date[d], last_price, rules,
-                             rebalance=d in rebalance_days, blocked=blocked)
+                             rebalance=d in rebalance_days, blocked=blocked, sectors=sectors)
         for sym, reason in sells:
             pos, price = holdings.pop(sym), last_price[sym]
             value = pos.qty * price
@@ -119,7 +135,8 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         slot = equity_now / rules.n_hold
         for sym in buys:
             price = last_price[sym]
-            qty = int(min(slot, cash) / (price * 1.003))
+            size = slot * vol_scale(vol, d, sym) if vol is not None else slot
+            qty = int(min(size, cash) / (price * 1.003))
             if qty <= 0:
                 continue
             c = costs.cost("buy", qty * price)
@@ -132,6 +149,18 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         equity[d] = cash + sum(p.qty * last_price[s] for s, p in holdings.items())
 
     return SimResult(pd.Series(equity, name="equity"), pd.DataFrame(trades), total_costs)
+
+
+def vol_scale(vol: pd.DataFrame, d, sym: str) -> float:
+    """Position size factor: the day's median volatility / this stock's (0.5x .. 1.5x)."""
+    try:
+        row = vol.loc[d]
+        v, med = row[sym], row.median()
+    except KeyError:
+        return 1.0
+    if not (v > 0 and med > 0):
+        return 1.0
+    return float(min(1.5, max(0.5, med / v)))
 
 
 # --- Metrics -----------------------------------------------------------------------

@@ -153,6 +153,30 @@ def _index_returns(indices: pd.DataFrame) -> pd.DataFrame:
     return idx[["symbol", "date", "ret_1", "ret_5", "ret_63", "ret_126"]]
 
 
+GLOBAL_CUES = {"SP500": 1, "NASDAQ": 1, "USVIX": 1, "NIKKEI": 1, "HANGSENG": 1,
+               "USDINR": 5, "CRUDE": 5}           # series -> return period (days)
+
+
+def global_cues(indices: pd.DataFrame, dates: pd.Index) -> pd.DataFrame:
+    """Overseas markets, the rupee and crude, per Indian trading date. Two versions:
+      *_prev: the latest close strictly BEFORE the date (long-term: the US close of the
+              same date comes after the evening decision, so it may not be used);
+      *_asof: the latest close ON or before the date. Intraday takes the previous day's
+              row, so this is the last overnight close before the 9:15 open."""
+    out = pd.DataFrame({"date": pd.to_datetime(dates)}).sort_values("date")
+    for name, n in GLOBAL_CUES.items():
+        s = indices[indices["symbol"] == name].set_index("date")["close"].sort_index()
+        if len(s) < n + 2:
+            continue
+        r = pd.DataFrame({"gdate": s.index, "v": (s / s.shift(n) - 1).to_numpy()}).dropna()
+        col = f"g_{name.lower()}_ret{n}"
+        for suffix, exact in (("prev", False), ("asof", True)):
+            m = pd.merge_asof(out[["date"]], r, left_on="date", right_on="gdate",
+                              allow_exact_matches=exact, tolerance=pd.Timedelta(days=7))
+            out[f"{col}_{suffix}"] = m["v"].to_numpy()
+    return out
+
+
 def market_regime(indices: pd.DataFrame) -> pd.DataFrame:
     nifty = indices[indices["symbol"] == MARKET_INDEX].set_index("date")["close"].sort_index()
     out = pd.DataFrame(index=nifty.index)
@@ -163,13 +187,15 @@ def market_regime(indices: pd.DataFrame) -> pd.DataFrame:
     if not vix.empty:
         out["vix"] = vix.reindex(out.index).ffill()
         out["vix_pct_252"] = out["vix"].rolling(252, min_periods=60).rank(pct=True)
-    return out.reset_index()
+    out = out.reset_index()
+    return out.merge(global_cues(indices, out["date"]), on="date", how="left")
 
 
 # --- Public API ------------------------------------------------------------------
 
 def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
-                   universe: pd.DataFrame | None = None) -> pd.DataFrame:
+                   universe: pd.DataFrame | None = None,
+                   delivery: pd.DataFrame | None = None) -> pd.DataFrame:
     """Return features for every (symbol, date) with enough history."""
     daily = daily.sort_values(["symbol", "date"]).reset_index(drop=True)
 
@@ -203,6 +229,10 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
     feats["rs_sector_63"] = feats["ret_63"] - feats["sector_ret_63"]
 
     feats = feats.merge(market_regime(indices), on="date", how="left")
+    if delivery is not None and not delivery.empty:        # NSE delivery share (data/delivery.py)
+        from stockpredictor.data.delivery import features as delivery_features
+
+        feats = feats.merge(delivery_features(delivery), on=["symbol", "date"], how="left")
 
     ranks = feats.groupby("date")[RANKED].rank(pct=True).add_suffix("_rank")
     feats = pd.concat([feats, ranks], axis=1)
@@ -235,4 +265,5 @@ FEATURE_COLUMNS_EXCLUDE = {"symbol", "date", "close", "history_days"}
 
 
 def feature_columns(feats: pd.DataFrame) -> list[str]:
-    return [c for c in feats.columns if c not in FEATURE_COLUMNS_EXCLUDE]
+    return [c for c in feats.columns if c not in FEATURE_COLUMNS_EXCLUDE
+            and not c.endswith("_asof")]

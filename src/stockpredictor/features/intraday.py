@@ -14,7 +14,12 @@ from stockpredictor.data import intraday as I
 # Daily (previous-day) context taken from the long-term feature table.
 DAILY_CONTEXT = ["ret_5", "ret_21", "ret_63", "rsi_14", "dist_ma50", "dist_ma200",
                  "dist_52w_high", "vol_21", "bb_pctb", "vol_ratio_20_120", "beta_252",
-                 "mkt_ret_63", "mkt_vol_21", "vix", "vix_pct_252", "wk_streak"]
+                 "mkt_ret_63", "mkt_vol_21", "vix", "vix_pct_252", "wk_streak",
+                 "deliv_pct_20", "deliv_pct_rel",
+                 # overnight cues: the previous day's row holds the last close before 9:15
+                 "g_sp500_ret1_asof", "g_nasdaq_ret1_asof", "g_usvix_ret1_asof",
+                 "g_nikkei_ret1_asof", "g_hangseng_ret1_asof", "g_usdinr_ret5_asof",
+                 "g_crude_ret5_asof"]
 RANKED = ["gap", "r30", "rel_r30", "vwap_dev", "vol30_adv", "pos30", "ret_5"]
 PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close",
               I.EXIT_COL]

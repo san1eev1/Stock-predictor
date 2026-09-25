@@ -17,7 +17,9 @@ from stockpredictor.models import longterm as M
 def load_all(store_dir: Path):
     daily, indices = store.load_daily(store_dir), store.load_indices(store_dir)
     universe = store.load_universe(store_dir)
-    feats = F.build_features(daily, indices, universe)
+    from stockpredictor.data import delivery as DL
+
+    feats = F.build_features(daily, indices, universe, DL.load(store_dir))
     labeled = M.add_labels(F.weekly_snapshots(feats), daily, indices)
     return daily, indices, feats, labeled
 
@@ -66,6 +68,18 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
         report["strategies"][reb] = {**P.performance(res.equity),
                                      **P.trade_stats(res.trades, res.equity),
                                      "total_costs": res.total_costs}
+    sectors = dict(zip(*store.load_universe(store_dir)[["symbol", "industry"]].T.values)) \
+        if (store_dir / "universe.csv").exists() else {}
+    variants = {"weekly, max 2 per sector": P.Rules(**{**rules.__dict__, "max_per_sector": 2}),
+                "weekly, volatility sizing": P.Rules(**{**rules.__dict__, "vol_sizing": True}),
+                "weekly, both": P.Rules(**{**rules.__dict__, "max_per_sector": 2,
+                                           "vol_sizing": True})}
+    for name, r in variants.items():
+        res = P.simulate(scores, close, r, capital, "weekly", sectors=sectors)
+        curves[f"model_{name}"] = res.equity
+        report["strategies"][name] = {**P.performance(res.equity),
+                                      **P.trade_stats(res.trades, res.equity),
+                                      "total_costs": res.total_costs}
     if rules.n_hold != 10:           # same strategy with 10 holdings, for comparison
         wide = P.Rules(**{**rules.__dict__, "n_hold": 10})
         res = P.simulate(scores, close, wide, capital, "weekly")

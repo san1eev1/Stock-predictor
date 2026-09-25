@@ -82,6 +82,24 @@ def cmd_intraday_collect(settings, args) -> None:
     print(f"Intraday summaries: {n} stock-days from {len(bars)}/{len(symbols)} stocks")
 
 
+def cmd_delivery_update(settings, args) -> None:
+    """NSE delivery share per stock and day -> delivery/<year>.csv in the git store."""
+    from stockpredictor import store
+    from stockpredictor.data import delivery
+
+    d = Path(args.dir)
+    uni = store.load_universe(d)
+    n = delivery.update(d, set(uni["symbol"]), date.fromisoformat(args.start),
+                        minutes=args.minutes)
+    print(f"Delivery data: {n} new days")
+
+
+def _delivery_args(p) -> None:
+    _dir_arg(p)
+    p.add_argument("--start", default="2005-01-01", help="Oldest day to download")
+    p.add_argument("--minutes", type=float, default=20, help="Time budget (resumes next run)")
+
+
 def cmd_intraday_backfill(settings, args) -> None:
     """Angel One 5-minute history -> local summaries (one-time, on the Mac)."""
     from stockpredictor import store
@@ -918,6 +936,8 @@ ARG_COMMANDS = {
     "intraday-backfill": (cmd_intraday_backfill, "Angel One 5-min history -> local summaries",
                           _backfill_args),
     "data-check": (cmd_data_check, "Report data coverage and gaps", _symbols_arg),
+    "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
+                        _delivery_args),
 }
 
 COMMANDS = {

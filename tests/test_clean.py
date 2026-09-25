@@ -41,3 +41,33 @@ def test_intraday_prices_put_on_the_daily_basis():
     assert abs(out["close"][1] - 773.6 * f) < 1e-9        # day 2 uses day 1's factor
     assert abs(out["c30"][2] - 774.0 * 289.5 / 773.6) < 1e-9   # live day: latest factor
     assert out["c30"][0] == 772.0                        # first day: nothing known before
+
+
+def test_nse_delivery_file_is_parsed():
+    from datetime import date
+
+    from stockpredictor.data import delivery
+
+    text = """Security Wise Delivery Position - Compulsory Rolling Settlement
+10,MTO,24092015,414433471,0001526
+Record Type,Sr No,Name of Security,Quantity Traded,Deliverable Quantity,% of Deliverable
+20,1,20MICRONS,EQ,27482,15476,56.31
+20,2,ABC,BE,100,100,100.00
+20,3,TCS,EQ,1000,600,60.00"""
+    df = delivery.parse(text, date(2015, 9, 24))
+    assert list(df["symbol"]) == ["20MICRONS", "TCS"] and df["deliv_pct"].tolist() == [56.31, 60.0]
+    f = delivery.features(pd.concat([df.assign(date=pd.Timestamp("2015-09-24") + pd.Timedelta(days=i))
+                                     for i in range(130)]))
+    assert abs(f["deliv_pct"].iloc[-1] - 0.60) < 1e-9 and abs(f["deliv_pct_rel"].iloc[-1] - 1) < 1e-9
+
+
+def test_overnight_cues_have_no_look_ahead():
+    from stockpredictor.features.longterm import global_cues
+
+    us = pd.DataFrame({"symbol": "SP500", "date": pd.to_datetime(
+        ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"]), "close": [100, 101, 99, 110]})
+    out = global_cues(us, pd.to_datetime(["2026-09-24"])).iloc[0]
+    # long-term decision on the 24th (evening IST): only the US close of the 23rd is known
+    assert abs(out["g_sp500_ret1_prev"] - (99 / 101 - 1)) < 1e-12
+    # intraday on the 25th uses the 24th's row: the US close of the 24th (known by 9:15)
+    assert abs(out["g_sp500_ret1_asof"] - (110 / 99 - 1)) < 1e-12

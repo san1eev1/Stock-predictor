@@ -28,6 +28,14 @@ INDICES = {
     "INDIAVIX": "^INDIAVIX",
     "NIFTYIT": "^CNXIT",
     "NIFTYPHARMA": "^CNXPHARMA",
+    # Overnight cues from outside India (features/longterm.global_cues)
+    "SP500": "^GSPC",
+    "NASDAQ": "^IXIC",
+    "USVIX": "^VIX",
+    "NIKKEI": "^N225",
+    "HANGSENG": "^HSI",
+    "USDINR": "INR=X",
+    "CRUDE": "CL=F",
 }
 
 
