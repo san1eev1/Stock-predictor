@@ -1,4 +1,6 @@
-# Trains the long-term and news models on all history (2005 onwards) and keeps self-tuning.
+# Trains the long-term, news and both intraday models on all history and keeps self-tuning
+# (intraday: Angel One 5-minute history, trading rules chosen by profit, 3 rounds of
+# historical paper-trading replays).
 # Runs free on GitHub Actions and publishes the trained models (~1 MB) to the `models`
 # branch; the Mac only downloads them, so the full history never has to live on the Mac.
 name: Train models
@@ -49,10 +51,31 @@ jobs:
           git clone -q --depth 1 --branch models "$url" trained-models || mkdir -p trained-models
           git clone -q --depth 1 --branch paper-feedback "$url" feedback || mkdir -p feedback
 
+      # Angel One 5-minute history: GitHub's private Actions cache (never committed, the repo
+      # is public). Restored from the newest run, topped up, saved again under a new key.
+      - name: Restore Angel One intraday history
+        uses: actions/cache/restore@v4
+        with:
+          path: data/intraday_backfill.csv
+          key: angel-intraday-${{ github.run_id }}
+          restore-keys: angel-intraday-
+
       - name: Train and self-tune
+        env:
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: |
           python -m stockpredictor cloud-train --dir market-data --feedback feedback \
             --minutes "${{ inputs.minutes || '150' }}" ${{ inputs.backtest && '--backtest' || '' }}
+
+      - name: Save Angel One intraday history
+        if: always() && hashFiles('data/intraday_backfill.csv') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/intraday_backfill.csv
+          key: angel-intraday-${{ github.run_id }}
 
       - name: Publish models
         working-directory: trained-models

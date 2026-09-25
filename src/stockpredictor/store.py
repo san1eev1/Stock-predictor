@@ -274,15 +274,25 @@ def publish_branch(src: Path, branch: str, message: str, remote: str | None = No
 
 
 def push_feedback(judged: pd.DataFrame, work_dir: Path | None = None,
-                  remote: str | None = None) -> None:
-    """Send judged paper predictions (symbol, date, correct) to GitHub for cloud training."""
+                  remote: str | None = None, intraday: pd.DataFrame | None = None) -> None:
+    """Send judged paper predictions (symbol, date, correct) to GitHub for cloud training:
+    long-term, and the intraday buy and sell picks (with their horizon)."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(work_dir or tmp)
         judged[["symbol", "date", "correct"]].sort_values(["date", "symbol"]).to_csv(
             d / "longterm_judged.csv", index=False)
+        if intraday is not None and not intraday.empty:
+            intraday[["horizon", "symbol", "date", "correct"]].sort_values(
+                ["horizon", "date", "symbol"]).to_csv(d / "intraday_judged.csv", index=False)
         publish_branch(d, FEEDBACK_BRANCH, "Judged paper predictions", remote)
+
+
+def load_intraday_feedback(path: Path) -> pd.DataFrame | None:
+    """Judged intraday paper picks (horizon, symbol, date, correct) from the feedback branch."""
+    f = path / "intraday_judged.csv"
+    return pd.read_csv(f, parse_dates=["date"]) if f.exists() else None
 
 
 def load_feedback(path: Path) -> pd.DataFrame | None:

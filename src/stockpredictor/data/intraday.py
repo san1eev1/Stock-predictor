@@ -173,12 +173,17 @@ def angel_bars(client, token: str, start: date, end: date,
 
 
 def angel_backfill(client, tokens: dict[str, str], symbols: list[str], start: date, end: date,
-                   progress=print) -> int:
+                   progress=print, deadline: float | None = None) -> int:
     """Download Angel One 5-minute history for `symbols` and save daily summaries locally.
     Stops early when Angel One refuses everything (MAX_FAILS stocks in a row); callers retry
     the missing stocks later."""
+    import time as _time
+
     total, fails = 0, 0
     for i, sym in enumerate(symbols, 1):
+        if deadline is not None and _time.monotonic() > deadline:
+            progress(f"time budget used after {i - 1} of {len(symbols)} stocks; rest next run")
+            break
         if sym not in tokens:
             progress(f"[{i}/{len(symbols)}] {sym}: no Angel One token")
             continue

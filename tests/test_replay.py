@@ -75,3 +75,27 @@ def test_tuning_round_is_checked_by_paper_trading(tmp_path, monkeypatch):
     assert r["adopted"] and saved == [{"a": 2}]
     rows = conn.execute("SELECT avg_day_pnl, adopted FROM tune_checks ORDER BY id").fetchall()
     assert [tuple(x) for x in rows] == [(200, 0), (300, 1)]
+
+
+def test_rules_tuned_by_profit(tmp_path, monkeypatch):
+    from stockpredictor.backtest import intraday as B
+
+    target = MI.Target("intraday", "px_1230", tmp_path / "m", "until 12:30")
+    days = pd.bdate_range("2026-01-01", periods=120)
+    scores = pd.DataFrame({"symbol": "A", "date": days, "score": 1.0})
+    monkeypatch.setattr(MI, "walk_forward", lambda f, params, last_days: scores)
+    from stockpredictor.data import intraday as I
+    feats = pd.DataFrame(columns=["symbol", "date", "c30", "px_1230", *I.LEVEL_COLS])
+
+    def fake_sim(sc, summ, r, capital, exit_col, exit_minutes):
+        # 2 buys, no sells, skipping weak days earns most; everything else loses costs
+        pnl = 100.0 if (r.n_long, r.n_short, r.skip_quantile) == (2, 0, 0.5) else -300.0
+        return {"days": pd.DataFrame({"date": days, "pnl": pnl})}
+
+    monkeypatch.setattr(B, "simulate", fake_sim)
+    rep = T.tune_rules(feats, target, B.IntradayRules(), max_n=5)
+    assert rep["adopted"] and rep["rules"]["n_long"] == 2 and rep["rules"]["n_short"] == 0
+    assert rep["rules"]["skip_quantile"] == 0.5 and rep["day_profit_recent"] == 100
+    # the learned rules apply, capped by the Settings maximum
+    r = T.rules_for(target, B.IntradayRules(n_long=1, n_short=5))
+    assert (r.n_long, r.n_short, r.skip_quantile) == (1, 0, 0.5)

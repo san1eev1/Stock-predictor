@@ -4,3 +4,8 @@ requests>=2.31
 pandas>=2.1
 numpy>=1.26
 lightgbm>=4.3
+# Angel One (intraday history for the intraday models)
+pyotp>=2.9
+smartapi-python>=1.4
+logzero>=1.7
+websocket-client>=1.6

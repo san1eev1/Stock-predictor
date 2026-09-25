@@ -100,13 +100,13 @@ class Monitor:
         return self._model
 
     def intraday_model(self) -> MI.IntradayModel | None:
-        if self._imodel is None and (MI.MODEL_DIR / "model.txt").exists():
-            self._imodel = MI.IntradayModel.load()
+        if self._imodel is None and MI.model_path(MI.TRADE) is not None:
+            self._imodel = MI.IntradayModel.load(MI.model_path(MI.TRADE))
         return self._imodel
 
     def close_model(self) -> MI.IntradayModel | None:
-        if self._cmodel is None and (MI.CLOSE.model_dir / "model.txt").exists():
-            self._cmodel = MI.IntradayModel.load(MI.CLOSE.model_dir)
+        if self._cmodel is None and MI.model_path(MI.CLOSE) is not None:
+            self._cmodel = MI.IntradayModel.load(MI.model_path(MI.CLOSE))
         return self._cmodel
 
     def watched_symbols(self) -> set[str]:
@@ -394,12 +394,17 @@ class Monitor:
                                 MI.current_params(MI.TRADE).get("peer_weight") or 0)
         r = PI.run_picks(self.conn, feats, trade_view, prices, pd.Timestamp(now.date()), rules,
                          self.capital_intraday, negative, strengths)
-        if close_model is not None:              # second book: 9:45 -> 15:15
+        if close_model is not None:              # second book: 9:45 -> 15:15, its own rules
+            crules, _ = PI.get_rules(self.conn, PI.CLOSE_HORIZON)
+            cstrengths = PI.recent_strengths(close_model, self.store_dir, ctx, crules) \
+                if crules.skip_quantile > 0 else None
             close_view = MI.Blended(close_model, model,
                                     MI.current_params(MI.CLOSE).get("peer_weight") or 0)
             rc = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
-                              rules, self.capital_intraday, negative, horizon=PI.CLOSE_HORIZON)
-            log.info("Intraday picks (until close): %s", "; ".join(rc["picks"]) or "none")
+                              crules, self.capital_intraday, negative, cstrengths,
+                              horizon=PI.CLOSE_HORIZON)
+            log.info("Intraday picks (until close): %s", "skip today (weak signal)"
+                     if rc["skipped"] else "; ".join(rc["picks"]) or "none")
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
@@ -570,15 +575,18 @@ class Monitor:
         if not config.CLOUD_TRAINING:
             return
         judged = T.judged_predictions(self.conn)
-        if judged.empty:
+        intraday = pd.read_sql("SELECT horizon, symbol, date, correct FROM predictions WHERE "
+                               "horizon LIKE 'intraday%' AND correct IS NOT NULL", self.conn)
+        if judged.empty and intraday.empty:
             return
-        key = f"{len(judged)}:{judged['date'].max()}"
+        key = f"{len(judged)}:{judged['date'].max()}:{len(intraday)}:{intraday['date'].max()}"
         if _setting(self.conn, "feedback_pushed") == key:
             return
         try:
-            store.push_feedback(judged)
+            store.push_feedback(judged, intraday=intraday)
             _set(self.conn, "feedback_pushed", key)
-            log.info("Sent %d judged paper predictions to GitHub for training", len(judged))
+            log.info("Sent %d long-term and %d intraday judged paper predictions to GitHub "
+                     "for training", len(judged), len(intraday))
         except Exception as exc:
             log.warning("could not send paper feedback to GitHub: %s", exc)
 

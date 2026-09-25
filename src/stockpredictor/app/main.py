@@ -12,7 +12,7 @@ import streamlit as st
 
 from stockpredictor import config, db, store
 from stockpredictor.app import charts as C
-from stockpredictor.config import load_settings
+from stockpredictor.config import SHARED_MODELS_DIR, load_settings
 from stockpredictor.data import fundamentals as FUND
 from stockpredictor.data import news as N
 from stockpredictor.features.labels import reason_text
@@ -355,7 +355,7 @@ def replay_history():
                "the previous round's judged buy and sell picks (wrong 2×, right 1.5×). If the "
                "last round beats the first, that learning is kept for the live model.")
     tuning_checks(c)
-    runs = pd.read_sql("SELECT * FROM replay_runs ORDER BY id", c)
+    runs = history_table(c, "replay_runs")
     if runs.empty:
         st.caption("The first replay runs after today's close (or now, at the weekend).")
         return
@@ -385,6 +385,15 @@ def replay_history():
                         width="stretch")
 
 
+def history_table(c, table: str) -> pd.DataFrame:
+    """Results kept on this Mac plus those published by the GitHub training runs."""
+    local = pd.read_sql(f"SELECT * FROM {table}", c).drop(columns="id")
+    path = SHARED_MODELS_DIR / "history" / f"{table}.csv"
+    cloud = pd.read_csv(path) if path.exists() else local.iloc[:0]
+    return pd.concat([local, cloud], ignore_index=True).sort_values("run_at", kind="stable") \
+        .reset_index(drop=True)
+
+
 def tuning_checks(c):
     """The paper-trading check run after every background tuning round."""
     st.subheader("🧪 Paper-trading check after each tuning round")
@@ -392,9 +401,9 @@ def tuning_checks(c):
                f"{T.REPLAY_DAYS} days (live rules: top buys + sells, ₹1 lakh a day, costs; each "
                "day predicted by a model trained only on earlier days). New settings are kept "
                "only if they also paper-trade at least as well (P&L per day and picks right).")
-    t = pd.read_sql("SELECT * FROM tune_checks ORDER BY id DESC LIMIT 40", c)
+    t = history_table(c, "tune_checks").iloc[::-1].head(40)
     if t.empty:
-        st.caption("Appears after the next tuning round (every few minutes).")
+        st.caption("Appears after the next GitHub training run (16:45 and 21:00 IST).")
         return
     st.dataframe(pd.DataFrame({
         "Time": t["run_at"].str[5:16].str.replace("T", " "),
@@ -568,7 +577,7 @@ def page_intraday(target: MI.Target):
     st.title("Intraday — until 12:30" if first else "Intraday — until close")
     accuracy_now_panel(target.horizon)
     c = conn()
-    rules, enabled = PI.get_rules(c)
+    rules, enabled = PI.get_rules(c, target.horizon)
     exit_at = "12:30" if first else "15:15 (close)"
     st.caption(f"At 9:45 this model ranks all Nifty 250 stocks on the first 30 minutes and "
                f"predicts the move until {exit_at}. Stop-loss {rules.stop_loss}%, target "
@@ -739,7 +748,7 @@ def paper_intraday(horizon: str = PI.HORIZON):
         return
     trades["Day"] = trades["entry_time"].str[:10]
     trades["sign"] = trades["side"].map({"long": 1, "short": -1})
-    rules, _ = PI.get_rules(c)
+    rules, _ = PI.get_rules(c, horizon)
     for side, title in (("long", f"▲ Buy trades — the top {rules.n_long} of the 10 buy candidates"),
                         ("short", f"▼ Sell trades (short) — the top {rules.n_short} of the 10 "
                                   "sell candidates")):
@@ -1186,16 +1195,17 @@ def strategy_race():
 def model_intraday():
     st.divider()
     st.header("Intraday model")
-    path = MI.MODEL_DIR / "meta.json"
-    if not path.exists():
-        st.info("Not trained yet: `python -m stockpredictor intraday-backfill` (Angel One, one-time), "
-                "then `python -m stockpredictor train-intraday`.")
+    where = MI.model_path(MI.TRADE)
+    if where is None:
+        st.info("Not trained yet: it is trained on GitHub after the close and downloaded "
+                "automatically.")
         return
+    path = where / "meta.json"
     meta = json.loads(path.read_text())
     st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on {meta.get('train_days', '?')} "
                f"days up to {meta['train_to']}. Retrains daily, self-tunes weekly.")
     from stockpredictor.features.labels import label
-    imp = MI.IntradayModel.load().importance().head(12)
+    imp = MI.IntradayModel.load(where).importance().head(12)
     imp = (imp / imp.sum()).rename("share").reset_index().rename(columns={"index": "feature"})
     imp["feature"] = imp["feature"].map(label)
     st.altair_chart(C.hbars(imp, "feature", "share", ".0%"), width="stretch")

@@ -29,7 +29,19 @@ N_CANDIDATES = 10        # buy and sell candidates shown and judged each day
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
 
-def get_rules(conn: sqlite3.Connection) -> tuple[B.IntradayRules, bool]:
+def learned_rules(horizon: str = HORIZON) -> dict | None:
+    """Trading rules chosen by profit on GitHub for this book (trainer.tune_rules)."""
+    t = next((t for t in MI.TARGETS if t.horizon == horizon), None)
+    path = t.model_dir / "rules.json" if t is not None else None
+    try:
+        return json.loads(path.read_text()) if path is not None and path.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
+def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.IntradayRules, bool]:
+    """Settings page values; the numbers of buys/sells there are the MAXIMUM. Rules learned
+    by profit on GitHub (fewer trades, skipping weak days, stop/target) apply within them."""
     s = dict(conn.execute("SELECT key, value FROM app_settings").fetchall())
     d = B.IntradayRules()
     rules = B.IntradayRules(
@@ -37,6 +49,13 @@ def get_rules(conn: sqlite3.Connection) -> tuple[B.IntradayRules, bool]:
         stop_loss=float(s.get("id_stop_loss", d.stop_loss)),
         target=float(s.get("id_target", d.target)),
         skip_quantile=float(s.get("id_skip_q", d.skip_quantile)))
+    learned = (learned_rules(horizon) or {}).get("rules")
+    if learned and s.get("id_learned_rules", "1") == "1":
+        rules = B.IntradayRules(
+            n_long=min(rules.n_long, int(learned["n_long"])),
+            n_short=min(rules.n_short, int(learned["n_short"])),
+            stop_loss=float(learned["stop_loss"]), target=float(learned["target"]),
+            skip_quantile=float(learned["skip_quantile"]))
     return rules, s.get("id_enabled", "1") == "1"
 
 
@@ -83,10 +102,9 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
                      [(stamp, r.symbol, float(r.c30)) for r in feats_today.itertuples()])
     day = feats_today.assign(score=model.score(feats_today).values)
     strength = B.signal_strength(day["score"], rules)
-    if rules.skip_quantile > 0 and strengths is not None and len(strengths) >= 20 \
-            and strength < strengths.quantile(rules.skip_quantile):
-        conn.commit()
-        return {"skipped": True, "strength": strength, "picks": []}
+    # Weak day: no trades, but the candidates are still saved and judged (the models learn).
+    skipped = bool(rules.skip_quantile > 0 and strengths is not None and len(strengths) >= 20
+                   and strength < strengths.quantile(rules.skip_quantile))
 
     # 10 buy and 10 sell candidates are saved and judged; paper trades are opened for the
     # strongest n_long / n_short of them (fewer, larger positions keep costs down).
@@ -118,7 +136,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
             "entry_price, stop_loss, target, reasons, model_version) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (horizon, stamp, p["symbol"], "up" if sign > 0 else "down", float(p["confidence"]),
              rank, entry, stop, target, json.dumps(why), model.train_to))
-        limit = rules.n_long if sign > 0 else rules.n_short
+        limit = 0 if skipped else rules.n_long if sign > 0 else rules.n_short
         qty = int(slot / entry) if rank <= limit else 0
         if qty <= 0:
             continue
@@ -131,7 +149,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
                      (qty * entry + c, horizon))
         opened.append(f"{p['side'].upper():5} {p['symbol']} {qty} @ {entry:.2f}")
     conn.commit()
-    return {"skipped": False, "strength": strength, "picks": opened}
+    return {"skipped": skipped, "strength": strength, "picks": opened}
 
 
 def exit_comparison(conn: sqlite3.Connection, closes: pd.DataFrame) -> pd.DataFrame:
@@ -304,7 +322,7 @@ def preview(ctx: E.MarketContext, store_dir: Path) -> tuple[pd.DataFrame, pd.Tim
     day = feats["date"].max()
     # Honest preview: a model trained only on days before the preview day.
     model = MI.IntradayModel.train(feats[feats["date"] < day], {**MI.current_params(), "n_seeds": 1})
-    if not (MI.MODEL_DIR / "model.txt").exists():
+    if MI.model_path(MI.TRADE) is None:
         MI.IntradayModel.train(feats).save()          # first real model for live picks
     t = feats[(feats["date"] == day) & feats["symbol"].isin(store.tradable(ctx.universe))].copy()
     t["score"] = model.score(t).values

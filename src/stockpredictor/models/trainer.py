@@ -52,6 +52,7 @@ MARGIN = 0.01
 RUN_LOG: Path | None = None
 # Set by cloud training: judged paper predictions from the paper-feedback branch.
 FEEDBACK: pd.DataFrame | None = None
+INTRADAY_FEEDBACK: pd.DataFrame | None = None   # judged intraday picks (cloud: feedback branch)
 
 
 def log_run(conn: sqlite3.Connection | None, horizon: str, kind: str, train_to: str,
@@ -335,6 +336,91 @@ def retrain_intraday(ctx, store_dir, conn=None, force: bool = False,
 COMPARE_PATH = MI.MODEL_DIR.parent / "intraday_compare.json"
 
 
+RULES_FILE = "rules.json"      # trading rules chosen by profit, per intraday model
+RULE_SIDES = [(5, 5), (3, 3), (2, 2), (1, 1), (5, 0), (3, 0), (2, 0), (1, 0),
+              (0, 5), (0, 3), (0, 2), (0, 1), (3, 1), (1, 3)]
+RULE_SKIPS = [0.0, 0.3, 0.5, 0.7]
+RULE_EXITS = [(1.0, 2.0), (0.5, 1.0), (0.75, 1.5), (1.0, 0.0), (1.5, 3.0), (0.75, 0.0)]
+
+
+def rules_for(target: MI.Target, base=None):
+    """`base` rules (the maximum trades) with this model's profit-tuned rules applied."""
+    from stockpredictor.backtest import intraday as B
+
+    base = base or B.IntradayRules()
+    path = target.model_dir / RULES_FILE
+    try:
+        r = json.loads(path.read_text())["rules"] if path.exists() else None
+    except (OSError, ValueError, KeyError):
+        r = None
+    if not r:
+        return base
+    return B.IntradayRules(n_long=min(base.n_long, int(r["n_long"])),
+                           n_short=min(base.n_short, int(r["n_short"])),
+                           stop_loss=float(r["stop_loss"]), target=float(r["target"]),
+                           skip_quantile=float(r["skip_quantile"]))
+
+
+def day_profit(days: pd.DataFrame) -> float:
+    """Average P&L per market day, skipped days counting as Rs 0 (fair to skipping)."""
+    return float(days["pnl"].sum() / len(days)) if len(days) else float("nan")
+
+
+def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int = 5,
+               capital: float = 100_000, days: int = 240) -> dict | None:
+    """Choose the trading rules by profit after costs: how many buys and sells (0..max_n,
+    long-only or short-only allowed), skipping weak days, stop-loss and target. Scores are
+    walk-forward (each day predicted by a model trained only on earlier days). A rule set
+    must earn the most on the recent half of the days AND not do worse than the current
+    rules on the earlier half; otherwise the current rules stay. Saved to rules.json."""
+    from dataclasses import replace
+
+    from stockpredictor.backtest import intraday as B
+    from stockpredictor.data import intraday as I
+
+    current = current or B.IntradayRules()
+    scores = MI.walk_forward(feats, params=MI.current_params(target), last_days=days)
+    if scores.empty or scores["date"].nunique() < 60:
+        return None
+    dates = sorted(scores["date"].unique())
+    recent = set(dates[len(dates) // 2:])
+    minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
+    summ = feats[["symbol", "date", "c30", target.exit_col, *I.LEVEL_COLS]]
+    results: dict = {}
+
+    def run(r) -> tuple[float, float]:           # (recent, earlier) profit per day
+        if r not in results:
+            d = B.simulate(scores, summ, r, capital, exit_col=target.exit_col,
+                           exit_minutes=minutes)["days"]
+            late = d["date"].isin(recent)
+            results[r] = (day_profit(d[late]), day_profit(d[~late]))
+        return results[r]
+
+    def best_of(options):
+        return max(options, key=lambda r: run(r)[0])
+
+    cap = lambda n: min(n, max_n)                              # noqa: E731
+    now = replace(current, n_long=cap(current.n_long), n_short=cap(current.n_short))
+    # Buys/sells per day together with skipping weak days (they interact), then stop/target.
+    best = best_of([now, *(replace(now, n_long=cap(a), n_short=cap(b), skip_quantile=q)
+                           for a, b in RULE_SIDES for q in RULE_SKIPS)])
+    best = best_of([best, *(replace(best, stop_loss=sl, target=tp) for sl, tp in RULE_EXITS)])
+    (new_late, new_early), (cur_late, cur_early) = run(best), run(now)
+    adopted = best != now and new_late > cur_late and new_early >= cur_early
+    chosen = best if adopted else now
+    report = {"target": target.horizon, "adopted": adopted,
+              "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
+                        "stop_loss": chosen.stop_loss, "target": chosen.target,
+                        "skip_quantile": chosen.skip_quantile},
+              "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
+              "current_day_profit_recent": cur_late, "tested": len(results),
+              "period": f"{pd.Timestamp(dates[0]):%Y-%m-%d} to {pd.Timestamp(dates[-1]):%Y-%m-%d}",
+              "updated": datetime.now().isoformat(timespec="seconds")}
+    target.model_dir.mkdir(parents=True, exist_ok=True)
+    (target.model_dir / RULES_FILE).write_text(json.dumps(report, indent=1))
+    return report
+
+
 def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
                   capital: float = 100_000) -> dict | None:
     """Which exit is better, 12:30 or the close? Both models, walk-forward on the SAME days
@@ -451,7 +537,7 @@ def replay_training(ctx, store_dir, conn=None, rules=None, capital: float = 100_
                 w = feedback.assign(fb_weight=feedback["correct"].map(FEEDBACK_WEIGHT))
                 feats = base.merge(w[["symbol", "date", "fb_weight"]], on=["symbol", "date"],
                                    how="left")
-            r = replay_round(feats, target, rules, capital)
+            r = replay_round(feats, target, rules_for(target, rules), capital)
             if r is None:
                 break
             res, feedback = r
@@ -488,6 +574,9 @@ def intraday_feedback(conn, feats: pd.DataFrame, horizon: str = "intraday") -> p
     target = next((t for t in MI.TARGETS if t.horizon == horizon), None)
     if target is not None and replay_file(target).exists():       # kept replay feedback
         parts.append(pd.read_csv(replay_file(target)))
+    if INTRADAY_FEEDBACK is not None:                             # cloud: sent by the Mac
+        f = INTRADAY_FEEDBACK
+        parts.append(f.loc[f["horizon"] == horizon, ["symbol", "date", "correct"]])
     if conn is not None:                                          # real paper picks win
         parts.append(pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE "
                                  "horizon = ? AND correct IS NOT NULL", conn, params=(horizon,)))
@@ -549,6 +638,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
                  "current": evaluate_intraday(feats, base["params"], check_days, peer)["ic"]}
         adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
                                                    or check["best"] >= check["current"])
+    rules = rules_for(target, rules)
     paper = {"current": paper_check(feats, target, base["params"], rules)}
     if adopted:
         paper["new"] = paper_check(feats, target, best["params"], rules)

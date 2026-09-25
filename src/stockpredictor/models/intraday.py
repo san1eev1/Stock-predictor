@@ -14,13 +14,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from stockpredictor.config import LOCAL_MODELS_DIR
+from stockpredictor import config
+from stockpredictor.config import LOCAL_MODELS_DIR, SHARED_MODELS_DIR
 from stockpredictor.data import intraday as I
 from stockpredictor.features import intraday as FI
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
-MODEL_DIR = LOCAL_MODELS_DIR / "intraday"     # trained on the Mac (Angel One data)
+# Trained on GitHub (published with the other models) unless the Mac trains itself.
+ROOT = LOCAL_MODELS_DIR if config.MAC_TRAINING else SHARED_MODELS_DIR
+MODEL_DIR = ROOT / "intraday"
 
 
 @dataclass(frozen=True)
@@ -33,9 +36,18 @@ class Target:
 
 
 TRADE = Target("intraday", I.EXIT_COL, MODEL_DIR, "until 12:30")
-CLOSE = Target("intraday_close", "px_1515", LOCAL_MODELS_DIR / "intraday_close",
+CLOSE = Target("intraday_close", "px_1515", ROOT / "intraday_close",
                "until the close (15:15 square-off)")
 TARGETS = (TRADE, CLOSE)
+
+
+def model_path(target: Target) -> Path | None:
+    """Where this target's trained model is: the published one, else a model the Mac trained
+    earlier (used until the first one arrives from GitHub)."""
+    for d in (target.model_dir, LOCAL_MODELS_DIR / target.model_dir.name):
+        if (d / "model.txt").exists():
+            return d
+    return None
 
 
 def peer_of(target: Target) -> Target:

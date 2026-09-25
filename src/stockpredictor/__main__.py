@@ -315,6 +315,7 @@ def cmd_cloud_train(settings, args) -> None:
     from stockpredictor import store
     from stockpredictor.backtest import run as bt
     from stockpredictor.config import SHARED_MODELS_DIR
+    from stockpredictor.models import intraday as MI
     from stockpredictor.models import longterm as M
     from stockpredictor.models import trainer as T
     from stockpredictor.nlp import relevance as R
@@ -360,17 +361,37 @@ def cmd_cloud_train(settings, args) -> None:
             f"{k}: {v['cagr']:.1%}/yr, Sharpe {v['sharpe']:.2f}, worst fall {v['max_drawdown']:.1%}"
             for k, v in s.items()), flush=True)
 
+    conn = _cloud_intraday(settings, d, ctx, args, started + budget * 0.4)
+
     rounds = adopted = 0
     scores: dict = {}               # settings already scored this run are not re-tested
     while time.monotonic() - started < budget:
-        r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False,
-                            cache=scores)
         rounds += 1
-        adopted += int(r["adopted"])
-        print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f}), "
-              f"paper check: the 5 stocks bought beat Nifty {r['top5_hit']:.1%} of weeks, "
-              f"avg {r['top5_excess']:+.2%}/week (top 10: {r['top10_hit']:.1%})"
-              + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
+        # Take turns: long-term, then each intraday model (when its history is available).
+        turn = ["longterm", *([t.horizon for t in MI.TARGETS] if conn is not None else [])]
+        which = turn[(rounds - 1) % len(turn)]
+        if which == "longterm":
+            r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False,
+                                cache=scores)
+            print(f"Tuning round {rounds} (long-term): IC {r['ic']:.4f} (current "
+                  f"{r['previous_ic']:.4f}), paper check: the 5 stocks bought beat Nifty "
+                  f"{r['top5_hit']:.1%} of weeks, avg {r['top5_excess']:+.2%}/week "
+                  f"(top 10: {r['top10_hit']:.1%})"
+                  + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
+        else:
+            target = next(t for t in MI.TARGETS if t.horizon == which)
+            r = T.tune_intraday(ctx, d, conn, n_candidates=args.candidates, log_all=False,
+                                target=target)
+            if r is None:
+                continue
+            p = r.get("paper") or {}
+            print(f"Tuning round {rounds} (intraday {target.label}): IC {r['ic']:.4f} (current "
+                  f"{r['previous_ic']:.4f}), paper check: Rs {p.get('avg_day_pnl', 0):+.0f}/day, "
+                  f"{(p.get('accuracy') or 0):.0%} picks right"
+                  + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
+        adopted += int(bool(r["adopted"]))
+    if conn is not None:
+        _export_history(conn, SHARED_MODELS_DIR / "history")
 
     if T.RUN_LOG.exists():   # keep the log small
         lines = T.RUN_LOG.read_text().splitlines()[-2000:]
@@ -380,6 +401,106 @@ def cmd_cloud_train(settings, args) -> None:
               "adopted": adopted, "minutes": round((time.monotonic() - started) / 60, 1)}
     (SHARED_MODELS_DIR / "status.json").write_text(json.dumps(status, indent=1))
     print(json.dumps(status), flush=True)
+
+
+def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
+    """GitHub: Angel One 5-minute history (kept in GitHub's private cache, never committed),
+    then both intraday models: retrain on all of it + judged paper picks, choose the trading
+    rules by profit, 3 rounds of historical paper-trading replays, 12:30-vs-close comparison.
+    Returns a database connection holding the run's results (None without Angel One keys)."""
+    import tempfile
+
+    import pandas as pd
+
+    from stockpredictor import store
+    from stockpredictor.data import intraday as I
+    from stockpredictor.models import intraday as MI
+    from stockpredictor.models import trainer as T
+
+    if not settings.angel.is_complete:
+        print("Intraday: no Angel One keys (GitHub Secrets) - intraday models not trained",
+              flush=True)
+        return None
+    if args.feedback:
+        T.INTRADAY_FEEDBACK = store.load_intraday_feedback(Path(args.feedback))
+    n_fb = 0 if T.INTRADAY_FEEDBACK is None else len(T.INTRADAY_FEEDBACK)
+    print(f"Intraday paper feedback: {n_fb} judged buy/sell picks", flush=True)
+    try:
+        from stockpredictor.data import angelone
+
+        client = angelone.AngelDataClient(settings.angel)
+        client.login()
+        tokens = angelone.fetch_nse_equity_tokens()
+        active = ctx.universe.loc[ctx.universe["active"] == 1, "symbol"].tolist()
+        have = I.backfill_symbols()
+        # Stocks with no or incomplete history: 2 years. Everyone: the days since the last run.
+        todo = sorted((set(active) - have) | (set(active) & (I.backfill_missing_exit()
+                                                              | I.backfill_incomplete())))
+        today = date.today()
+        if todo:
+            n = I.angel_backfill(client, tokens, todo, today - timedelta(days=730), today,
+                                 progress=lambda m: None, deadline=deadline)
+            print(f"Angel One history: {n} stock-days for {len(todo)} stocks with little or no "
+                  "history", flush=True)
+        last = I.load_summaries(d).query("source == 'angelone'")["date"].max()
+        if pd.notna(last) and last.date() < today:
+            rest = sorted(set(active) - set(todo))
+            n = I.angel_backfill(client, tokens, rest, last.date() + timedelta(days=1), today,
+                                 progress=lambda m: None, deadline=deadline + 20 * 60)
+            print(f"Angel One history: {n} new stock-days since {last:%Y-%m-%d}", flush=True)
+    except Exception as exc:
+        print(f"Angel One download failed ({exc}); training on the history already cached",
+              flush=True)
+    print(f"Intraday history: {I.backfill_days()} days, {len(I.backfill_symbols())} stocks",
+          flush=True)
+
+    path = Path(tempfile.mkdtemp()) / "cloud.db"
+    db.init_db(path)
+    conn = db.connect(path)
+    for target in MI.TARGETS:
+        feats = T.intraday_feedback(None, T.intraday_feats(ctx, d, target), target.horizon)
+        model = T.retrain_intraday(ctx, d, conn, force=True, target=target)
+        if model is None:
+            print(f"Intraday ({target.label}): not enough history yet", flush=True)
+            continue
+        print(f"Intraday ({target.label}): retrained on {model.train_days} days up to "
+              f"{model.train_to}", flush=True)
+        rep = T.tune_rules(feats, target)
+        if rep:
+            r = rep["rules"]
+            print(f"Intraday ({target.label}) trading rules by profit: {r['n_long']} buys + "
+                  f"{r['n_short']} sells, stop {r['stop_loss']}%, target {r['target'] or 'none'}"
+                  f"%, skip weakest {r['skip_quantile']:.0%} of days -> Rs "
+                  f"{rep['day_profit_recent']:+.0f}/day recently, Rs {rep['day_profit_before']:+.0f}"
+                  f"/day before" + (" (new)" if rep["adopted"] else " (kept)"), flush=True)
+    out = T.replay_training(ctx, d, conn)
+    for target in MI.TARGETS:
+        r = out.get(target.horizon)
+        if r:
+            print(f"Historical replay ({target.label}): " + " -> ".join(
+                f"round {x['round']}: Rs {x['avg_day_pnl']:+.0f}/day, {x['accuracy']:.0%} right"
+                for x in r["rounds"]) + (" -> learning kept" if r["adopted"] else
+                                         " -> not used"), flush=True)
+            if r["adopted"]:
+                T.retrain_intraday(ctx, d, conn, force=True, target=target)
+    cmp = T.compare_exits(ctx, d)
+    if cmp:
+        a, b = cmp[MI.TRADE.horizon], cmp[MI.CLOSE.horizon]
+        print(f"Exit comparison: 12:30 Rs {a['avg_day_pnl']:+.0f}/day, close Rs "
+              f"{b['avg_day_pnl']:+.0f}/day", flush=True)
+    return conn
+
+
+def _export_history(conn, folder: Path, keep: int = 5000) -> None:
+    """Append this run's replay and paper-check results to the published CSVs (dashboard)."""
+    import pandas as pd
+
+    folder.mkdir(parents=True, exist_ok=True)
+    for table in ("replay_runs", "tune_checks"):
+        new = pd.read_sql(f"SELECT * FROM {table}", conn).drop(columns="id")
+        path = folder / f"{table}.csv"
+        old = pd.read_csv(path) if path.exists() else new.iloc[:0]
+        pd.concat([old, new], ignore_index=True).tail(keep).to_csv(path, index=False)
 
 
 def cmd_schedule(settings, args) -> None:
