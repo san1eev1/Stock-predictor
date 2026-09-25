@@ -37,6 +37,10 @@ def _axis():
     return dict(gridOpacity=0.35, domainOpacity=0.4, tickOpacity=0.4, labelFontSize=11)
 
 
+def _field(name: str) -> str:
+    return str(name).replace(":", "\\:").replace(".", "\\.")
+
+
 def lines(df: pd.DataFrame, x: str, y: str, series: str, y_format: str = ",.0f",
           y_title: str = "") -> alt.Chart:
     """Multi-series line chart with a hover crosshair and a legend."""
@@ -53,7 +57,8 @@ def lines(df: pd.DataFrame, x: str, y: str, series: str, y_format: str = ",.0f",
     rule = base.mark_rule(opacity=0.4).encode(
         opacity=alt.condition(hover, alt.value(0.4), alt.value(0)),
         tooltip=[alt.Tooltip(f"{x}:T", title="Date")]
-        + [alt.Tooltip(f"{n}:Q", format=y_format) for n in names],
+        # series names may contain ':' ("Intraday 12:30"), which Altair reads as a type
+        + [alt.Tooltip(f"{_field(n)}:Q", title=n, format=y_format) for n in names],
     ).transform_pivot(series, value=y, groupby=[x]).add_params(hover)
     points = line.mark_point(size=60, filled=True).encode(
         opacity=alt.condition(hover, alt.value(1), alt.value(0)))
