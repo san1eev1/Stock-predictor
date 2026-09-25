@@ -67,7 +67,15 @@ def todays_features(ctx: E.MarketContext, first30: dict[str, dict], today: pd.Ti
     hist = hist[hist["date"] >= today - pd.Timedelta(days=HISTORY_DAYS * 1.6)]
     rows = [{"symbol": s, "date": today, **v, "source": "live"} for s, v in first30.items()]
     summ = pd.concat([hist[hist["date"] < today], pd.DataFrame(rows)], ignore_index=True)
-    feats = FI.build_for(summ, ctx, store_dir, daily=ctx.daily[ctx.daily["date"] < today])
+    try:                           # today's pre-open auction (NSE shows the current day)
+        from stockpredictor.data import preopen
+
+        live_po = preopen.fetch()
+        live_po = live_po[live_po["date"] == today]
+    except Exception:
+        live_po = None
+    feats = FI.build_for(summ, ctx, store_dir, daily=ctx.daily[ctx.daily["date"] < today],
+                         live_preopen=live_po)
     return feats[feats["date"] == today]
 
 

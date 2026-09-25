@@ -238,6 +238,14 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
         from stockpredictor.data.earnings import add_features as earnings_features
 
         feats = earnings_features(feats, earnings)
+        # How the market took the latest results (stock vs Nifty on the reaction day):
+        # prices tend to keep drifting the same way for weeks (post-results drift). A
+        # point-in-time stand-in for results surprises; used for one quarter.
+        feats = feats.sort_values(["symbol", "date"])
+        abn = (feats["_ret1"] - feats["nifty_ret_1"]).where(feats["results_today"] == 1)
+        feats["results_reaction"] = abn.groupby(feats["symbol"]).ffill().where(
+            feats["days_since_results"] <= 63)
+        feats = feats.sort_index()
 
     ranks = feats.groupby("date")[RANKED].rank(pct=True).add_suffix("_rank")
     feats = pd.concat([feats, ranks], axis=1)

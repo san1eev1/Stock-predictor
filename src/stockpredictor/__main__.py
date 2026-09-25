@@ -104,6 +104,16 @@ def cmd_earnings_update(settings, args) -> None:
     print(f"Results dates: {n} announcements stored")
 
 
+def cmd_preopen_update(settings, args) -> None:
+    """Today's NSE pre-open auction -> preopen/<year>.csv in the git store."""
+    from stockpredictor import store
+    from stockpredictor.data import preopen
+
+    d = Path(args.dir)
+    n = preopen.update(d, set(store.load_universe(d)["symbol"]))
+    print(f"Pre-open auction: {n} stocks saved")
+
+
 def _delivery_args(p) -> None:
     _dir_arg(p)
     p.add_argument("--start", default="2005-01-01", help="Oldest day to download")
@@ -964,6 +974,7 @@ ARG_COMMANDS = {
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
+    "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
 }
 
 COMMANDS = {

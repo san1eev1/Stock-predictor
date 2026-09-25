@@ -15,16 +15,17 @@ from stockpredictor.data import intraday as I
 DAILY_CONTEXT = ["ret_5", "ret_21", "ret_63", "rsi_14", "dist_ma50", "dist_ma200",
                  "dist_52w_high", "vol_21", "bb_pctb", "vol_ratio_20_120", "beta_252",
                  "mkt_ret_63", "mkt_vol_21", "vix", "vix_pct_252", "wk_streak",
-                 "deliv_pct_20", "deliv_pct_rel",
+                 "deliv_pct_20", "deliv_pct_rel", "results_reaction",
                  # overnight cues: the previous day's row holds the last close before 9:15
                  "g_sp500_ret1_asof", "g_nasdaq_ret1_asof", "g_usvix_ret1_asof",
                  "g_nikkei_ret1_asof", "g_hangseng_ret1_asof", "g_usdinr_ret5_asof",
                  "g_crude_ret5_asof"]
 RANKED = ["gap", "r30", "rel_r30", "vwap_dev", "vol30_adv", "pos30", "ret_5"]
 PRICE_COLS = ["open", "h30", "l30", "c30", "vwap30", "high_after", "low_after", "px_1515", "close",
-              I.EXIT_COL]
+              I.EXIT_COL, "iep"]
 EXCLUDE = {"symbol", "date", "source", "target", "target_ret", "prev_date", "prev_close", "adv20",
            "target_trade", "trade_long_ret", "trade_short_ret", "industry",
+           "po_qty", "buy_qty", "sell_qty",
            "fb_weight",
            *PRICE_COLS,
            "v30", *I.LEVEL_COLS}
@@ -111,6 +112,9 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
                       allow_exact_matches=False)
     s = s.dropna(subset=["prev_close"])
 
+    from stockpredictor.data.preopen import add_features as preopen_features
+
+    s = preopen_features(s)                   # pre-open auction (empty until collected)
     s["gap"] = s["open"] / s["prev_close"] - 1
     s["r30"] = s["c30"] / s["open"] - 1
     s["r_prev"] = s["c30"] / s["prev_close"] - 1
@@ -171,14 +175,16 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
 
 
 def build_for(summ: pd.DataFrame, ctx, store_dir, exit_col: str = I.EXIT_COL,
-              daily: pd.DataFrame | None = None) -> pd.DataFrame:
+              daily: pd.DataFrame | None = None,
+              live_preopen: pd.DataFrame | None = None) -> pd.DataFrame:
     """`build` with everything from the market context and data store (corporate actions,
     sectors, results dates) - the one way training and live picks build features."""
     from stockpredictor import store
     from stockpredictor.data import earnings as ER
-    from stockpredictor.data import fine
+    from stockpredictor.data import fine, preopen
 
-    return build(fine.attach(summ), ctx.daily if daily is None else daily, ctx.feats,
+    summ = preopen.attach(fine.attach(summ), store_dir, live_preopen)
+    return build(summ, ctx.daily if daily is None else daily, ctx.feats,
                  store.load_actions(store_dir), exit_col=exit_col,
                  sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])),
                  earnings=ER.load(store_dir))
