@@ -40,6 +40,8 @@ def fast_tuning(monkeypatch):
     """Tuning rounds train many models; tests only check when they run."""
     calls = []
     monkeypatch.setattr(MON.Monitor, "_tune_round", lambda self, now, n, label: calls.append(label))
+    monkeypatch.setattr(MON.store, "sync_models", lambda: None)       # no GitHub in tests
+    monkeypatch.setattr(MON.store, "push_feedback", lambda judged: None)
     return calls
 
 def test_intraday_day_cycle(tmp_path, monkeypatch):

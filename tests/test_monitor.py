@@ -30,6 +30,8 @@ def fast_tuning(monkeypatch):
     """Tuning rounds train many models; tests only check when they run."""
     calls = []
     monkeypatch.setattr(MON.Monitor, "_tune_round", lambda self, now, n, label: calls.append(label))
+    monkeypatch.setattr(MON.store, "sync_models", lambda: None)       # no GitHub in tests
+    monkeypatch.setattr(MON.store, "push_feedback", lambda judged: None)
     return calls
 
 def make(tmp_path, ctx, model, prices, when):
@@ -175,3 +177,31 @@ def test_idle_tuning_hourly_only_when_market_closed(tmp_path, ctx_model, fast_tu
     assert mon.idle_tune(clock["now"]) is True
     assert fast_tuning == ["background", "background"]
     assert mon.market_idle(ist(2026, 9, 26, 3, 0))            # Saturday night
+
+
+class _FakeBackground:
+    def __init__(self):
+        import threading
+        self.model_changed = threading.Event()
+        self.days = []
+
+    def learn_from_today(self, day):
+        self.days.append(day)
+
+
+def test_live_learning_after_square_off(tmp_path, ctx_model, fast_tuning, monkeypatch):
+    ctx, model = ctx_model
+    monkeypatch.setattr(MON.Monitor, "weekly_retrain", lambda self, now: False)
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 25, 15, 10))
+    mon.background = bg = _FakeBackground()
+    mon._imodel = "old"
+    mon._last_quarter = clock["now"]                            # 15-minute job not due
+    assert "live-learn" not in mon.tick()
+    clock["now"] = ist(2026, 9, 25, 15, 17)
+    assert "live-learn" in mon.tick() and bg.days == [clock["now"].date()]
+    assert "live-learn" not in mon.tick()                       # once per day
+    bg.model_changed.set()
+    mon.tick()
+    assert mon._imodel is None and not bg.model_changed.is_set()  # improved model reloaded
+    clock["now"] = ist(2026, 9, 26, 3, 0)                        # background thread tunes,
+    assert "tune" not in mon.tick() and fast_tuning == []        # so the monitor doesn't

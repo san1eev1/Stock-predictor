@@ -5,6 +5,7 @@
 /data/*
 !/data/.gitkeep
 /models/
+/trained-models/
 /logs/
 # Python
 __pycache__/

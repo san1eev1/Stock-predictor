@@ -23,6 +23,7 @@ RSS_URL = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 NEWS_COLS = ["symbol", "published", "source", "title", "url", "sentiment"]
 STRONG_NEGATIVE = -0.6      # a headline this negative counts as "bad news"
+RELEVANT = 0.8              # ... if its learned relevance is at least this (1.0 = average)
 MIN_BAD_HEADLINES = 2       # a flag needs a cluster of bad news within 3 days ...
 MAX_MEAN_3D = -0.3          # ... and a negative average tone
 SEVERE_BAD_HEADLINES = 3    # "severe" (enough to sell a holding) needs more evidence
@@ -32,6 +33,21 @@ PRICE_MOVE = re.compile(
     r"(?:share|stock|price)s?\b.*\b(?:fall|fell|drop|declin|slip|slump|down|tumbl|plung|los|"
     r"crash|sink|sank|tank)|top (?:loser|gainer)|\b(?:sensex|nifty)\b|52[- ]?w(?:ee)?k|trades? flat|"
     r"price target|target (?:price|cut)|stock (?:price|analysis)", re.I)
+
+# Tips and recommendations, not news: we don't copy other people's buy/sell calls, the
+# model makes its own. Dropped when fetching and ignored in stored files.
+TIPS = re.compile(
+    r"stocks? to (?:buy|sell|watch|trade|add|avoid|bet on)|stocks? in focus|shares in focus|"
+    r"buy or sell|should you (?:buy|sell|hold|invest)|top (?:stock )?picks?|stock picks|"
+    r"trading (?:ideas|calls|setup)|technical picks|\b\d+ (?:\w+ )?picks\b|multibagger|"
+    r"^(?:buy|sell|accumulate|reduce|hold|add|neutral)\b.*\btarget|"
+    r"\b(?:buy|sell|accumulate|reduce|hold|add)\b[^:]*;\s*target|"
+    r"target (?:price|of rs)|price target|(?:raise|cut|hike)s? target|"
+    r"(?:buy|sell|hold|outperform|underperform|overweight|underweight|neutral) rating|"
+    r"(?:upgrade|downgrade)s?\b|brokerages? (?:see|bullish|bearish|recommend)|recommend|"
+    r"(?:price|share) (?:forecast|prediction)|outlook to 20\d\d|"
+    r"is (?:important|attractive) to you|presents an opportunity|"
+    r"top (?:gainers?|losers?)|gainers (?:and|&) losers", re.I)
 
 _SUFFIXES = re.compile(r"\b(ltd|limited|corporation|corp|inc)\b\.?", re.I)
 # Headlines about foreign-listed namesakes (e.g. Cummins Inc on NYSE vs Cummins India).
@@ -53,7 +69,7 @@ def parse_rss(xml_text: str, symbol: str) -> list[dict]:
         if source and title.endswith(f" - {source}"):
             title = title[: -len(source) - 3].strip()
         pub = item.findtext("pubDate")
-        if not title or not pub or FOREIGN.search(title):
+        if not title or not pub or FOREIGN.search(title) or TIPS.search(title):
             continue
         items.append({
             "symbol": symbol,
@@ -93,7 +109,7 @@ def load_news(store_dir: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=NEWS_COLS)
     df = pd.concat((pd.read_csv(f) for f in files), ignore_index=True)
     df["published"] = pd.to_datetime(df["published"], utc=True)
-    return df
+    return df[~df["title"].astype(str).str.contains(TIPS)].reset_index(drop=True)
 
 
 def append_news(store_dir: Path, rows: list[dict]) -> pd.DataFrame:
@@ -144,15 +160,21 @@ def news_summary(news: pd.DataFrame, asof: pd.Timestamp) -> pd.DataFrame:
     asof = pd.Timestamp(asof)
     asof = asof.tz_localize("UTC") if asof.tzinfo is None else asof.tz_convert("UTC")
     recent = news[(news["published"] <= asof)
-                  & (news["published"] > asof - pd.Timedelta(days=7))]
+                  & (news["published"] > asof - pd.Timedelta(days=7))].copy()
+    # Learned relevance (nlp/relevance.py): headlines that historically came with real moves
+    # in their stock count more; lists, namesakes and noise count less.
+    recent["w"] = recent["relevance"] if "relevance" in recent else 1.0
+    recent = recent[recent["sentiment"].notna()]
     last3 = recent[recent["published"] > asof - pd.Timedelta(days=3)]
-    g7, g3 = recent.groupby("symbol")["sentiment"], last3.groupby("symbol")["sentiment"]
+    g7, g3 = recent.groupby("symbol"), last3.groupby("symbol")["sentiment"]
     out = pd.DataFrame({
         "news_count_7d": g7.size(),
-        "sent_mean_7d": g7.mean(),
+        "sent_mean_7d": g7.apply(lambda x: (x["sentiment"] * x["w"]).sum() / x["w"].sum()
+                                 if x["w"].sum() > 0 else x["sentiment"].mean()),
         "sent_min_3d": g3.min(),
     })
-    events = last3[~last3["title"].str.contains(PRICE_MOVE) & ~last3["title"].str.contains(FOREIGN)]
+    events = last3[~last3["title"].str.contains(PRICE_MOVE) & ~last3["title"].str.contains(FOREIGN)
+                   & (last3["w"] >= RELEVANT)]
     ge = events.groupby("symbol")["sentiment"]
     out["bad_news_3d"] = ge.apply(lambda x: int((x <= STRONG_NEGATIVE).sum()))
     out["bad_news_3d"] = out["bad_news_3d"].fillna(0).astype(int)

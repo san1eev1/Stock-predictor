@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from stockpredictor import db, store
+from stockpredictor import config, db, store
 from stockpredictor.app import charts as C
 from stockpredictor.config import load_settings
 from stockpredictor.data import fundamentals as FUND
@@ -17,6 +17,7 @@ from stockpredictor.data import news as N
 from stockpredictor.features.labels import reason_text
 from stockpredictor.live.prices import in_market_hours, now_ist
 from stockpredictor.models import longterm as M
+from stockpredictor.models import trainer as T
 from stockpredictor.paper import daily as D
 from stockpredictor.backtest import intraday as BI
 from stockpredictor.models import intraday as MI
@@ -745,9 +746,16 @@ def page_model():
     path = M.MODEL_DIR / "meta.json"
     if path.exists():
         meta = json.loads(path.read_text())
-        st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on every week whose "
-                   f"1-week outcome is known (up to {meta['train_to']}); today's picks use "
-                   "today's data. Retrains daily, self-tunes weekly.")
+        st.caption(f"Trained {meta['trained_at'][:16].replace('T', ' ')} on every week since "
+                   f"2005 whose 1-week outcome is known (up to {meta['train_to']}); today's picks "
+                   "use today's data.")
+        status = M.MODEL_DIR.parent / "status.json"
+        if config.CLOUD_TRAINING and status.exists():
+            s_ = json.loads(status.read_text())
+            st.info(f"☁️ Trained on GitHub every hour on all history (data to {s_['data_to']}). "
+                    f"Last run {s_['updated'][:16].replace('T', ' ')} UTC: {s_['tuning_rounds']} "
+                    f"self-tuning rounds, {s_['adopted']} improvement(s) adopted. "
+                    "The Mac downloads new models automatically.")
         model = M.LongTermModel.load(M.MODEL_DIR)
         from stockpredictor.features.labels import label
         imp = model.importance().head(15)
@@ -757,7 +765,7 @@ def page_model():
         st.altair_chart(C.hbars(imp, "feature", "share", ".0%"), width="stretch")
     else:
         st.info("No model trained yet.")
-    if st.button("Retrain now") and not need_data():
+    if not config.CLOUD_TRAINING and st.button("Retrain now") and not need_data():
         from stockpredictor.features import longterm as F
         with st.spinner("Training…"):
             m = ctx()
@@ -810,8 +818,7 @@ def page_model():
 def training_history():
     """Continuous-training log: every retrain and weekly self-tuning result."""
     c = conn()
-    runs = pd.read_sql("SELECT horizon, version, train_from AS kind, train_to, metrics "
-                       "FROM model_runs ORDER BY id", c)
+    runs = T.load_runs(c)
     st.divider()
     st.header("Continuous training")
     st.caption("Models retrain after every close on all history plus judged paper-trading "

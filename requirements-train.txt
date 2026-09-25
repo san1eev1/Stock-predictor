@@ -1,0 +1,6 @@
+# Minimal dependencies for training on GitHub Actions (see .github/workflows/train-models.yml)
+python-dotenv>=1.0
+requests>=2.31
+pandas>=2.1
+numpy>=1.26
+lightgbm>=4.3

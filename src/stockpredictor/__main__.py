@@ -270,7 +270,7 @@ def cmd_daily(settings, args) -> None:
 def cmd_run(settings, args) -> None:
     import logging
 
-    from stockpredictor.live import monitor, prices
+    from stockpredictor.live import background, monitor, prices
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     db.init_db(settings.db_path)
@@ -278,6 +278,8 @@ def cmd_run(settings, args) -> None:
     mon = monitor.Monitor(conn, Path(args.dir), prices.LivePrices(settings),
                           settings.paper_capital_longterm,
                           capital_intraday=settings.paper_capital_intraday)
+    mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
+    mon.background.start()
     try:
         monitor.run_forever(mon)
     except KeyboardInterrupt:
@@ -299,6 +301,65 @@ def cmd_auto(settings, args) -> None:
                               capital_intraday=settings.paper_capital_intraday)
         done = mon.scheduled_run(mon.clock())
     print(f"{datetime.now():%Y-%m-%d %H:%M} auto: {', '.join(done) or 'nothing to do'}", flush=True)
+
+
+def cmd_cloud_train(settings, args) -> None:
+    """GitHub Actions: retrain the long-term and news models on all history (2005 onwards),
+    then keep self-tuning until the time budget is used. Output goes to trained-models/,
+    which the workflow publishes to the `models` branch for the Mac to download."""
+    import json
+    import time
+    from datetime import datetime
+
+    from stockpredictor import store
+    from stockpredictor.backtest import run as bt
+    from stockpredictor.config import SHARED_MODELS_DIR
+    from stockpredictor.models import longterm as M
+    from stockpredictor.models import trainer as T
+    from stockpredictor.nlp import relevance as R
+    from stockpredictor.paper.engine import MarketContext
+
+    started = time.monotonic()
+    budget = args.minutes * 60
+    d = Path(args.dir)
+    T.RUN_LOG = SHARED_MODELS_DIR / "runs.jsonl"
+    if args.feedback:
+        T.FEEDBACK = store.load_feedback(Path(args.feedback))
+    print(f"Paper feedback: {0 if T.FEEDBACK is None else len(T.FEEDBACK)} judged predictions",
+          flush=True)
+    ctx = MarketContext.load(d)
+    print(f"Data: {ctx.daily['symbol'].nunique()} stocks, {len(ctx.daily):,} daily rows, "
+          f"{ctx.daily['date'].min():%Y-%m-%d} to {ctx.daily['date'].max():%Y-%m-%d}", flush=True)
+
+    model = T.retrain_longterm(ctx, None, force=True)
+    print(f"Long-term model retrained on outcomes up to {model.train_to}", flush=True)
+    news = R.train(ctx.news, ctx.universe, ctx.daily, ctx.indices)
+    print("News relevance: " + (f"{news['headlines']} headlines, out-of-sample corr "
+                                f"{news['test_corr']:.3f} (tone only {news['baseline_sentiment_corr']:.3f})"
+                                if news else "not enough headlines yet"), flush=True)
+
+    bt_path = M.MODEL_DIR / "backtest.json"
+    if not bt_path.exists() or time.time() - bt_path.stat().st_mtime > 7 * 86400 or args.backtest:
+        report = bt.run(d, capital=settings.paper_capital_longterm)
+        bt.save(report, bt_path)
+        print("Backtest refreshed", flush=True)
+
+    rounds = adopted = 0
+    while time.monotonic() - started < budget:
+        r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False)
+        rounds += 1
+        adopted += int(r["adopted"])
+        print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f})"
+              + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
+
+    if T.RUN_LOG.exists():   # keep the log small
+        lines = T.RUN_LOG.read_text().splitlines()[-2000:]
+        T.RUN_LOG.write_text("\n".join(lines) + "\n")
+    status = {"updated": datetime.now().isoformat(timespec="seconds"),
+              "data_to": f"{ctx.daily['date'].max():%Y-%m-%d}", "tuning_rounds": rounds,
+              "adopted": adopted, "minutes": round((time.monotonic() - started) / 60, 1)}
+    (SHARED_MODELS_DIR / "status.json").write_text(json.dumps(status, indent=1))
+    print(json.dumps(status), flush=True)
 
 
 def cmd_schedule(settings, args) -> None:
@@ -407,7 +468,7 @@ def cmd_start(settings, args) -> None:
     import time
     import webbrowser
 
-    from stockpredictor.live import monitor, prices
+    from stockpredictor.live import background, monitor, prices
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     db.init_db(settings.db_path)
@@ -428,6 +489,8 @@ def cmd_start(settings, args) -> None:
     if args.until:
         from datetime import time as _t
         until = _t(*map(int, args.until.split(":")))
+    mon.background = background.BackgroundTrainer(settings.db_path, Path(args.dir), settings)
+    mon.background.start()
     try:
         monitor.run_forever(mon, until=until)
     except KeyboardInterrupt:
@@ -546,6 +609,14 @@ def _improve_args(p):
     p.add_argument("--no-sync", action="store_true")
 
 
+def _cloud_train_args(p):
+    _dir_arg(p)
+    p.add_argument("--minutes", type=float, default=40, help="Total time budget incl. tuning")
+    p.add_argument("--candidates", type=int, default=3, help="New settings per tuning round")
+    p.add_argument("--feedback", help="Folder with longterm_judged.csv (paper-feedback branch)")
+    p.add_argument("--backtest", action="store_true", help="Refresh the backtest now")
+
+
 def _schedule_args(p):
     p.add_argument("action", choices=["install", "remove", "status"], nargs="?", default="status")
 
@@ -651,6 +722,8 @@ ARG_COMMANDS = {
                 _improve_args),
     "auto": (cmd_auto, "One background pass: after-close decision, retrain, weekend tuning",
              _dir_arg),
+    "cloud-train": (cmd_cloud_train, "GitHub Actions: train on all history and self-tune",
+                    _cloud_train_args),
     "schedule": (cmd_schedule, "Install/remove the daily background training job (macOS)",
                  _schedule_args),
     "train-intraday": (cmd_train_intraday, "Train the intraday model", _dir_arg),

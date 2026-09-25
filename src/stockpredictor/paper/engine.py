@@ -51,8 +51,10 @@ class MarketContext:
 
         daily, indices = store.load_daily(store_dir), store.load_indices(store_dir)
         universe = store.load_universe(store_dir)
+        from stockpredictor.nlp import relevance as R
+
         return cls(daily, indices, universe, cached_features(store_dir, daily, indices, universe),
-                   N.load_news(store_dir))
+                   R.add_relevance(N.load_news(store_dir), universe))
 
     def closes_on(self, date: pd.Timestamp) -> dict[str, float]:
         d = self.daily[self.daily["date"] <= date]

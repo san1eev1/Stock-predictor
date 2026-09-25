@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -10,12 +11,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from stockpredictor.config import PROJECT_ROOT
+from stockpredictor.config import LOCAL_MODELS_DIR
 from stockpredictor.features import intraday as FI
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
-MODEL_DIR = PROJECT_ROOT / "models" / "intraday"
+MODEL_DIR = LOCAL_MODELS_DIR / "intraday"     # trained on the Mac (Angel One data)
+# Held while model files are written or read (background training runs in another thread).
+MODEL_LOCK = threading.RLock()
 MIN_TRAIN_DAYS = 40
 NUM_ROUNDS = 300
 PARAMS = dict(
@@ -73,18 +76,21 @@ class IntradayModel:
         return pd.Series(imp, index=self.features).sort_values(ascending=False)
 
     def save(self, path: Path = MODEL_DIR) -> None:
-        path.mkdir(parents=True, exist_ok=True)
-        self.model.save(path)
-        (path / "meta.json").write_text(json.dumps({
-            "features": self.features, "trained_at": self.trained_at, "train_to": self.train_to,
-            "train_days": self.train_days, "metrics": self.metrics}, indent=2))
+        with MODEL_LOCK:
+            path.mkdir(parents=True, exist_ok=True)
+            self.model.save(path)
+            (path / "meta.json").write_text(json.dumps({
+                "features": self.features, "trained_at": self.trained_at,
+                "train_to": self.train_to, "train_days": self.train_days,
+                "metrics": self.metrics}, indent=2))
 
     @classmethod
     def load(cls, path: Path = MODEL_DIR) -> "IntradayModel":
-        meta = json.loads((path / "meta.json").read_text())
-        return cls(Ensemble.load(path),
-                   meta["features"], meta["trained_at"], meta["train_to"],
-                   meta.get("train_days", 0), meta.get("metrics", {}))
+        with MODEL_LOCK:
+            meta = json.loads((path / "meta.json").read_text())
+            return cls(Ensemble.load(path),
+                       meta["features"], meta["trained_at"], meta["train_to"],
+                       meta.get("train_days", 0), meta.get("metrics", {}))
 
 
 def walk_forward(feats: pd.DataFrame, min_train_days: int = MIN_TRAIN_DAYS,

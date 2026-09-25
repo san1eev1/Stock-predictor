@@ -1,0 +1,70 @@
+# Trains the long-term and news models on all history (2005 onwards) and keeps self-tuning.
+# Runs free on GitHub Actions and publishes the trained models (~1 MB) to the `models`
+# branch; the Mac only downloads them, so the full history never has to live on the Mac.
+name: Train models
+
+on:
+  schedule:
+    - cron: "5 * * * *"       # every hour: retrain on the newest data, then self-tune
+                              # (~45 min per run, so training on history is near-continuous)
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Time budget in minutes (retrain + self-tuning)"
+        default: "45"
+      backtest:
+        description: "Refresh the long-term backtest now"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-models
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements-train.txt && pip install -e . --no-deps
+
+      - name: Get market data, current models and paper feedback
+        run: |
+          url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git clone -q --depth 1 --branch market-data "$url" market-data
+          git clone -q --depth 1 --branch models "$url" trained-models || mkdir -p trained-models
+          git clone -q --depth 1 --branch paper-feedback "$url" feedback || mkdir -p feedback
+
+      - name: Train and self-tune
+        run: |
+          python -m stockpredictor cloud-train --dir market-data --feedback feedback \
+            --minutes "${{ inputs.minutes || '45' }}" ${{ inputs.backtest && '--backtest' || '' }}
+
+      - name: Publish models
+        working-directory: trained-models
+        run: |
+          # One commit, force-pushed: the branch never grows a history.
+          rm -rf .git
+          git init -q -b models
+          git config user.name "models-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Models $(date -u +%Y-%m-%dT%H:%MZ)"
+          url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          for i in 1 2 3 4; do
+            git push -q --force "$url" HEAD:models && exit 0
+            sleep $((i * i * 5))
+          done
+          exit 1

@@ -20,9 +20,9 @@ from stockpredictor.features import technical
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
-from stockpredictor.config import PROJECT_ROOT
+from stockpredictor.config import SHARED_MODELS_DIR
 
-MODEL_DIR = PROJECT_ROOT / "models" / "longterm"
+MODEL_DIR = SHARED_MODELS_DIR / "longterm"   # trained on GitHub (see config.py)
 HORIZON = 5             # trading days: predict the next week
 EMBARGO_DAYS = 14       # calendar days between train labels and test start (> horizon)
 MIN_TRAIN_ROWS = 5000

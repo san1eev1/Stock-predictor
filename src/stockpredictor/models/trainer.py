@@ -13,6 +13,7 @@ import json
 import random
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -42,8 +43,21 @@ FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
 MARGIN = 0.01
 
 
+# Set by cloud training: runs are also appended to this JSON-lines file (published with the
+# models), so the dashboard on the Mac can show the cloud's training history.
+RUN_LOG: Path | None = None
+# Set by cloud training: judged paper predictions from the paper-feedback branch.
+FEEDBACK: pd.DataFrame | None = None
+
+
 def log_run(conn: sqlite3.Connection | None, horizon: str, kind: str, train_to: str,
             metrics: dict) -> None:
+    if RUN_LOG is not None:
+        RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(RUN_LOG, "a") as f:
+            f.write(json.dumps({"horizon": horizon, "version": datetime.now().isoformat(
+                timespec="seconds"), "kind": kind, "train_to": train_to,
+                "metrics": metrics}, default=float) + "\n")
     if conn is None:
         return
     conn.execute("INSERT INTO model_runs (horizon, version, train_from, train_to, metrics) "
@@ -86,10 +100,12 @@ def longterm_labeled(ctx) -> pd.DataFrame:
 def paper_feedback(ctx, conn, labeled: pd.DataFrame) -> pd.DataFrame:
     """Add the judged paper-trading predictions to the training data with extra weight
     (more for the ones it got wrong), so the model concentrates on its own decisions."""
-    if conn is None:
+    if FEEDBACK is not None:
+        judged = FEEDBACK.copy()
+    elif conn is None:
         return labeled
-    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
-                         "AND correct IS NOT NULL AND horizon_days = ?", conn, params=(M.HORIZON,))
+    else:
+        judged = judged_predictions(conn)
     if judged.empty:
         return labeled
     judged["date"] = pd.to_datetime(judged["date"])
@@ -102,6 +118,25 @@ def paper_feedback(ctx, conn, labeled: pd.DataFrame) -> pd.DataFrame:
     key = set(zip(rows["symbol"], rows["date"]))
     rest = labeled[[k not in key for k in zip(labeled["symbol"], labeled["date"])]]
     return pd.concat([rest, rows.drop(columns="correct")], ignore_index=True)
+
+
+def judged_predictions(conn) -> pd.DataFrame:
+    return pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
+                       "AND correct IS NOT NULL AND horizon_days = ?", conn, params=(M.HORIZON,))
+
+
+def load_runs(conn, run_log: Path | None = None) -> pd.DataFrame:
+    """Training history: local runs (database) plus cloud runs (runs.jsonl from GitHub)."""
+    runs = pd.read_sql("SELECT horizon, version, train_from AS kind, train_to, metrics "
+                       "FROM model_runs ORDER BY id", conn)
+    path = run_log or (M.MODEL_DIR.parent / "runs.jsonl")
+    if path.exists():
+        cloud = pd.read_json(path, lines=True, dtype=False)
+        if not cloud.empty:
+            cloud["metrics"] = cloud["metrics"].map(lambda m: json.dumps(m, default=float))
+            runs = pd.concat([runs, cloud[["horizon", "version", "kind", "train_to", "metrics"]]],
+                             ignore_index=True).sort_values("version", kind="stable")
+    return runs.reset_index(drop=True)
 
 
 def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> dict:
@@ -136,7 +171,7 @@ def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | N
 
 
 def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
-                  seed: int | None = None, check_years: int = 6) -> dict:
+                  seed: int | None = None, check_years: int = 6, log_all: bool = True) -> dict:
     """Try variations of the current settings on history (walk-forward). A winner must beat
     the current settings over the last `years` AND not be worse over `check_years`, so a
     setting that only fits one period by luck is not adopted."""
@@ -164,7 +199,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
               "top10_excess": chosen["top10_excess"], "previous_ic": base["ic"],
               "tested": len(results), "params": chosen["params"], "all": results,
               "long_check": check}
-    log_run(conn, "longterm", "tune", f"{labeled['date'].max():%Y-%m-%d}", report)
+    if log_all or adopted:     # continuous rounds only log the ones that changed something
+        log_run(conn, "longterm", "tune", f"{labeled['date'].max():%Y-%m-%d}", report)
     if adopted:
         retrain_longterm(ctx, conn, force=True)
     return report
@@ -240,7 +276,8 @@ def retrain_intraday(ctx, store_dir, conn=None, force: bool = False) -> MI.Intra
 
 
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
-                  seed: int | None = None, check_days: int = 250) -> dict | None:
+                  seed: int | None = None, check_days: int = 250,
+                  log_all: bool = True) -> dict | None:
     """Like tune_longterm: must win on the last 120 days and not lose on the last `check_days`."""
     feats = intraday_feats(ctx, store_dir)
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS + 10:
@@ -268,7 +305,8 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
               "all": results, "long_check": check}
-    log_run(conn, "intraday", "tune", f"{feats['date'].max():%Y-%m-%d}", report)
+    if log_all or adopted:
+        log_run(conn, "intraday", "tune", f"{feats['date'].max():%Y-%m-%d}", report)
     if adopted:
         MI.IntradayModel.train(feats).save()
     return report

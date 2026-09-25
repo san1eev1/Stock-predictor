@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stockpredictor import store
+from stockpredictor import config, store
 from stockpredictor.data import news as N
 from stockpredictor.features import longterm as F
 from stockpredictor.live.prices import IST, LivePrices, in_market_hours, now_ist
@@ -38,6 +38,7 @@ LOCAL_FETCH_AFTER = time(17, 45)   # fetch prices ourselves if GitHub hasn't by 
 INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
 INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) until 14:30
 INTRADAY_SQUARE_OFF = time(15, 15)
+LIVE_LEARN = time(15, 17)         # 15:15 bar is complete: learn from today's live session
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -76,6 +77,8 @@ class Monitor:
         self._last_quarter: datetime | None = None
         self._live_day: tuple | None = None   # (date, is_trading_day)
         self._imodel: MI.IntradayModel | None = None
+        self._models_rev: str | None = None      # commit of the cloud-trained models in use
+        self.background = None                   # live/background.py BackgroundTrainer
         self._started = False
         self._last_pick_try: datetime | None = None
         self.capital_intraday = capital_intraday
@@ -121,6 +124,9 @@ class Monitor:
         now = self.clock()
         done = []
         _set(self.conn, "monitor_heartbeat", now.isoformat(timespec="seconds"))
+        if self.background is not None and self.background.model_changed.is_set():
+            self.background.model_changed.clear()
+            self._imodel = None                  # background training improved it: reload
         if not self._started:
             self._started = True
             self.startup_job(now)
@@ -136,6 +142,11 @@ class Monitor:
             if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
                 self.square_off_job(now)
                 done.append("square-off")
+            if now.time() >= LIVE_LEARN and self.background is not None \
+                    and _setting(self.conn, "live_learn_day") != day:
+                _set(self.conn, "live_learn_day", day)
+                self.background.learn_from_today(now.date())
+                done.append("live-learn")
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
                 self.quarter_job(now)
                 self._last_quarter = now
@@ -149,7 +160,8 @@ class Monitor:
         elif now.weekday() >= 5:
             if self.weekly_retrain(now):
                 done.append("retrain")
-        if self.market_idle(now) and self.idle_tune(now):
+        # Without the background thread, tune in the monitor itself (only when idle).
+        if self.background is None and self.market_idle(now) and self.idle_tune(now):
             done.append("tune")
         return done
 
@@ -177,14 +189,16 @@ class Monitor:
     def _tune_round(self, now: datetime, n: int, label: str) -> None:
         try:
             ctx = self.ctx()
-            lt = T.tune_longterm(ctx, self.conn, n_candidates=n)
-            msg = f"long-term IC {lt['ic']:.3f}"
-            if lt["adopted"]:
-                self._model = None
-                alert(self.conn, "model", "info", None,
-                      f"{now:%Y-%m-%d %H:%M} {label} tuning improved long-term IC "
-                      f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
-                msg += " (improved - new settings adopted)"
+            msg = "long-term: trained on GitHub"
+            if not config.CLOUD_TRAINING:
+                lt = T.tune_longterm(ctx, self.conn, n_candidates=n)
+                msg = f"long-term IC {lt['ic']:.3f}"
+                if lt["adopted"]:
+                    self._model = None
+                    alert(self.conn, "model", "info", None,
+                          f"{now:%Y-%m-%d %H:%M} {label} tuning improved long-term IC "
+                          f"{lt['previous_ic']:.3f} -> {lt['ic']:.3f}")
+                    msg += " (improved - new settings adopted)"
             it = T.tune_intraday(ctx, self.store_dir, self.conn, n_candidates=n)
             if it:
                 msg += f", intraday IC {it['ic']:.3f}"
@@ -291,7 +305,7 @@ class Monitor:
                     and now.time() >= LOCAL_FETCH_AFTER or (now.date() - last_close).days > 3:
                 if self.local_catchup(now):
                     ctx = self.ctx(reload=True)
-            lt = T.retrain_longterm(ctx, self.conn)
+            lt = self.retrain_longterm(ctx)
             if lt is not None:
                 self._model = lt
                 log.info("Long-term model retrained on data up to %s", lt.train_to)
@@ -377,6 +391,7 @@ class Monitor:
             self._ctx = None
         except Exception as exc:
             log.warning("sync failed: %s", exc)
+        self.refresh_models()
         ctx = self.ctx()
         summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
         negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
@@ -455,7 +470,7 @@ class Monitor:
         self.angel_topup(now)
         # Keep learning: retrain on the newest data before today's decision.
         try:
-            lt = T.retrain_longterm(ctx, self.conn)
+            lt = self.retrain_longterm(ctx)
             if lt is not None:
                 self._model = lt
             it = T.retrain_intraday(ctx, self.store_dir, self.conn)
@@ -478,9 +493,51 @@ class Monitor:
             buys, sells = ", ".join(r["buys"]) or "none", ", ".join(s for s, _ in r["sells"]) or "none"
             alert(self.conn, "paper-longterm", "decision", None,
                   f"{r['date']:%Y-%m-%d} decision - buy: {buys}; sell: {sells}")
+        self.push_feedback()
         _set(self.conn, "lt_after_close_day", f"{now:%Y-%m-%d}")
         self.evening_tune(now)
         return True
+
+    # --- cloud training (GitHub Actions) ---------------------------------------------
+    def retrain_longterm(self, ctx) -> M.LongTermModel | None:
+        """On the Mac only when cloud training is off; otherwise fetch GitHub's newest model."""
+        if not config.CLOUD_TRAINING:
+            return T.retrain_longterm(ctx, self.conn)
+        self.refresh_models()
+        return None
+
+    def refresh_models(self) -> None:
+        """Download the newest long-term and news models trained on GitHub (if changed)."""
+        if not config.CLOUD_TRAINING:
+            return
+        try:
+            rev = store.sync_models()
+        except Exception as exc:
+            log.warning("could not download models from GitHub: %s", exc)
+            return
+        if rev and rev != self._models_rev:
+            if self._models_rev is not None:
+                log.info("New models from GitHub training (%s)", rev[:7])
+            self._models_rev = rev
+            self._model = None
+            self._ctx = None          # reload so the new news-relevance model is applied
+
+    def push_feedback(self) -> None:
+        """Send judged paper predictions to GitHub so cloud training keeps learning from them."""
+        if not config.CLOUD_TRAINING:
+            return
+        judged = T.judged_predictions(self.conn)
+        if judged.empty:
+            return
+        key = f"{len(judged)}:{judged['date'].max()}"
+        if _setting(self.conn, "feedback_pushed") == key:
+            return
+        try:
+            store.push_feedback(judged)
+            _set(self.conn, "feedback_pushed", key)
+            log.info("Sent %d judged paper predictions to GitHub for training", len(judged))
+        except Exception as exc:
+            log.warning("could not send paper feedback to GitHub: %s", exc)
 
     def evening_tune(self, now: datetime) -> None:
         """Keep training: a light self-tuning round every weekday evening (2 new settings
@@ -538,12 +595,13 @@ class Monitor:
             return False
         _set(self.conn, "last_tune", now.replace(tzinfo=None).isoformat(timespec="seconds"))
         ctx = self.ctx(reload=True)
-        lt = T.tune_longterm(ctx, self.conn)
-        self._model = None
-        msg = (f"{now:%Y-%m-%d} long-term tuning: prediction quality (IC) {lt['ic']:.3f}"
-               + (f", improved from {lt['previous_ic']:.3f} - new settings adopted"
-                  if lt["adopted"] else " - current settings kept"))
-        alert(self.conn, "model", "info", None, msg)
+        if not config.CLOUD_TRAINING:        # otherwise GitHub tunes the long-term model
+            lt = T.tune_longterm(ctx, self.conn)
+            self._model = None
+            msg = (f"{now:%Y-%m-%d} long-term tuning: prediction quality (IC) {lt['ic']:.3f}"
+                   + (f", improved from {lt['previous_ic']:.3f} - new settings adopted"
+                      if lt["adopted"] else " - current settings kept"))
+            alert(self.conn, "model", "info", None, msg)
         it = T.tune_intraday(ctx, self.store_dir, self.conn)
         self._imodel = None
         if it:

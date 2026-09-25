@@ -10,6 +10,18 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
+load_dotenv(PROJECT_ROOT / ".env")
+
+# Long-term and news models train on GitHub Actions on all history (2005 onwards) and are
+# published to the `models` git branch; the Mac downloads them into trained-models/ and keeps
+# only recent prices. CLOUD_TRAINING=0 in .env trains everything on the Mac instead.
+CLOUD_TRAINING = os.getenv("CLOUD_TRAINING", "1") != "0"
+IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+SHARED_MODELS_DIR = PROJECT_ROOT / ("trained-models" if CLOUD_TRAINING else "models")
+LOCAL_MODELS_DIR = PROJECT_ROOT / "models"            # intraday model (uses Angel One data)
+# Years of daily prices kept on the Mac (features need ~1 year of warm-up). 0 = all.
+LOCAL_HISTORY_YEARS = 0 if (IN_GITHUB_ACTIONS or not CLOUD_TRAINING) \
+    else int(os.getenv("LOCAL_HISTORY_YEARS", "4"))
 
 
 @dataclass(frozen=True)

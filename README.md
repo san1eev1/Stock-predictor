@@ -62,7 +62,7 @@ Terminal equivalents: `python -m stockpredictor start`, `... improve --tune`, `.
 
 | What | How much | Where |
 |---|---|---|
-| Daily prices | **Nifty 250** since **2005** (~1M rows) | git `market-data` branch, updated 16:30 IST by GitHub Actions |
+| Daily prices | **Nifty 250** since **2005** (~1M rows) | git `market-data` branch, updated 16:30 IST by GitHub Actions; the Mac keeps the last 4 years |
 | Universe | Nifty LargeMidcap 250 — both models train on it and pick from it | |
 | Intraday | Daily summaries of 5-min bars: 200 stocks, Yahoo (60 days, growing daily) + Angel One backfill (~2 years) | git + small local file |
 | News | Google News + FinBERT, 4× per trading day | git |
@@ -75,20 +75,35 @@ Donchian breakouts, Heikin-Ashi, Keltner squeeze), volume flow (OBV, Chaikin mon
 statistics (trend slope and R², autocorrelation, variance ratio, efficiency ratio, skew,
 z-score). LightGBM learns how much each is worth and how they combine; nothing is a fixed rule.
 
-How the long-term model keeps learning:
+### Where training happens
 
-| When | What it learns from |
-|---|---|
-| **Every day after the close** | Retrains on all history (every 5th trading day since 2005, shifting daily so the newest known 1-week outcome is always included) **plus its own judged predictions** — wrong ones weigh 2×, right ones 1.5× |
-| **Every day (live race)** | Three variants — AI model, 50/50 blend with momentum, momentum only — each make paper predictions. After 20+ judged days, the system switches to the variant with the best **live** accuracy if it leads by 5+ points |
-| **Every weekday evening** | Light self-tuning (2 new settings per model) |
-| **Every weekend** | Full self-tuning: tries new model settings, recency weighting (favour recent years) and focus on extreme winners/losers, scored out-of-sample; keeps changes only if they test better |
+| Where | What | How often |
+|---|---|---|
+| **GitHub Actions** (free) | Long-term model: retrains on **all history since 2005** plus judged paper predictions (wrong ones weigh 2×, right ones 1.5×), then self-tunes for the rest of a ~45-minute run. News relevance model. Weekly backtest. Results go to the `models` branch (~1.5 MB). | **Every hour** (`.github/workflows/train-models.yml`) |
+| **Mac, background thread** | Intraday model: self-tuning rounds on its history (uses your Angel One data, which stays on the Mac) — keeps running during market hours without pausing live prices | Every ~5 minutes, all day |
+| **Mac, live market** | Right after the 15:15 square-off, today's live Angel One 5-minute session is added and the intraday model retrains on it | Every trading day, 15:17 |
+| **Mac** | Downloads the newest cloud models; sends judged paper predictions to the `paper-feedback` branch so cloud training learns from them | Every 15 min / after each close |
 
-The training engine uses **early stopping** (grows trees only while a held-out recent period
-improves) and an **average of 3 models** with different random seeds. Out-of-sample over the last
-3 years this raised long-term IC from 0.064 to 0.066 and top-10 hit rate from 60.5% to 61.9%,
-while training 40% faster. Features are cached (~100 MB in `data/cache`, turn off with
-`FEATURE_CACHE=0` in `.env`), so loading takes ~3 s instead of ~20 s.
+The Mac keeps only the last **4 years** of daily prices (~13 MB; the signals need ~1 year of
+warm-up) — the full history lives on git and is only downloaded by GitHub Actions. Set
+`CLOUD_TRAINING=0` in `.env` to train everything on the Mac instead (downloads all history).
+
+New settings are adopted only if they beat the current ones out-of-sample over the last 3 years
+**and** are not worse over 6 years (intraday: 120 and 250 days), so a setting that only fits one
+period by luck is rejected.
+
+**Live race:** three variants — AI model, 50/50 blend with momentum, momentum only — each make
+paper predictions. After 20+ judged days, the system switches to the variant with the best
+**live** accuracy if it leads by 5+ points.
+
+**News:** buy/sell tips, target prices, "stocks to watch" lists and forecasts are ignored — the
+model makes its own calls. A LightGBM model learns from history which headlines actually move
+their stock (`nlp/relevance.py`); relevant news counts more in the news mood and bad-news exits,
+lists and namesakes count less. On unseen headlines its relevance ranks real reactions better
+than FinBERT tone alone (correlation 0.15 vs 0.11).
+
+The training engine uses **early stopping** and an **average of 3 models** with different random
+seeds. Features are cached in `data/cache` (turn off with `FEATURE_CACHE=0` in `.env`).
 
 The **Accuracy** page shows the live race; the **Model** page shows every retrain and tuning run.
 
