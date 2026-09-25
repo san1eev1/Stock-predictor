@@ -7,14 +7,16 @@ so live prices keep updating every minute while it works:
     (the long-term and news models are trained on GitHub; see cloud-train), keeping new
     settings only when they test better out-of-sample
   * after the 15:30 close: today's whole live Angel One 5-minute session is added to the
-    history and the intraday model retrains on it (trading stops at 12:30, learning doesn't)
+    history and the intraday models retrain on it (trading stops at 12:30, learning doesn't)
+  * after the close, once a day: 3 rounds of historical paper-trading replays per intraday
+    model, each round learning from the previous round's judged picks (replay_training)
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from datetime import date
+from datetime import date, datetime, time
 from pathlib import Path
 
 from stockpredictor import config, db
@@ -23,6 +25,7 @@ from stockpredictor.models import trainer as T
 
 log = logging.getLogger(__name__)
 PAUSE_MIN = 5            # rest between tuning rounds
+REPLAY_AFTER = time(15, 40)   # weekdays: historical replays once the close work is done
 CANDIDATES = 3           # new settings tried per round
 
 
@@ -61,6 +64,8 @@ class BackgroundTrainer(threading.Thread):
                 day, self._live_day = self._live_day, None
                 self._learn_live(conn, day)
                 self._compare(conn)                # daily: which exit is better so far
+            elif self._replay_due(conn):
+                self._replay(conn)
             else:
                 self._tune(conn)
             self.wake.wait(self.pause)
@@ -97,6 +102,42 @@ class BackgroundTrainer(threading.Thread):
                          " -> new settings adopted" if lt["adopted"] else "")
         except Exception:
             log.exception("background training round failed")
+
+    def _replay_due(self, conn, now: datetime | None = None) -> bool:
+        from stockpredictor.live.prices import now_ist
+
+        now = now or now_ist()
+        after_close = now.weekday() >= 5 or now.time() >= REPLAY_AFTER
+        row = conn.execute("SELECT value FROM app_settings WHERE key = 'replay_day'").fetchone()
+        return after_close and (row is None or row[0] != f"{now:%Y-%m-%d}")
+
+    def _replay(self, conn) -> None:
+        """3 rounds of historical intraday paper trading, each learning from the last."""
+        from stockpredictor.live.prices import now_ist
+        from stockpredictor.paper import intraday as PI
+
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('replay_day', ?)",
+                     (f"{now_ist():%Y-%m-%d}",))
+        conn.commit()
+        try:
+            rules, _ = PI.get_rules(conn)
+            ctx = self._ctx()
+            out = T.replay_training(ctx, self.store_dir, conn, rules)
+            for target in MI.TARGETS:
+                r = out.get(target.horizon)
+                if not r:
+                    log.info("Historical replay (%s): not enough history yet", target.label)
+                    continue
+                log.info("Historical replay (%s): %s", target.label, " -> ".join(
+                    f"round {x['round']}: Rs {x['avg_day_pnl']:+.0f}/day, {x['accuracy']:.0%} right"
+                    for x in r["rounds"]) + (" -> learning kept" if r["adopted"] else
+                                             " -> no improvement, not used"))
+                if r["adopted"]:
+                    with MI.MODEL_LOCK:
+                        T.retrain_intraday(ctx, self.store_dir, conn, force=True, target=target)
+                    self.model_changed.set()
+        except Exception:
+            log.exception("historical replay failed")
 
     def _compare(self, conn) -> None:
         """Refresh the 12:30-vs-close comparison (walk-forward, same days, costs)."""

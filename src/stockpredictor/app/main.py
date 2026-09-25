@@ -335,7 +335,8 @@ def page_paper_intraday():
                "the stocks it expects to rise and short-sells the ones it expects to fall, with "
                "a stop-loss and target. Book 1 closes everything at 12:30, book 2 at 15:15 "
                "(the close). After the close they are compared and both learn.")
-    tab1, tab2, tab3 = st.tabs(["Until 12:30", "Until close (15:15)", "🏆 Competition"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)", "🏆 Competition",
+                                      "🔁 Historical replays"])
     with tab1:
         accuracy_now_panel(PI.HORIZON)
         paper_intraday(PI.HORIZON)
@@ -344,6 +345,47 @@ def page_paper_intraday():
         paper_intraday(PI.CLOSE_HORIZON)
     with tab3:
         competition()
+    with tab4:
+        replay_history()
+
+
+def replay_history():
+    """After each close: 3 rounds of paper trading on past days, each learning from the last."""
+    c = conn()
+    st.subheader("🔁 Historical paper-trading replays")
+    st.caption(f"After every close each intraday model paper-trades the last {T.REPLAY_DAYS} days "
+               f"again in {T.REPLAY_ROUNDS} rounds (₹1 lakh a day, same rules and costs). Every "
+               "day is traded by a model trained only on earlier days; each round learns from "
+               "the previous round's judged buy and sell picks (wrong 2×, right 1.5×). If the "
+               "last round beats the first, that learning is kept for the live model.")
+    runs = pd.read_sql("SELECT * FROM replay_runs ORDER BY id", c)
+    if runs.empty:
+        st.caption("The first replay runs after today's close (or now, at the weekend).")
+        return
+    last = runs[runs["run_at"] == runs["run_at"].max()]
+    st.caption(f"Latest run {last['run_at'].iloc[0][:16].replace('T', ' ')} · "
+               f"{last['period'].iloc[0]}")
+    for h, g in last.groupby("horizon", sort=False):
+        kept = bool(g["adopted"].max())
+        st.markdown(f"**{MODEL_NAMES.get(h, h)}** — "
+                    + ("✅ learning kept (last round beat the first)" if kept
+                       else "➖ no improvement over the rounds, not used"))
+        st.dataframe(pd.DataFrame({
+            "Round": g["round"], "Days": g["days"], "Avg P&L per day": g["avg_day_pnl"],
+            "Profitable days": g["win_days"], "Picks right": g["accuracy"],
+            "Random picks": g["random"], "IC": g["ic"]}), hide_index=True, width="stretch",
+            column_config={"Avg P&L per day": st.column_config.NumberColumn(format="₹%.0f"),
+                           "Profitable days": st.column_config.NumberColumn(format="percent"),
+                           "Picks right": st.column_config.NumberColumn(format="percent"),
+                           "Random picks": st.column_config.NumberColumn(format="percent"),
+                           "IC": st.column_config.NumberColumn(format="%.3f")})
+    daily = runs[runs["round"] == runs.groupby("run_at")["round"].transform("max")]
+    if daily["run_at"].nunique() >= 2:
+        st.caption("Final-round accuracy of each daily replay")
+        d = daily.assign(date=pd.to_datetime(daily["run_at"]),
+                         series=daily["horizon"].map(MODEL_NAMES), value=daily["accuracy"])
+        st.altair_chart(C.lines(d[["date", "series", "value"]], "date", "value", "series", ".0%"),
+                        width="stretch")
 
 
 def competition():

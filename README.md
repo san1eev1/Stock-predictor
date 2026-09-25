@@ -23,7 +23,7 @@ history and [DAILY_GUIDE.md](DAILY_GUIDE.md) for step-by-step daily use.
 |---|---|
 | **Universe** | Both models **train on and pick from the Nifty LargeMidcap 250** (Nifty 100 + Midcap 150), refreshed from NSE's official list daily. |
 | **History** | Long-term model trains on **all daily history since 2005**. Intraday model trains on ~2 years of Angel One 5-minute history plus Yahoo's daily-growing summaries. |
-| **Continuous training** | Models **keep training on historical data in the background**: GitHub retrains + self-tunes the long-term and news models **every hour**; the Mac tunes the intraday model **all day, market hours included**, without pausing live prices. |
+| **Continuous training** | Models **keep training on historical data in the background**: GitHub retrains + self-tunes the long-term and news models on all history since 2005 **every 3 hours**; the Mac tunes the intraday model **all day, market hours included**, without pausing live prices. |
 | **Learning from the live market** | The model **learns from the market until it closes**: after 15:30 the day's full live Angel One session is added and the intraday model retrains. |
 | **Intraday: two trades** | Picks at 9:45. **Book 1 trades until 12:30**, **book 2 until the close (15:15 square-off)**, each with its own model (predicting 9:45 → 12:30 and 9:45 → 15:15), its own ₹1 lakh and stop-loss / target. Separate pages: *Intraday — until 12:30* and *Intraday — until close*. |
 | **Compete and learn from each other** | After the close both books are judged; a daily winner and running score are shown (🏆 Competition). Each model's tuning may blend in the other's ranking (`peer_weight`), kept only if it improves accuracy on unseen days. A walk-forward backtest compares 12:30 vs close exits on the same days (refreshed daily). |
@@ -74,9 +74,10 @@ days the app isn't open), *Keep training now*, *Get latest data*, *Backtest long
 
 | Where | What | How often |
 |---|---|---|
-| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~45-minute run; news relevance model; weekly backtest. Published to the `models` branch. | **Every hour** (`train-models.yml`) |
+| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~150-minute run; news relevance model; weekly backtest. Published to the `models` branch. | **Every 3 hours** (`train-models.yml`) |
 | **Mac, background thread** | Both intraday models take turns self-tuning on their history (uses your Angel One data, which stays on the Mac) | Every ~5 minutes, all day |
 | **Mac, after the close** | Today's full live session is added; both intraday models retrain with it; the 12:30-vs-close comparison is refreshed | Every trading day, 15:32 |
+| **Mac, after the close** | **Historical paper-trading replays:** each intraday model trades the last 120 days again in **3 rounds**, each round learning from the previous round's judged buy/sell picks; kept for the live model only if the last round beats the first (🔁 tab on *Paper trading — Intraday*) | Daily, 15:40 (weekends: any time) |
 | **Mac, after each close** | Judged paper predictions (stock, date, right/wrong) sent to the `paper-feedback` branch for cloud training | Daily |
 
 New settings are adopted only if they beat the current ones out-of-sample over the last 3 years

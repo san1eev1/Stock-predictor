@@ -5,13 +5,13 @@ name: Train models
 
 on:
   schedule:
-    - cron: "5 * * * *"       # every hour: retrain on the newest data, then self-tune
-                              # (~45 min per run, so training on history is near-continuous)
+    - cron: "5 */3 * * *"     # every 3 hours: retrain on all history since 2005, then
+                              # self-tune (~150 min per run, so training is near-continuous)
   workflow_dispatch:
     inputs:
       minutes:
         description: "Time budget in minutes (retrain + self-tuning)"
-        default: "45"
+        default: "150"
       backtest:
         description: "Refresh the long-term backtest now"
         type: boolean
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 175
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
       - name: Train and self-tune
         run: |
           python -m stockpredictor cloud-train --dir market-data --feedback feedback \
-            --minutes "${{ inputs.minutes || '45' }}" ${{ inputs.backtest && '--backtest' || '' }}
+            --minutes "${{ inputs.minutes || '150' }}" ${{ inputs.backtest && '--backtest' || '' }}
 
       - name: Publish models
         working-directory: trained-models

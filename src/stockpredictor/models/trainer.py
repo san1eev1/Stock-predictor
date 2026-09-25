@@ -370,13 +370,109 @@ def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
     return out
 
 
+REPLAY_ROUNDS = 3
+REPLAY_DAYS = 120
+
+
+def replay_file(target: MI.Target):
+    return target.model_dir / "replay_feedback.csv"
+
+
+def replay_round(feats: pd.DataFrame, target: MI.Target, rules, capital: float,
+                 last_days: int = REPLAY_DAYS) -> tuple[dict, pd.DataFrame] | None:
+    """One historical paper-trading batch: every day of the last `last_days` is traded by a
+    model trained only on earlier days (using the fb_weight already in `feats`), then judged.
+    Returns the result and the judged picks (symbol, date, correct) for the next round."""
+    from stockpredictor.backtest import intraday as B
+    from stockpredictor.data import intraday as I
+
+    scores = MI.walk_forward(feats, params=MI.current_params(target), last_days=last_days)
+    if scores.empty:
+        return None
+    m = scores.merge(feats[["symbol", "date", "target_ret"]], on=["symbol", "date"])
+    ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
+                                 include_groups=False).dropna()
+    minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
+    summ = feats[["symbol", "date", "c30", target.exit_col, *I.LEVEL_COLS]]
+    sim = B.simulate(scores, summ, rules, capital, exit_col=target.exit_col, exit_minutes=minutes)
+    r = B.metrics(sim, capital)
+    if not r.get("trading_days"):
+        return None
+    days = sorted(scores["date"].unique())
+    result = {"period": f"{pd.Timestamp(days[0]):%Y-%m-%d} to {pd.Timestamp(days[-1]):%Y-%m-%d}",
+              "days": r["trading_days"], "avg_day_pnl": r["avg_day_pnl"],
+              "win_days": r["win_days"], "accuracy": r["direction_accuracy"],
+              "random": r["random_baseline"], "ic": float(ic.mean())}
+    judged = sim["trades"][["symbol", "date", "correct"]].astype({"correct": int})
+    return result, judged
+
+
+def replay_training(ctx, store_dir, conn=None, rules=None, capital: float = 100_000,
+                    rounds: int = REPLAY_ROUNDS) -> dict:
+    """After the close: `rounds` historical paper-trading batches per intraday model, each
+    learning from the previous batch's judged picks (wrong 2x, right 1.5x). If the last round
+    beats the first (P&L per day and accuracy), the replay feedback is kept for the live
+    model's training; otherwise it is dropped."""
+    from stockpredictor.backtest import intraday as B
+
+    rules = rules or B.IntradayRules()
+    run_at = datetime.now().isoformat(timespec="seconds")
+    out = {}
+    for target in MI.TARGETS:
+        base = intraday_feats(ctx, store_dir, target)
+        if base.dropna(subset=["target"])["date"].nunique() < MI.MIN_TRAIN_DAYS + 20:
+            out[target.horizon] = None
+            continue
+        feedback, results = None, []
+        for rnd in range(1, rounds + 1):
+            feats = base
+            if feedback is not None:
+                w = feedback.assign(fb_weight=feedback["correct"].map(FEEDBACK_WEIGHT))
+                feats = base.merge(w[["symbol", "date", "fb_weight"]], on=["symbol", "date"],
+                                   how="left")
+            r = replay_round(feats, target, rules, capital)
+            if r is None:
+                break
+            res, feedback = r
+            results.append({"round": rnd, **res})
+        if not results:
+            out[target.horizon] = None
+            continue
+        first, last = results[0], results[-1]
+        adopted = len(results) > 1 and last["avg_day_pnl"] > first["avg_day_pnl"] \
+            and last["accuracy"] >= first["accuracy"]
+        path = replay_file(target)
+        if adopted:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            feedback.assign(date=pd.to_datetime(feedback["date"]).dt.strftime("%Y-%m-%d")) \
+                .to_csv(path, index=False)
+        else:
+            path.unlink(missing_ok=True)
+        if conn is not None:
+            conn.executemany(
+                "INSERT INTO replay_runs (run_at, horizon, round, period, days, avg_day_pnl, "
+                "win_days, accuracy, random, ic, adopted) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                [(run_at, target.horizon, r["round"], r["period"], r["days"], r["avg_day_pnl"],
+                  r["win_days"], r["accuracy"], r["random"], r["ic"],
+                  int(adopted and r["round"] == len(results))) for r in results])
+            conn.commit()
+        out[target.horizon] = {"rounds": results, "adopted": adopted}
+    return out
+
+
 def intraday_feedback(conn, feats: pd.DataFrame, horizon: str = "intraday") -> pd.DataFrame:
     """Judged intraday paper picks, buy AND sell, get extra weight in training (wrong ones
     more), so the model concentrates on the calls it actually makes."""
-    if conn is None:
+    parts = []
+    target = next((t for t in MI.TARGETS if t.horizon == horizon), None)
+    if target is not None and replay_file(target).exists():       # kept replay feedback
+        parts.append(pd.read_csv(replay_file(target)))
+    if conn is not None:                                          # real paper picks win
+        parts.append(pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE "
+                                 "horizon = ? AND correct IS NOT NULL", conn, params=(horizon,)))
+    if not parts:
         return feats
-    judged = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = ? "
-                         "AND correct IS NOT NULL", conn, params=(horizon,))
+    judged = pd.concat(parts, ignore_index=True).drop_duplicates(["symbol", "date"], keep="last")
     if judged.empty:
         return feats
     judged["date"] = pd.to_datetime(judged["date"])
