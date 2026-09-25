@@ -134,8 +134,15 @@ def save_local_overlay(folder: str, rows: pd.DataFrame, keep_after: str | None =
     return len(rows)
 
 
-def load_daily(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:
-    return _load_prices(store_dir, "daily")
+def load_daily(store_dir: Path = DEFAULT_STORE_DIR, clean: bool = True) -> pd.DataFrame:
+    """Daily prices; by default cleaned of data errors (data/clean.py: bad rows dropped,
+    unadjusted splits/bonuses/demergers back-adjusted). clean=False: exactly as stored."""
+    df = _load_prices(store_dir, "daily")
+    if clean and not df.empty:
+        from stockpredictor.data.clean import clean_daily
+
+        df, _ = clean_daily(df)
+    return df
 
 
 def load_indices(store_dir: Path = DEFAULT_STORE_DIR) -> pd.DataFrame:

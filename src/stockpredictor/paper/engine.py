@@ -65,7 +65,7 @@ class MarketContext:
         return float(n["close"].iloc[-1])
 
 
-FEATURE_CACHE_VERSION = 3
+FEATURE_CACHE_VERSION = 4     # 4: cleaned prices (data/clean.py)
 
 
 def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:

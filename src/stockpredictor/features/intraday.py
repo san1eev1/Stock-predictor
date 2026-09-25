@@ -40,6 +40,28 @@ def adjust_splits(summ: pd.DataFrame, actions: pd.DataFrame) -> pd.DataFrame:
     return summ
 
 
+BASIS_TOL = 0.02      # intraday vs official close differ a little; beyond this: other basis
+
+
+def align_to_daily(summ: pd.DataFrame, daily: pd.DataFrame) -> pd.DataFrame:
+    """Put intraday prices on the daily history's price basis. The daily history is adjusted
+    for splits, bonuses and demergers (data/clean.py); some intraday rows are not, which made
+    gap and 'vs yesterday' features wrong for those stock-days. The factor comes from the
+    PREVIOUS day (today's close is not known at 9:45: no look-ahead), which is the same
+    factor except on the event day itself. Ratios within a day are unchanged."""
+    d = daily[["symbol", "date", "close"]].rename(columns={"close": "_dclose"})
+    s = summ.merge(d, on=["symbol", "date"], how="left").sort_values(["symbol", "date"])
+    k = s["_dclose"] / s["close"]
+    k = k.where(k.isna() | ((k - 1).abs() > BASIS_TOL), 1.0)
+    k = k.groupby(s["symbol"]).shift(1)
+    k = k.groupby(s["symbol"]).ffill().fillna(1.0)
+    cols = [c for c in PRICE_COLS if c in s]
+    s[cols] = s[cols].mul(k, axis=0)
+    if "v30" in s:
+        s["v30"] = s["v30"] / k
+    return s.drop(columns="_dclose").reset_index(drop=True)
+
+
 def _daily_context(daily: pd.DataFrame, lt_feats: pd.DataFrame) -> pd.DataFrame:
     """Per (symbol, date): yesterday-close context available before today's open."""
     d = daily.sort_values(["symbol", "date"]).copy()
@@ -70,6 +92,7 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     s["date"] = pd.to_datetime(s["date"])
     if actions is not None:
         s = adjust_splits(s, actions)
+    s = align_to_daily(s, daily)
     ctx = _daily_context(daily, lt_feats).rename(columns={"date": "prev_date"})
     s = s.sort_values("date")
     ctx = ctx.sort_values("prev_date")
