@@ -353,9 +353,19 @@ def paper_longterm():
 
 
 def paper_book(c, h: str, title: str, prices: dict[str, float]):
+    """Two tables: what the paper account is buying (holdings + queued buys) and what it is
+    selling (queued sells + stocks already sold)."""
     rules, _ = D.get_rules(c)
     sign = E.book_sign(h)
-    st.subheader(title)
+    buy_word, sell_word = ("Buying", "Selling") if sign > 0 else ("Shorting", "Covering")
+    pending = pd.read_sql("SELECT created, symbol, side, reason FROM paper_orders "
+                          "WHERE horizon = ? AND status = 'pending'", c, params=(h,))
+    pending["Live price"] = pending["symbol"].map(prices)
+    pending["Today %"] = as_pct(pct(pending["Live price"], pending["symbol"].map(prev_closes())))
+    order_cols = {"created": "Decided", "symbol": "Stock", "reason": "Why"}
+    order_cfg = {"Live price": st.column_config.NumberColumn(format="₹%.2f"), "Today %": PCT}
+
+    st.subheader(f"▲ {buy_word} — {title.lower()}")
     pos = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'open'", c, params=(h,))
     if pos.empty:
         st.caption("No open positions yet — orders fill at the next market price after a decision.")
@@ -377,28 +387,35 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
                 for c_ in [entry, "Live price", "P&L (after costs)", "Stop-loss"]} | {
                 "P&L %": st.column_config.NumberColumn(format="percent"),
                 "Today %": PCT, "Since entry %": PCT})
-    pending = pd.read_sql("SELECT created, symbol, side, reason FROM paper_orders "
-                          "WHERE horizon = ? AND status = 'pending'", c, params=(h,))
-    if not pending.empty:
-        if sign < 0:
-            pending["side"] = pending["side"].map({"buy": "short", "sell": "cover"})
-        st.caption("Queued orders (fill at the next market price):")
-        st.dataframe(pending, hide_index=True, width="stretch")
+    buys = pending[pending["side"] == "buy"]
+    if not buys.empty:
+        st.caption(f"Queued {buy_word.lower()} orders (fill at the next market price):")
+        st.dataframe(buys[["created", "symbol", "Live price", "Today %", "reason"]].rename(
+            columns=order_cols), hide_index=True, width="stretch", column_config=order_cfg)
+
+    st.subheader(f"▼ {sell_word}")
+    sells = pending[pending["side"] == "sell"]
+    if sells.empty:
+        st.caption(f"No {sell_word.lower()} orders queued.")
+    else:
+        st.caption(f"Queued {sell_word.lower()} orders (fill at the next market price):")
+        st.dataframe(sells[["created", "symbol", "Live price", "Today %", "reason"]].rename(
+            columns=order_cols), hide_index=True, width="stretch", column_config=order_cfg)
     closed = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'closed' "
                          "ORDER BY exit_time DESC", c, params=(h,))
-    with st.expander(f"Closed trades ({len(closed)})"):
-        if closed.empty:
-            st.caption("None yet.")
-        else:
-            closed["Return"] = sign * (closed["exit_price"] / closed["entry_price"] - 1)
-            closed["Result"] = ["✅ profit" if p > 0 else "❌ loss" for p in closed["pnl"]]
-            st.dataframe(closed[["symbol", "entry_time", "entry_price", "exit_time", "exit_price",
-                                 "Return", "pnl", "exit_reason", "Result"]].rename(columns={
-                "symbol": "Stock", "entry_time": "Opened", "entry_price": "Entry",
-                "exit_time": "Closed", "exit_price": "Exit", "pnl": "P&L (after costs)",
-                "exit_reason": "Why closed"}), hide_index=True, width="stretch", column_config={
-                    "Return": st.column_config.NumberColumn(format="percent"),
-                    "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
+    st.caption(f"{'Sold' if sign > 0 else 'Covered'} ({len(closed)})"
+               + (f" · won {(closed['pnl'] > 0).mean():.0%} · total P&L "
+                  f"{C.money(closed['pnl'].sum())}" if len(closed) else " — none yet"))
+    if not closed.empty:
+        closed["Return"] = sign * (closed["exit_price"] / closed["entry_price"] - 1)
+        closed["Result"] = ["✅ profit" if p > 0 else "❌ loss" for p in closed["pnl"]]
+        st.dataframe(closed[["symbol", "entry_time", "entry_price", "exit_time", "exit_price",
+                             "Return", "pnl", "exit_reason", "Result"]].rename(columns={
+            "symbol": "Stock", "entry_time": "Bought", "entry_price": "Buy price",
+            "exit_time": "Sold", "exit_price": "Sell price", "pnl": "P&L (after costs)",
+            "exit_reason": "Why sold"}), hide_index=True, width="stretch", column_config={
+                "Return": st.column_config.NumberColumn(format="percent"),
+                "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
 
 
 def page_intraday():

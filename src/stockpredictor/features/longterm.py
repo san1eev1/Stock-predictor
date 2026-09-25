@@ -204,12 +204,12 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
 
     feats = feats.merge(market_regime(indices), on="date", how="left")
 
-    for col in RANKED:
-        feats[f"{col}_rank"] = feats.groupby("date")[col].rank(pct=True)
+    ranks = feats.groupby("date")[RANKED].rank(pct=True).add_suffix("_rank")
+    feats = pd.concat([feats, ranks], axis=1)
 
     feats = feats[feats["history_days"] >= MIN_HISTORY_DAYS]
     drop = [c for c in feats.columns if c.startswith("_") or c.startswith("nifty_")]
-    return feats.drop(columns=drop).reset_index(drop=True)
+    return feats.drop(columns=drop).reset_index(drop=True).copy()   # copy = one compact block
 
 
 def _rolling_beta(feats: pd.DataFrame, n: int = 252) -> pd.Series:

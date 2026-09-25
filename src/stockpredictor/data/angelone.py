@@ -31,6 +31,17 @@ MAX_DAYS_PER_REQUEST = {
 }
 
 
+def _quiet_smartapi() -> None:
+    """SmartAPI logs every failed request with its headers (API key, session token) to the
+    terminal and to logs/<date>/app.log. Turn that off; our own code reports errors."""
+    import logging
+
+    import logzero
+
+    logzero.logfile(None)
+    logzero.loglevel(logging.CRITICAL)
+
+
 class AngelOneError(RuntimeError):
     pass
 
@@ -67,6 +78,7 @@ class AngelDataClient:
         from SmartApi import SmartConnect  # imported lazily: optional until keys exist
 
         api = SmartConnect(api_key=self._creds.api_key)
+        _quiet_smartapi()
         totp = pyotp.TOTP(self._creds.totp_secret).now()
         resp = api.generateSession(self._creds.client_code, self._creds.pin, totp)
         if not resp or not resp.get("status"):

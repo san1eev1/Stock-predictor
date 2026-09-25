@@ -87,12 +87,13 @@ def cached_features(store_dir, daily, indices, universe) -> pd.DataFrame:
     path = cache_dir / f"longterm_features_{key}.pkl.gz"
     if path.exists():
         try:
-            return pd.read_pickle(path)
+            return pd.read_pickle(path).copy()
         except Exception:
             path.unlink(missing_ok=True)
     feats = F.build_features(daily, indices, universe)
     floats = feats.select_dtypes("float64").columns
     feats[floats] = feats[floats].astype(np.float32)
+    feats = feats.copy()
     cache_dir.mkdir(parents=True, exist_ok=True)
     for old in cache_dir.glob("longterm_features_*"):
         old.unlink(missing_ok=True)

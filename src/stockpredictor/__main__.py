@@ -388,6 +388,9 @@ def _angel_startup(settings, store_dir: Path) -> None:
             n = intraday.angel_backfill(client, tokens, todo, date.today() - timedelta(days=730),
                                         date.today() - timedelta(days=1),
                                         progress=lambda m: log.debug(m))
+            if not n:
+                log.info("Angel One backfill: nothing new downloaded (will retry next start)")
+                return
             log.info("Angel One backfill finished: %s stock-days; retraining intraday model", n)
             with db.connect(settings.db_path) as conn:
                 T.retrain_intraday(MarketContext.load(store_dir), store_dir, conn, force=True)
