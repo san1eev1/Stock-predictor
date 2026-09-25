@@ -172,6 +172,13 @@ class Monitor:
         self.conn.executemany("INSERT OR REPLACE INTO live_prices VALUES (?, ?, ?, ?)",
                               [(s, p, stamp, self.prices.source) for s, p in prices.items()])
         _set(self.conn, "live_source", self.prices.source)
+        sample = next((f"{s} Rs {prices[s]:,.2f}" for s in ("RELIANCE", "HDFCBANK", "TCS")
+                       if s in prices), "")
+        log.info("Live prices: %d/%d stocks from %s  %s", len(prices), len(symbols),
+                 self.prices.source, sample)
+        if len(prices) < len(symbols) * 0.9:
+            log.warning("Live prices missing for %d stocks (%s)", len(symbols) - len(prices),
+                        getattr(self.prices, "last_error", None) or "no data returned")
 
         rules, _ = D.get_rules(self.conn)
         if now.time() >= FIRST_FILL:
