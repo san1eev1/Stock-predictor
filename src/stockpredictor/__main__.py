@@ -340,7 +340,7 @@ def cmd_cloud_train(settings, args) -> None:
 
     bt_path = M.MODEL_DIR / "backtest.json"
     # Long-term paper trading on history (walk-forward since 2015, the live paper rules:
-    # top 3 held), once a day on the first run after the 15:30 close.
+    # the 5 best held), once a day on the first run after the 15:30 close.
     from stockpredictor.live.prices import now_ist
 
     ist = now_ist()
@@ -367,8 +367,8 @@ def cmd_cloud_train(settings, args) -> None:
         rounds += 1
         adopted += int(r["adopted"])
         print(f"Tuning round {rounds}: IC {r['ic']:.4f} (current {r['previous_ic']:.4f}), "
-              f"paper check: top-10 buys beat Nifty {r['top10_hit']:.1%} of weeks, "
-              f"avg {r['top10_excess']:+.2%}/week"
+              f"paper check: the 5 stocks bought beat Nifty {r['top5_hit']:.1%} of weeks, "
+              f"avg {r['top5_excess']:+.2%}/week (top 10: {r['top10_hit']:.1%})"
               + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
 
     if T.RUN_LOG.exists():   # keep the log small

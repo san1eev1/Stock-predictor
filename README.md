@@ -4,9 +4,9 @@ Personal AI stock predictor for the **Nifty LargeMidcap 250** (Nifty 100 + Midca
 tracks:
 
 - **Long-term:** 1-week predictions — the top 10 buy candidates after every close, judged
-  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio holding the top 3.
+  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio holding the 5 best.
 - **Intraday — two competing models:** at 9:45 each lists the top 10 buys and top 10 sells
-  (separate tables) from the first 30 minutes and paper-trades the top 3 buys + 3 sells (fewer
+  (separate tables) from the first 30 minutes and paper-trades only the 5 best buys + 5 best sells (fewer
   trades, lower costs; all 10 + 10 are still judged and learned from). One trades **until 12:30**, the other **until the close (15:15 square-off)**, each
   on its own ₹1 lakh a day. After the close they are compared, both learn from the full session,
   and each can learn from the other.
@@ -75,8 +75,8 @@ days the app isn't open), *Keep training now*, *Get latest data*, *Backtest long
 
 | Where | What | How often |
 |---|---|---|
-| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~150-minute run; news relevance model (each tuning round is also checked on paper picks: new settings are kept only if the top-10 buys beat Nifty at least as often); **long-term historical paper trading** (walk-forward since 2015 with the live rules — top 3 held — plus a 10-holding comparison, costs included) once a day on the first run after the 15:30 close. Published to the `models` branch. | **Every 3 hours** (`train-models.yml`) |
-| **Mac, background thread** | Both intraday models take turns self-tuning on their history (uses your Angel One data, which stays on the Mac). **After every round a paper-trading check** trades the last 120 days with the settings in use (3 buys + 3 sells, ₹1 lakh a day, costs); new settings are kept only if they also paper-trade at least as well (🧪 on *Paper trading — Intraday* → 🔁) | Every ~5 minutes in market hours, back to back after the close |
+| **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~150-minute run; news relevance model (each tuning round is also checked on paper picks: new settings are kept only if the 5 stocks it would buy beat Nifty at least as often); **long-term historical paper trading** (walk-forward since 2015 with the live rules — the 5 best held — plus a 10-holding comparison, costs included) once a day on the first run after the 15:30 close. Published to the `models` branch. | **Every 3 hours** (`train-models.yml`) |
+| **Mac, background thread** | Both intraday models take turns self-tuning on their history (uses your Angel One data, which stays on the Mac). **After every round a paper-trading check** trades the last 120 days with the settings in use (5 best buys + 5 best sells, ₹1 lakh a day, costs); new settings are kept only if they also paper-trade at least as well (🧪 on *Paper trading — Intraday* → 🔁) | Every ~5 minutes in market hours, back to back after the close |
 | **Mac, after the close** | Today's full live session is added; both intraday models retrain with it; the 12:30-vs-close comparison is refreshed | Every trading day, 15:32 |
 | **Mac, after the close** | **Historical paper-trading replays:** each intraday model trades the last 120 days again in **3 rounds**, each round learning from the previous round's judged buy/sell picks; kept for the live model only if the last round beats the first (🔁 tab on *Paper trading — Intraday*) | Daily, 15:40 (weekends: any time) |
 | **Mac, after the close** | Live prices stop at 15:30; from then on the Mac only learns from history (intraday tuning, replays) | Every trading day |
@@ -127,7 +127,7 @@ starts in 2026).
 - **Long-term picks** — long-term accuracy (UP table only — long-term predicts only UP; live today row); top 10 buy candidates
   (no sell candidates) with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
 - **Intraday — until 12:30** / **Intraday — until close** — each model's accuracy (UP / DOWN);
-  top 10 buy / top 10 sell (🧪 = the 3 + 3 traded) at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;
+  top 10 buy / top 10 sell (🧪 = the 5 + 5 traded) at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;
   the close page also compares 12:30 vs close exits
 - **Paper trading — Long-term** — accuracy; **Buying** (holdings + queued buys) and **Selling**
   (queued sells + sold) tables with P&L after costs

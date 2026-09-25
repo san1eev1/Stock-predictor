@@ -23,8 +23,8 @@ from stockpredictor.data import intraday as I
 
 @dataclass(frozen=True)
 class IntradayRules:
-    n_long: int = 3             # traded per day (the 10 + 10 candidates are still judged)
-    n_short: int = 3
+    n_long: int = 5             # traded per day: the 5 best buys and 5 best sells (the
+    n_short: int = 5            # 10 + 10 candidates are still judged and learned from)
     stop_loss: float = 1.0      # % from the 9:45 price (one of intraday.LEVELS)
     target: float = 2.0         # % (one of LEVELS), 0 = no target
     skip_quantile: float = 0.0  # skip days whose signal strength is below this

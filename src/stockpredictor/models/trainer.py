@@ -143,18 +143,25 @@ def load_runs(conn, run_log: Path | None = None) -> pd.DataFrame:
     return runs.reset_index(drop=True)
 
 
+TOP_TRADED = 5          # long-term: the 5 best stocks are bought (backtest.portfolio.Rules)
+
+
 def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> dict:
     last = labeled.dropna(subset=["target"])["date"].max().year
     scores = M.walk_forward(labeled, labeled, last - years + 1, last, params=params)
     if scores.empty:
         return {"ic": float("nan"), "ic_positive": float("nan"), "top10_hit": float("nan"),
-                "top10_excess": float("nan"), "weeks": 0}
+                "top10_excess": float("nan"), "top5_hit": float("nan"),
+                "top5_excess": float("nan"), "weeks": 0}
     ic = M.information_coefficient(scores, labeled)
     m = scores.merge(labeled[["symbol", "date", "fwd_excess"]], on=["symbol", "date"]).dropna()
-    top = m[m.groupby("date")["score"].rank(ascending=False) <= 10]
+    rank = m.groupby("date")["score"].rank(ascending=False)
+    top, best = m[rank <= 10], m[rank <= TOP_TRADED]
     return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()),
             "top10_hit": float((top["fwd_excess"] > 0).mean()),
-            "top10_excess": float(top["fwd_excess"].mean()), "weeks": int(len(ic))}
+            "top10_excess": float(top["fwd_excess"].mean()),
+            "top5_hit": float((best["fwd_excess"] > 0).mean()),
+            "top5_excess": float(best["fwd_excess"].mean()), "weeks": int(len(ic))}
 
 
 def retrain_longterm(ctx, conn=None, force: bool = False) -> M.LongTermModel | None:
@@ -199,8 +206,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
     base = results[0]
     adopted = (not best["current"] and not np.isnan(best["ic"])
                and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN)
-               # paper check: the top-10 buy picks must beat Nifty at least as often
-               and not best["top10_hit"] < base["top10_hit"])
+               # paper check: the 5 stocks it would buy must beat Nifty at least as often
+               and not best.get("top5_hit", np.nan) < base.get("top5_hit", np.nan))
     check = None
     if adopted and check_years > years:
         check = {"best": score(best["params"], check_years)["ic"],
@@ -211,7 +218,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
         _save_params(M.MODEL_DIR, best["params"])
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"], "top10_hit": chosen["top10_hit"],
-              "top10_excess": chosen["top10_excess"], "previous_ic": base["ic"],
+              "top10_excess": chosen["top10_excess"], "top5_hit": chosen.get("top5_hit"),
+              "top5_excess": chosen.get("top5_excess"), "previous_ic": base["ic"],
               "tested": len(results), "params": chosen["params"], "all": results,
               "long_check": check}
     if log_all or adopted:     # continuous rounds only log the ones that changed something
@@ -501,8 +509,16 @@ def paper_check(feats, target: MI.Target, params: dict, rules=None,
     Rs 1 lakh a day, costs), every day predicted by a model trained only on earlier days."""
     from stockpredictor.backtest import intraday as B
 
-    r = replay_round(feats, target, rules or B.IntradayRules(), capital, params=params)
-    return r[0] if r else None
+    rules = rules or B.IntradayRules()
+    key = (target.horizon, json.dumps(params, sort_keys=True, default=str), repr(rules),
+           str(feats["date"].max()), len(feats))
+    if key not in _PAPER_CACHE:     # same settings on the same data: same result, skip
+        r = replay_round(feats, target, rules, capital, params=params)
+        _PAPER_CACHE[key] = r[0] if r else None
+    return _PAPER_CACHE[key]
+
+
+_PAPER_CACHE: dict = {}
 
 
 def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,

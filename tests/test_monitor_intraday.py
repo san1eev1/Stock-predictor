@@ -74,7 +74,7 @@ def test_intraday_day_cycle(tmp_path, monkeypatch):
     monkeypatch.setattr(MON.Monitor, "quarter_job", lambda self, now: None)
 
     assert "intraday-picks" in mon.tick()
-    assert len(PI.open_trades(conn)) == 6            # top 3 buy + 3 sell of the 10 + 10
+    assert len(PI.open_trades(conn)) == 10           # the 5 best buys + 5 best sells of 10 + 10
     assert "intraday-picks" not in mon.tick()          # only once per day
 
     clock["now"] = clock["now"].replace(hour=15, minute=16)
@@ -82,7 +82,7 @@ def test_intraday_day_cycle(tmp_path, monkeypatch):
     assert "square-off" in mon.tick()
     assert PI.open_trades(conn) == []
     acc = E.accuracy(conn, "intraday")
-    assert acc["matured"] == 20 and acc["closed_trades"] == 6    # 10+10 judged, 3+3 traded
+    assert acc["matured"] == 20 and acc["closed_trades"] == 10   # 10+10 judged, 5+5 traded
     assert conn.execute("SELECT COUNT(*) FROM alerts WHERE source = 'paper-intraday' "
                         "AND kind = 'decision'").fetchone()[0] == 1
 

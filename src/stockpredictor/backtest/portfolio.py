@@ -17,7 +17,7 @@ from stockpredictor.costs import DEFAULT_COSTS, DeliveryCosts
 
 @dataclass(frozen=True)
 class Rules:
-    n_hold: int = 3             # stocks held per book, equal weight (of 10 candidates)
+    n_hold: int = 5             # the 5 best stocks held, equal weight (of 10 candidates)
     exit_rank: int = 50         # sell when a holding drops below this rank
     stop_loss: float = 0.15     # sell when price falls this far below entry
     cooldown_days: int = 7      # don't re-buy a stopped-out stock for this long

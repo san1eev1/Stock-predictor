@@ -86,7 +86,7 @@ If GitHub's evening data update is late, the program downloads the day's prices 
 |---|---|---|
 | 9:15 | Starts watching live prices (Angel One real-time) | sidebar: *Live monitor 🟢* |
 | 9:20 | Fills last night's long-term paper orders at market prices | Paper trading → Long-term |
-| **9:46** | **Intraday: top 10 buy + top 10 sell candidates**, top 3 + 3 paper-traded on a fresh ₹1 lakh | **Intraday picks** |
+| **9:46** | **Intraday: top 10 buy + top 10 sell candidates**, the 5 best buys + 5 best sells paper-traded on a fresh ₹1 lakh | **Intraday picks** |
 | every minute | Stop-loss / target checks (paper) · stop-loss alerts (your portfolio) | 🔔 Alerts |
 | every 15 min | New news, live re-ranking of long-term picks | Long-term picks → *Live ranking* |
 | **12:30** | **Intraday square-off** and scoring (trading stops; learning doesn't) | Paper trading → Intraday → *Day by day* |
@@ -98,9 +98,9 @@ If GitHub's evening data update is late, the program downloads the day's prices 
 ## What to look at in the dashboard
 
 1. **Long-term picks** — top 10 buy candidates (expected to beat Nifty **next week**; no sell
-   candidates), plus **Sell now** for holdings the model expects to fall. Paper holds the top 3.
-2. **Intraday picks** — top 10 buy + top 10 sell for today (3 + 3 traded), entry / stop-loss / target and live result.
-3. **Paper trading — Long-term** (buy-only) and **Paper trading — Intraday** (3 buy + 3 sell
+   candidates), plus **Sell now** for holdings the model expects to fall. Paper holds the 5 best.
+2. **Intraday picks** — top 10 buy + top 10 sell for today (5 + 5 traded), entry / stop-loss / target and live result.
+3. **Paper trading — Long-term** (buy-only) and **Paper trading — Intraday** (5 buy + 5 sell
    trades a day, separate sections), each with P&L after costs.
 4. **My portfolio** — enter your real Groww trades (➕ Add a trade); live P&L and stop-loss alerts.
 5. **Accuracy** — how often picks were right (long-term judged after 1 week, intraday same day)
