@@ -40,6 +40,7 @@ INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) unt
 INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.intraday.TRADE_EXIT)
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
+MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 21:00 IST)
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -179,6 +180,14 @@ class Monitor:
             if self.background is not None:
                 self.background.learn_from_today(now.date())
                 done.append("live-learn")
+        # The Mac's one training of the day: today's Angel One session, then long-term and
+        # both intraday models (config.MAC_DAILY_TRAINING; GitHub trains again at 21:00).
+        if not config.MAC_TRAINING and config.MAC_DAILY_TRAINING and now.weekday() < 5 \
+                and now.time() >= MAC_TRAIN_AT and _setting(self.conn, "mac_train_day") != day:
+            _set(self.conn, "mac_train_day", day)
+            self.angel_topup(now)
+            self.daily_mac_train(self.ctx())
+            done.append("mac-train")
         # Without the background thread, tune in the monitor itself (only when idle).
         if self.background is None and config.MAC_TRAINING and self.market_idle(now) \
                 and self.idle_tune(now):
@@ -523,9 +532,8 @@ class Monitor:
                 if T.retrain_intraday(ctx, self.store_dir, self.conn,
                                       target=MI.CLOSE) is not None:
                     self._cmodel = None
-            elif config.MAC_DAILY_TRAINING:
-                self.daily_mac_train(ctx)
-                self._model = None
+            else:
+                self._model = None      # use the freshest model (Mac 16:00 or GitHub)
         except Exception:
             log.exception("daily retraining failed; using current models")
         results = D.run_daily(self.conn, ctx, self.capital, self.model())
@@ -640,7 +648,7 @@ class Monitor:
             if model is not None:
                 log.info("Daily Mac training: %s model retrained on %s days up to %s",
                          target.label, model.train_days, model.train_to)
-        self._imodel = self._cmodel = None
+        self._imodel = self._cmodel = self._model = None
 
     def angel_topup(self, now: datetime) -> None:
         settings = getattr(self.prices, "settings", None)

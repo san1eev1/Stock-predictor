@@ -218,3 +218,19 @@ def test_mac_trains_nothing_when_training_is_on_github(tmp_path, ctx_model, monk
     monkeypatch.setattr(MON.T, "retrain_intraday", lambda *a, **k: pytest.fail("trained"))
     monkeypatch.setattr(MON.T, "tune_intraday", lambda *a, **k: pytest.fail("tuned"))
     assert "retrain" not in mon.tick() and "tune" not in mon.tick()
+
+
+def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
+    ctx, model = ctx_model
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 15, 50))  # Monday
+    monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d: ctx))
+    monkeypatch.setattr(MON.config, "MAC_TRAINING", False)
+    monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", True)
+    calls = []
+    monkeypatch.setattr(mon, "daily_mac_train", lambda c: calls.append(1))
+    monkeypatch.setattr(mon, "angel_topup", lambda now: None)
+    mon._started = True
+    assert "mac-train" not in mon.tick()                  # 15:50: not yet
+    clock["now"] = ist(2026, 9, 28, 16, 1)
+    assert "mac-train" in mon.tick() and calls == [1]
+    assert "mac-train" not in mon.tick() and calls == [1]  # once a day
