@@ -49,6 +49,42 @@ TIPS = re.compile(
     r"is (?:important|attractive) to you|presents an opportunity|"
     r"top (?:gainers?|losers?)|gainers (?:and|&) losers", re.I)
 
+# Headlines that only report a price move ("X shares fall 2%", "share price today", 52-week
+# highs, index moves). Dropped unless they also name a company event (EVENT): prices are
+# already known to the model; the news signal should be about the company itself.
+MOVE_ONLY = re.compile(
+    r"\b(?:shares?|stocks?|scrip|share price|stock price)\b.{0,60}?\b(?:rise[sn]?|rose|jump(?:s|ed)?|surge[sd]?|"
+    r"gain(?:s|ed)?|climb(?:s|ed)?|rall(?:y|ies|ied)|soar(?:s|ed)?|spurt|zoom(?:s|ed)?|up|fall(?:s|en)?|fell|"
+    r"drop(?:s|ped)?|declin(?:e|es|ed)|slip(?:s|ped)?|slump(?:s|ed)?|down|tumbl(?:e|es|ed)|plung(?:e|es|ed)|"
+    r"crash(?:es|ed)?|sink(?:s)?|sank|tank(?:s|ed)?|trade[sd]? (?:higher|lower|flat)|edge[sd]? (?:up|down|higher|lower)|"
+    r"extend(?:s|ed)? (?:gains|losses)|in (?:green|red))\b"
+    r"|\b(?:rise[sn]?|rose|jump(?:s|ed)?|surge[sd]?|gain(?:s|ed)?|fall(?:s|en)?|fell|drop(?:s|ped)?|slip(?:s|ped)?|"
+    r"decline[sd]?|tumble[sd]?|plunge[sd]?|up|down)\s+(?:over |nearly |about |up to )?\d+(?:\.\d+)?\s?%"
+    r"|price (?:live|today)|(?:share|stock)/?(?:stock|share)? price live|live (?:updates|blog)|"
+    r"52[- ]?w(?:ee)?k (?:high|low)|all[- ]time (?:high|low)|record high|record low|"
+    r"(?:upper|lower) circuit|straight session|(?:sustained|consecutive) (?:gains|losses)|sees (?:sustained )?(?:gains|losses)|"
+    r"why is .{0,60} (?:falling|rising|up|down)|buzzing|in focus|\bsensex\b|\bnifty\b|stock market (?:today|live)|"
+    r"block (?:trade|deal)s? on|after the close with|stock (?:analysis|performance)|share price (?:history|forecast)|"
+    r"caught the eye of investors|key financial ratios|how .{0,60} stocks? (?:are|is) performing|"
+    r"(?:share|stock) price live|live (?:nse|bse)", re.I)
+# Company events that make a price-move headline real news ("shares jump after Q1 profit ...").
+EVENT = re.compile(
+    r"\b(?:q[1-4]|fy\d{2}|results?|profit|loss(?:es)? (?:widen|narrow)|revenue|sales|earnings|ebitda|margin|guidance|"
+    r"order|orders|contract|deal|acqui|merger|demerger|stake|buyback|dividend|bonus|split|ipo|ofs|qip|fund ?rais|"
+    r"approv|licen[cs]e|launch|plant|capacity|expansion|capex|partnership|agreement|mou|joint venture|"
+    r"ceo|cfo|md\b|chairman|resign|appoint|board|management|promoter|pledge|sebi|rbi|cci|court|tribunal|nclt|"
+    r"arbitration|penalty|fine[sd]?\b|raid|probe|fraud|ban\b|recall|usfda|fda|warning letter|downgrade|upgrade|"
+    r"rating|tariff|strike|fire|accident|outage|default|debt|loan|npa|asset quality|subscriber|volumes?|deliveries|"
+    r"production|cargo|sales data|monthly|business update|guidance|block deal|bulk deal|"
+    r"proposal|regulat|policy|government|govt|ministry|fssai|duty|gst|excise|tax)", re.I)
+
+
+def is_noise(title: str) -> bool:
+    """Tips, or a price move with no company event behind it."""
+    t = str(title)
+    return bool(TIPS.search(t)) or (bool(MOVE_ONLY.search(t)) and not EVENT.search(t))
+
+
 _SUFFIXES = re.compile(r"\b(ltd|limited|corporation|corp|inc)\b\.?", re.I)
 # Headlines about foreign-listed namesakes (e.g. Cummins Inc on NYSE vs Cummins India).
 FOREIGN = re.compile(r"\((?:NYSE|NASDAQ|OTC|LSE|TSX)\s*:", re.I)
@@ -69,7 +105,7 @@ def parse_rss(xml_text: str, symbol: str) -> list[dict]:
         if source and title.endswith(f" - {source}"):
             title = title[: -len(source) - 3].strip()
         pub = item.findtext("pubDate")
-        if not title or not pub or FOREIGN.search(title) or TIPS.search(title):
+        if not title or not pub or FOREIGN.search(title) or is_noise(title):
             continue
         items.append({
             "symbol": symbol,
@@ -109,7 +145,7 @@ def load_news(store_dir: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=NEWS_COLS)
     df = pd.concat((pd.read_csv(f) for f in files), ignore_index=True)
     df["published"] = pd.to_datetime(df["published"], utc=True)
-    return df[~df["title"].astype(str).str.contains(TIPS)].reset_index(drop=True)
+    return df[~df["title"].map(is_noise)].reset_index(drop=True)
 
 
 def append_news(store_dir: Path, rows: list[dict]) -> pd.DataFrame:

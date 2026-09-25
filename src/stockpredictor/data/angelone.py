@@ -124,8 +124,16 @@ class AngelDataClient:
             "fromdate": start.strftime("%Y-%m-%d %H:%M"),
             "todate": end.strftime("%Y-%m-%d %H:%M"),
         }
-        resp = self._require_login().getCandleData(params)
-        time.sleep(0.4)  # stay under SmartAPI rate limits
-        if not resp or not resp.get("status"):
-            raise AngelOneError(f"Candle fetch failed: {resp and resp.get('message')}")
-        return [tuple(row) for row in (resp.get("data") or [])]
+        # Angel One throttles bursts (answers with an unparsable page): back off and retry.
+        for wait in (0, 2, 6, 15):
+            time.sleep(wait)
+            try:
+                resp = self._require_login().getCandleData(params)
+            except Exception as exc:
+                resp, err = None, exc
+            else:
+                err = None
+            time.sleep(0.5)  # stay under SmartAPI rate limits
+            if resp and resp.get("status"):
+                return [tuple(row) for row in (resp.get("data") or [])]
+        raise AngelOneError(f"Candle fetch failed: {err or (resp and resp.get('message'))}")

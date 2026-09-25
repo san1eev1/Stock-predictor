@@ -22,7 +22,9 @@ from stockpredictor.features import intraday as FI
 from stockpredictor.models import intraday as MI
 from stockpredictor.paper import engine as E
 
-HORIZON = "intraday"
+HORIZON = "intraday"                 # 9:45 -> 12:30 book
+CLOSE_HORIZON = MI.CLOSE.horizon     # 9:45 -> 15:15 book ("until the close")
+BOOKS = (HORIZON, CLOSE_HORIZON)
 N_CANDIDATES = 10        # buy and sell candidates shown and judged each day
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
@@ -71,10 +73,11 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
               prices: dict[str, float], today: pd.Timestamp, rules: B.IntradayRules,
               capital: float, negative_news: set[str] = frozenset(),
               strengths: pd.Series | None = None,
-              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> dict:
-    """Score, pick, save predictions and open paper trades at live prices."""
-    E.ensure_account(conn, capital, HORIZON)
-    start_day(conn, capital)
+              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS, horizon: str = HORIZON) -> dict:
+    """Score, pick, save predictions and open paper trades at live prices (in `horizon`'s
+    own Rs 1 lakh book)."""
+    E.ensure_account(conn, capital, horizon)
+    start_day(conn, capital, horizon)
     stamp = f"{today:%Y-%m-%d}"
     conn.executemany("INSERT OR REPLACE INTO intraday_open VALUES (?, ?, ?)",
                      [(stamp, r.symbol, float(r.c30)) for r in feats_today.itertuples()])
@@ -113,7 +116,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         conn.execute(
             "INSERT OR REPLACE INTO predictions (horizon, date, symbol, direction, confidence, rank, "
             "entry_price, stop_loss, target, reasons, model_version) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (HORIZON, stamp, p["symbol"], "up" if sign > 0 else "down", float(p["confidence"]),
+            (horizon, stamp, p["symbol"], "up" if sign > 0 else "down", float(p["confidence"]),
              rank, entry, stop, target, json.dumps(why), model.train_to))
         limit = rules.n_long if sign > 0 else rules.n_short
         qty = int(slot / entry) if rank <= limit else 0
@@ -123,42 +126,12 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         conn.execute(
             "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, costs, "
             "status, reason, stop_loss, target) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (HORIZON, p["symbol"], p["side"], qty, f"{stamp} 09:45", entry, c, "9:45 pick", stop, target))
+            (horizon, p["symbol"], p["side"], qty, f"{stamp} 09:45", entry, c, "9:45 pick", stop, target))
         conn.execute("UPDATE paper_accounts SET cash = cash - ? WHERE horizon = ?",
-                     (qty * entry + c, HORIZON))
+                     (qty * entry + c, horizon))
         opened.append(f"{p['side'].upper():5} {p['symbol']} {qty} @ {entry:.2f}")
     conn.commit()
     return {"skipped": False, "strength": strength, "picks": opened}
-
-
-def predict_only(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.IntradayModel,
-                 prices: dict[str, float], today: pd.Timestamp,
-                 target: MI.Target = MI.CLOSE) -> int:
-    """10 buy / 10 sell predictions without paper trades (the model that learns until the
-    close). Saved like the traded picks, judged when `target`'s exit comes."""
-    stamp = f"{today:%Y-%m-%d}"
-    day = feats_today.assign(score=model.score(feats_today).values)
-    ranked = day.sort_values("score", ascending=False)
-    pct = day["score"].rank(pct=True)
-    ups = ranked.head(N_CANDIDATES).assign(direction="up")
-    downs = ranked.tail(N_CANDIDATES).iloc[::-1].assign(direction="down")
-    ups["rank"], downs["rank"] = range(1, len(ups) + 1), range(1, len(downs) + 1)
-    picks = pd.concat([ups, downs])
-    why = model.explain(picks)
-    n = 0
-    for (idx, p), reasons in zip(picks.iterrows(), why):
-        up = p["direction"] == "up"
-        if not up:
-            reasons = [x for x in reasons if x.startswith("-")] + [x for x in reasons if x.startswith("+")]
-        conn.execute(
-            "INSERT OR REPLACE INTO predictions (horizon, date, symbol, direction, confidence, rank, "
-            "entry_price, reasons, model_version) VALUES (?,?,?,?,?,?,?,?,?)",
-            (target.horizon, stamp, p["symbol"], p["direction"],
-             float(pct[idx] if up else 1 - pct[idx]), int(p["rank"]), prices.get(p["symbol"], p["c30"]),
-             json.dumps(reasons), model.train_to))
-        n += 1
-    conn.commit()
-    return n
 
 
 def exit_comparison(conn: sqlite3.Connection, closes: pd.DataFrame) -> pd.DataFrame:
@@ -195,23 +168,24 @@ def exit_comparison(conn: sqlite3.Connection, closes: pd.DataFrame) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
-def start_day(conn: sqlite3.Connection, capital: float) -> bool:
+def start_day(conn: sqlite3.Connection, capital: float, horizon: str = HORIZON) -> bool:
     """A new day starts with the full capital again (only when nothing is still open)."""
-    if open_trades(conn):
+    if open_trades(conn, horizon):
         return False
     conn.execute("UPDATE paper_accounts SET capital = ?, cash = ? WHERE horizon = ?",
-                 (capital, capital, HORIZON))
+                 (capital, capital, horizon))
     conn.commit()
     return True
 
 
-def daily_results(conn: sqlite3.Connection, capital: float = 100_000) -> pd.DataFrame:
+def daily_results(conn: sqlite3.Connection, capital: float = 100_000,
+                  horizon: str = HORIZON) -> pd.DataFrame:
     """One row per trading day: paper result on a fresh `capital` and how the day's 10 buy /
     10 sell picks did (9:45 -> 12:30), next to picking stocks at random."""
     trades = pd.read_sql("SELECT substr(entry_time, 1, 10) AS date, side, pnl, status "
-                         "FROM paper_trades WHERE horizon = ?", conn, params=(HORIZON,))
+                         "FROM paper_trades WHERE horizon = ?", conn, params=(horizon,))
     preds = pd.read_sql("SELECT date, direction, correct, base_rate FROM predictions "
-                        "WHERE horizon = ? AND correct IS NOT NULL", conn, params=(HORIZON,))
+                        "WHERE horizon = ? AND correct IS NOT NULL", conn, params=(horizon,))
     days = sorted(set(trades["date"]) | set(preds["date"]))
     rows = []
     for d in days:
@@ -231,9 +205,9 @@ def daily_results(conn: sqlite3.Connection, capital: float = 100_000) -> pd.Data
     return pd.DataFrame(rows)
 
 
-def open_trades(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def open_trades(conn: sqlite3.Connection, horizon: str = HORIZON) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM paper_trades WHERE horizon = ? AND status = 'open'",
-                        (HORIZON,)).fetchall()
+                        (horizon,)).fetchall()
 
 
 def close_trade(conn, t, price: float, reason: str, stamp: str,
@@ -245,13 +219,14 @@ def close_trade(conn, t, price: float, reason: str, stamp: str,
                  "status = 'closed', exit_reason = ? WHERE id = ?",
                  (stamp, price, c, gross - t["costs"] - c, reason, t["id"]))
     conn.execute("UPDATE paper_accounts SET cash = cash + ? WHERE horizon = ?",
-                 (t["qty"] * t["entry_price"] + gross - c, HORIZON))
+                 (t["qty"] * t["entry_price"] + gross - c, t["horizon"]))
     return f"{t['side']} {t['symbol']} closed @ {price:.2f} ({reason}), P&L {gross - t['costs'] - c:+.0f}"
 
 
-def check_exits(conn, prices: dict[str, float], stamp: str) -> list[str]:
+def check_exits(conn, prices: dict[str, float], stamp: str,
+                books: tuple[str, ...] = BOOKS) -> list[str]:
     log = []
-    for t in open_trades(conn):
+    for t in [t for h in books for t in open_trades(conn, h)]:
         p = prices.get(t["symbol"])
         if p is None:
             continue
@@ -264,17 +239,18 @@ def check_exits(conn, prices: dict[str, float], stamp: str) -> list[str]:
     return log
 
 
-def square_off(conn, prices: dict[str, float], stamp: str) -> list[str]:
-    log = [close_trade(conn, t, prices.get(t["symbol"], t["entry_price"]), "12:30 square-off", stamp)
-           for t in open_trades(conn)]
+def square_off(conn, prices: dict[str, float], stamp: str, horizon: str = HORIZON) -> list[str]:
+    label = "12:30 square-off" if horizon == HORIZON else "15:15 square-off"
+    log = [close_trade(conn, t, prices.get(t["symbol"], t["entry_price"]), label, stamp)
+           for t in open_trades(conn, horizon)]
     conn.commit()
     return log
 
 
 def evaluate_day(conn, day: str, exit_prices: dict[str, float],
                  horizon: str = HORIZON) -> int:
-    """Judge today's picks by the 9:45 -> 12:30 move (prices at the square-off), and store
-    the random baseline."""
+    """Judge `horizon`'s picks by the move from 9:45 to its square-off (12:30 or 15:15) at
+    `exit_prices`, and store the random baseline."""
     opens = dict(conn.execute("SELECT symbol, c30 FROM intraday_open WHERE date = ?", (day,)).fetchall())
     moves = {s: exit_prices[s] / c - 1 for s, c in opens.items() if s in exit_prices}
     up_share = sum(m > 0 for m in moves.values()) / len(moves) if moves else None
@@ -291,22 +267,22 @@ def evaluate_day(conn, day: str, exit_prices: dict[str, float],
                      (px, ret, int(ret > 0 if up else ret < 0),
                       None if up_share is None else (up_share if up else 1 - up_share), p["id"]))
         n += 1
-    if horizon == HORIZON:                   # the traded model also books the paper result
-        v = value(conn, exit_prices)
+    if horizon in BOOKS:                     # book the paper result too
+        v = value(conn, exit_prices, horizon)
         conn.execute("INSERT OR REPLACE INTO paper_equity VALUES (?, ?, ?, ?, ?)",
-                     (HORIZON, day, v["cash"], v["holdings"], v["equity"]))
+                     (horizon, day, v["cash"], v["holdings"], v["equity"]))
     conn.commit()
     return n
 
 
-def value(conn, prices: dict[str, float]) -> dict:
+def value(conn, prices: dict[str, float], horizon: str = HORIZON) -> dict:
     """Account value with open longs and shorts marked to `prices`."""
     acct = conn.execute("SELECT capital, cash FROM paper_accounts WHERE horizon = ?",
-                        (HORIZON,)).fetchone()
+                        (horizon,)).fetchone()
     if acct is None:
         return {"capital": 0, "cash": 0, "holdings": 0, "equity": 0, "pnl": 0, "positions": 0}
     held = 0.0
-    trades = open_trades(conn)
+    trades = open_trades(conn, horizon)
     for t in trades:
         sign = 1 if t["side"] == "long" else -1
         p = prices.get(t["symbol"], t["entry_price"])

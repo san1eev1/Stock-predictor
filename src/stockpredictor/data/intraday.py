@@ -39,6 +39,7 @@ TRADE_EXIT = time(12, 30)         # intraday trades are squared off here
 EXIT_COL = "px_1230"              # price at TRADE_EXIT: the model's target and square-off price
 EXIT_MINUTES = 165                # TRADE_EXIT minus the 9:45 entry
 WINDOW_MINUTES = 330              # EXIT_TIME minus 9:45: last minute with stored first-hit times
+CLOSE_EXIT = time(15, 15)         # the second intraday trade squares off here ("until close")
 BAR_MINUTES = 5
 LEVELS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0)   # percent
 LEVEL_COLS = [f"{p}{int(round(lv * 100)):03d}" for p in "ud" for lv in LEVELS]
@@ -169,8 +170,10 @@ def angel_bars(client, token: str, start: date, end: date,
 
 def angel_backfill(client, tokens: dict[str, str], symbols: list[str], start: date, end: date,
                    progress=print) -> int:
-    """Download Angel One 5-minute history for `symbols` and save daily summaries locally."""
-    total = 0
+    """Download Angel One 5-minute history for `symbols` and save daily summaries locally.
+    Stops early when Angel One refuses everything (MAX_FAILS stocks in a row); callers retry
+    the missing stocks later."""
+    total, fails = 0, 0
     for i, sym in enumerate(symbols, 1):
         if sym not in tokens:
             progress(f"[{i}/{len(symbols)}] {sym}: no Angel One token")
@@ -178,10 +181,18 @@ def angel_backfill(client, tokens: dict[str, str], symbols: list[str], start: da
         try:
             rows = summarize(angel_bars(client, tokens[sym], start, end), sym, "angelone")
             total += upsert_backfill(rows)
+            fails = 0
             progress(f"[{i}/{len(symbols)}] {sym}: {len(rows)} days")
         except Exception as exc:
+            fails += 1
             progress(f"[{i}/{len(symbols)}] {sym}: error: {exc}")
+            if fails >= MAX_FAILS:
+                progress(f"stopped after {fails} failures in a row: Angel One is refusing requests")
+                break
     return total
+
+
+MAX_FAILS = 5
 
 
 def backfill_symbols(path: Path = BACKFILL_PATH) -> set[str]:

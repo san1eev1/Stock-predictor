@@ -61,7 +61,7 @@ def replay(row, side: str, rules: IntradayRules, exit_col: str = I.EXIT_COL,
         return c30 * (1 - sign * sl / 100), "stop-loss"
     if not np.isnan(t_tp):
         return c30 * (1 + sign * tp / 100), "target"
-    return row[exit_col], ("12:30 square-off" if exit_col == I.EXIT_COL else "close")
+    return row[exit_col], ("12:30 square-off" if exit_col == I.EXIT_COL else "15:15 square-off")
 
 
 def trade_pnl(side: str, qty: int, entry: float, exit_: float,

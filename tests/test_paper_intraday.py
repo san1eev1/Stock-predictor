@@ -66,3 +66,22 @@ def test_skip_weak_day_and_negative_news(setup):
     PI.run_picks(conn, today, model, prices, today["date"].iloc[0],
                  IntradayRules(n_long=2, n_short=2), 100_000, negative_news={top})
     assert top not in [t["symbol"] for t in PI.open_trades(conn) if t["side"] == "long"]
+
+
+def test_two_books_each_start_with_their_own_capital(setup):
+    conn, model, today = setup
+    d = today["date"].iloc[0]
+    prices = dict(zip(today["symbol"], today["c30"]))
+    rules = IntradayRules(n_long=2, n_short=2)
+    PI.run_picks(conn, today, model, prices, d, rules, 100_000)
+    peer_view = MI.Blended(model, model, 0.5)                   # learning from the other model
+    PI.run_picks(conn, today, peer_view, prices, d, rules, 100_000, horizon=PI.CLOSE_HORIZON)
+    assert len(PI.open_trades(conn)) == 4 and len(PI.open_trades(conn, PI.CLOSE_HORIZON)) == 4
+    PI.square_off(conn, prices, "12:30")                        # only the 12:30 book closes
+    assert PI.open_trades(conn) == [] and len(PI.open_trades(conn, PI.CLOSE_HORIZON)) == 4
+    assert PI.value(conn, prices, PI.CLOSE_HORIZON)["capital"] == 100_000
+    log = PI.square_off(conn, prices, "15:15", PI.CLOSE_HORIZON)
+    assert all("15:15 square-off" in x for x in log)
+    PI.evaluate_day(conn, f"{d:%Y-%m-%d}", prices, PI.CLOSE_HORIZON)
+    days = PI.daily_results(conn, 100_000, PI.CLOSE_HORIZON)
+    assert len(days) == 1 and days["trades"].iloc[0] == 4

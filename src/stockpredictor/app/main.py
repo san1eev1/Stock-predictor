@@ -331,11 +331,62 @@ def page_paper_longterm():
 
 def page_paper_intraday():
     st.title("Paper trading — Intraday")
-    st.caption("Every trading day at 9:46: buys the 10 stocks expected to rise and short-sells the "
-               "10 expected to fall, with a stop-loss and target, all closed by 12:30 (the model keeps "
-               "learning from the market until the 15:30 close).")
-    accuracy_now_panel("intraday")
-    paper_intraday()
+    st.caption("Two books, each starting every day with its own ₹1 lakh. At 9:46 each model buys "
+               "the stocks it expects to rise and short-sells the ones it expects to fall, with "
+               "a stop-loss and target. Book 1 closes everything at 12:30, book 2 at 15:15 "
+               "(the close). After the close they are compared and both learn.")
+    tab1, tab2, tab3 = st.tabs(["Until 12:30", "Until close (15:15)", "🏆 Competition"])
+    with tab1:
+        accuracy_now_panel(PI.HORIZON)
+        paper_intraday(PI.HORIZON)
+    with tab2:
+        accuracy_now_panel(PI.CLOSE_HORIZON)
+        paper_intraday(PI.CLOSE_HORIZON)
+    with tab3:
+        competition()
+
+
+def competition():
+    """Day by day: which book did better, and the running score."""
+    c = conn()
+    cap = SETTINGS.paper_capital_intraday
+    a = PI.daily_results(c, cap, PI.HORIZON)
+    b = PI.daily_results(c, cap, PI.CLOSE_HORIZON)
+    st.subheader("🏆 12:30 vs close — who wins each day?")
+    if a.empty or b.empty:
+        st.caption("The competition starts on the first trading day both books trade "
+                   "(results after 15:15).")
+        return
+    m = a.merge(b, on="date", suffixes=("_1230", "_close"))
+    m = m[(m["open_1230"] == 0) & (m["open_close"] == 0)]
+    if m.empty:
+        st.caption("Today's result appears after 15:15.")
+        return
+    m["Winner"] = ["12:30" if x > y else "Close" if y > x else "Tie"
+                   for x, y in zip(m["pnl_1230"], m["pnl_close"])]
+    wins = m["Winner"].value_counts()
+    k = st.columns(4)
+    k[0].metric("Days compared", len(m))
+    k[1].metric("12:30 book won", int(wins.get("12:30", 0)))
+    k[2].metric("Close book won", int(wins.get("Close", 0)))
+    lead = m["pnl_1230"].sum() - m["pnl_close"].sum()
+    k[3].metric("P&L difference (12:30 − close)", C.money(lead))
+    t = m.iloc[::-1]
+    st.dataframe(pd.DataFrame({
+        "Day": t["date"], "Winner": t["Winner"],
+        "12:30 P&L": t["pnl_1230"], "Close P&L": t["pnl_close"],
+        "12:30 picks right": (t["accuracy_1230"] * 100).round(0),
+        "Close picks right": (t["accuracy_close"] * 100).round(0)}),
+        hide_index=True, width="stretch", column_config={
+            "12:30 P&L": st.column_config.NumberColumn(format="₹%.0f"),
+            "Close P&L": st.column_config.NumberColumn(format="₹%.0f"),
+            "12:30 picks right": st.column_config.NumberColumn(format="%.0f%%"),
+            "Close picks right": st.column_config.NumberColumn(format="%.0f%%")})
+    st.caption("How they learn from each other: each model's self-tuning may blend in the other "
+               "model's ranking when that makes it more accurate on days it hasn't seen — the "
+               "blend is kept only if it wins. Both retrain on each day's full session after the "
+               "close.")
+    exit_comparison()
 
 
 @st.fragment(run_every=REFRESH)
@@ -437,39 +488,39 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
                 "P&L (after costs)": st.column_config.NumberColumn(format="₹%.0f")})
 
 
-def page_intraday():
-    st.title("Intraday picks")
-    st.header("Until 12:30 — traded")
-    accuracy_now_panel("intraday")
-    c = conn()
-    rules, enabled = PI.get_rules(c)
-    st.caption(f"At 9:45 the model ranks all Nifty 250 stocks on the first 30 minutes. "
-               f"Stop-loss {rules.stop_loss}%, "
-               f"target {rules.target or 'none'}%, squared off at 12:30. It lists 10 buy and 10 sell "
-               f"candidates; 🧪 marks the {rules.n_long} + {rules.n_short} strongest that are "
-               "paper-traded (change in Settings).")
-    if not enabled:
-        st.warning("Intraday is switched off in Settings.")
+def page_intraday_1230():
+    page_intraday(MI.TRADE)
 
-    last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = 'intraday'").fetchone()[0]
-    if not last:
-        intraday_preview()
-    else:
-        intraday_live(last)
 
-    st.divider()
-    st.header("Until the 15:30 close — learning model")
-    st.caption("A second model predicts 9:45 → close for the same stocks. It is not traded; it "
-               "keeps learning from the market until the close and is judged at 15:30.")
-    accuracy_now_panel("intraday_close")
-    last_close = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = ?",
-                           (MI.CLOSE.horizon,)).fetchone()[0]
-    if last_close:
-        intraday_live(last_close, MI.CLOSE)
-    else:
-        st.caption("Its first picks appear at 9:46 on the next trading day.")
+def page_intraday_close():
+    page_intraday(MI.CLOSE)
     st.divider()
     exit_comparison()
+
+
+def page_intraday(target: MI.Target):
+    first = target == MI.TRADE
+    st.title("Intraday — until 12:30" if first else "Intraday — until close")
+    accuracy_now_panel(target.horizon)
+    c = conn()
+    rules, enabled = PI.get_rules(c)
+    exit_at = "12:30" if first else "15:15 (close)"
+    st.caption(f"At 9:45 this model ranks all Nifty 250 stocks on the first 30 minutes and "
+               f"predicts the move until {exit_at}. Stop-loss {rules.stop_loss}%, target "
+               f"{rules.target or 'none'}%, squared off at {exit_at}. It lists 10 buy and 10 sell "
+               f"candidates; 🧪 marks the {rules.n_long} + {rules.n_short} strongest that are "
+               "paper-traded on this model's own ₹1 lakh. Both intraday models keep learning "
+               "until the close, compete, and can learn from each other.")
+    if not enabled:
+        st.warning("Intraday is switched off in Settings.")
+    last = c.execute("SELECT MAX(date) FROM predictions WHERE horizon = ?",
+                     (target.horizon,)).fetchone()[0]
+    if last:
+        intraday_live(last, target)
+    elif first:
+        intraday_preview()
+    else:
+        st.caption("Its first picks appear at 9:46 on the next trading day.")
 
 
 def exit_comparison():
@@ -556,14 +607,14 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
     c = conn()
     traded_model = target == MI.TRADE
     until = "12:30" if traded_model else "close"
+    exit_col = "Exit 12:30" if traded_model else "Exit 15:15"
     preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = ? AND date = ?",
                         c, params=(target.horizon, day))
     live = live_prices(c)
     closes = closing_prices(day)
     st.subheader(f"Picks for {pd.Timestamp(day):%d %b %Y}")
-    st.caption("Exit 12:30 = price at the intraday square-off (judged here) · Live = now · "
-               "Close 15:30 = market close (appears after 15:30)." if traded_model else
-               "Live = now · Close 15:30 = market close, where these picks are judged.")
+    st.caption(f"{exit_col} = price at this model's square-off (judged here) · Live = now · "
+               "Close 15:30 = market close (appears after 15:30).")
     traded = {(r[0], r[1]) for r in c.execute(
         "SELECT symbol, side FROM paper_trades WHERE horizon = 'intraday' AND entry_time LIKE ?",
         (f"{day}%",))}
@@ -576,7 +627,7 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
         live_px = p["symbol"].map(live).astype(float)
         # Exit price at 12:30 once squared off; the live price until then.
         now_px = p["actual_exit"].astype(float).fillna(live_px)
-        p["Exit 12:30"] = p["actual_exit"].astype(float)
+        p[exit_col] = p["actual_exit"].astype(float)
         p["Live"] = live_px
         p["Close 15:30"] = p["symbol"].map(closes).astype(float)
         p["Move"] = dash(sign * (now_px / p["entry_price"] - 1), "{:+.2%}")
@@ -589,10 +640,8 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
         p["Paper"] = ["🧪" if (s_, side) in traded else "" for s_ in p["symbol"]]
         st.markdown(f"**{title}**")
         cols = ["symbol", "Paper", "confidence", "entry_price", "stop_loss", "target",
-                "Exit 12:30", "Live", "Close 15:30", "Today %", "Share since 9:45", "Move",
+                exit_col, "Live", "Close 15:30", "Today %", "Share since 9:45", "Move",
                 "Result", "Why"]
-        if not traded_model:                 # not traded: no stops, judged at the close
-            cols = [x for x in cols if x not in ("Paper", "stop_loss", "target", "Exit 12:30")]
         st.dataframe(p[cols].rename(columns={
             "symbol": "Stock", "confidence": "Confidence", "entry_price": "Entry 9:45",
             "stop_loss": "Stop-loss", "target": "Target", "Move": "Move (in our favour)",
@@ -601,23 +650,25 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
                 format="percent", min_value=0, max_value=1),
                 "Today %": PCT, "Share since 9:45": PCT,
                 **{k_: st.column_config.NumberColumn(format="₹%.2f")
-                   for k_ in ["Entry 9:45", "Stop-loss", "Exit 12:30", "Live", "Close 15:30"]}})
+                   for k_ in ["Entry 9:45", "Stop-loss", exit_col, "Live", "Close 15:30"]}})
 
 
 @st.fragment(run_every=REFRESH)
-def paper_intraday():
+def paper_intraday(horizon: str = PI.HORIZON):
     c = conn()
-    E.ensure_account(c, SETTINGS.paper_capital_intraday, PI.HORIZON)
+    E.ensure_account(c, SETTINGS.paper_capital_intraday, horizon)
     live = live_prices(c)
-    v = PI.value(c, live)
+    v = PI.value(c, live, horizon)
     k = st.columns(4)
     k[0].metric("Started today with", rupees(v["capital"]),
                 help="Every trading day starts fresh with ₹1 lakh")
     k[1].metric("Value now", rupees(v["equity"]), C.money(v["pnl"]))
     k[2].metric("Cash", rupees(v["cash"]))
     k[3].metric("Open positions", f"{v['positions']}")
-    trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = 'intraday' "
-                         "ORDER BY entry_time DESC, id", c)
+    exit_name = "Exit (12:30 or stop/target)" if horizon == PI.HORIZON \
+        else "Exit (15:15 or stop/target)"
+    trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? "
+                         "ORDER BY entry_time DESC, id", c, params=(horizon,))
     if trades.empty:
         st.caption("No intraday paper trades yet — they open at 9:46 on trading days.")
         return
@@ -654,22 +705,23 @@ def paper_intraday():
         st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Exit", "Live", "Close 15:30",
                         "Share move %", "Today %", "stop_loss", "target", "P&L", "Status"]].rename(columns={
             "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45",
-            "Exit": "Exit (12:30 or stop/target)", "stop_loss": "Stop-loss",
+            "Exit": exit_name, "stop_loss": "Stop-loss",
             "target": "Target", "P&L": "P&L (after costs)"}), hide_index=True, width="stretch",
             column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
-                           for k_ in ["Entry 9:45", "Exit (12:30 or stop/target)", "Live",
+                           for k_ in ["Entry 9:45", exit_name, "Live",
                                       "Close 15:30", "Stop-loss", "Target", "P&L (after costs)"]}
             | {"Share move %": PCT, "Today %": PCT})
-    intraday_days(c)
+    intraday_days(c, horizon)
 
 
-def intraday_days(c):
+def intraday_days(c, horizon: str = PI.HORIZON):
     """Every day's result on a fresh ₹1 lakh, compared day by day."""
     cap = SETTINGS.paper_capital_intraday
-    d = PI.daily_results(c, cap)
+    d = PI.daily_results(c, cap, horizon)
     st.subheader("📅 Day by day (each day starts with ₹1 lakh)")
     if d.empty:
-        st.caption("The first day's result appears after 12:30.")
+        st.caption("The first day's result appears after "
+                   f"{'12:30' if horizon == PI.HORIZON else '15:15'}.")
         return
     done = d[d["open"] == 0]
     if len(done) >= 2:
@@ -717,7 +769,7 @@ def intraday_days(c):
             a["date"] = pd.to_datetime(a["date"])
             st.altair_chart(C.lines(a[["date", "series", "value"]].dropna(), "date", "value",
                                     "series", ".0%", "Picks right"), width="stretch")
-    st.caption("Each day's picks and trades are kept. After 12:30 they are judged and fed "
+    st.caption("Each day's picks and trades are kept. After the square-off they are judged and fed "
                "back into training — buy and sell picks, wrong calls weighted more — so later "
                "days can be compared with earlier ones.")
 
@@ -812,8 +864,8 @@ def page_accuracy():
 def accuracy_now_panel(horizon: str):
     """This model's accuracy, predicted-UP and predicted-DOWN picks in separate tables."""
     now = now_ist().replace(tzinfo=None)
-    name = {"longterm": "Long-term", "intraday": "Intraday until 12:30 (traded)",
-            "intraday_close": "Intraday until the 15:30 close (learning)"}[horizon]
+    name = {"longterm": "Long-term", "intraday": "Intraday until 12:30",
+            "intraday_close": "Intraday until close (15:15)"}[horizon]
     st.subheader(f"📊 {name} — accuracy · {now:%H:%M}")
     c = conn()
     acc = SB.by_direction(c, horizon, now, live_prices(c), prev_closes())
@@ -834,8 +886,8 @@ def accuracy_now_panel(horizon: str):
                 "lagged. 'Today' uses live prices vs yesterday's close." if horizon == "longterm"
                 else "Judged at 12:30: a buy pick is right if it rose from 9:45, a sell pick if it "
                 "fell." if horizon == "intraday"
-                else "A second model that keeps learning until the close: judged at 15:30, a buy "
-                "pick is right if it rose from 9:45, a sell pick if it fell. Not traded.") + " 'Random' = picking stocks at random on the same days. "
+                else "Judged at 15:15 (the close square-off): a buy pick is right if it rose from "
+                "9:45, a sell pick if it fell.") + " 'Random' = picking stocks at random on the same days. "
                "Updates every minute.")
 
 
@@ -847,9 +899,9 @@ ACCURACY_TEXT = {
                  "from 9:45, a short is ✅ if it fell. Random baseline = share of all Nifty 250 "
                  "stocks that moved that way.", "Results appear after the first trading day.",
                  "9:45 → 12:30"),
-    "intraday_close": ("The learning model's pick is judged at the 15:30 close: a buy is ✅ if the "
-                       "price rose from 9:45, a sell is ✅ if it fell. Not traded.",
-                       "Results appear after the first trading day's close.", "9:45 → close"),
+    "intraday_close": ("An until-close pick is judged at the 15:15 square-off: a buy is ✅ if the "
+                       "price rose from 9:45, a sell is ✅ if it fell.",
+                       "Results appear after the first trading day's close.", "9:45 → 15:15"),
 }
 
 
@@ -1161,7 +1213,8 @@ def page_settings():
 
 
 pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
-         st.Page(page_intraday, title="Intraday picks", icon="⚡"),
+         st.Page(page_intraday_1230, title="Intraday — until 12:30", icon="⚡"),
+         st.Page(page_intraday_close, title="Intraday — until close", icon="🔔"),
          st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
          st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),

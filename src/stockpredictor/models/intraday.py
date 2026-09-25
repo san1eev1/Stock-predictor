@@ -1,5 +1,7 @@
-"""Intraday ranking models: which stocks will do best / worst from 9:45 to 12:30 (traded),
-and from 9:45 to the 15:30 close (a second model that keeps learning until the close)."""
+"""Intraday ranking models: which stocks will do best / worst from 9:45 to 12:30, and from
+9:45 until the close (15:15 square-off). Both are paper-traded on their own Rs 1 lakh a day,
+compete after every close, and can learn from each other: each model's tuning may blend in
+the other model's ranking (peer_weight) when that is more accurate out-of-sample."""
 
 from __future__ import annotations
 
@@ -30,10 +32,39 @@ class Target:
     label: str
 
 
-TRADE = Target("intraday", I.EXIT_COL, MODEL_DIR, "until 12:30 (traded)")
-CLOSE = Target("intraday_close", "close", LOCAL_MODELS_DIR / "intraday_close",
-               "until the 15:30 close (learning)")
+TRADE = Target("intraday", I.EXIT_COL, MODEL_DIR, "until 12:30")
+CLOSE = Target("intraday_close", "px_1515", LOCAL_MODELS_DIR / "intraday_close",
+               "until the close (15:15 square-off)")
 TARGETS = (TRADE, CLOSE)
+
+
+def peer_of(target: Target) -> Target:
+    return CLOSE if target == TRADE else TRADE
+
+
+class Blended:
+    """A model's scores blended with its peer's ranking (learning from each other).
+    Used exactly like an IntradayModel for picking; reasons come from the model itself."""
+
+    def __init__(self, own: "IntradayModel", peer: "IntradayModel | None", weight: float):
+        self.own, self.peer, self.weight = own, peer, weight
+        self.train_to = own.train_to
+
+    def score(self, feats: pd.DataFrame) -> pd.Series:
+        s = self.own.score(feats)
+        if self.peer is None or not self.weight:
+            return s
+        return blend(s, self.peer.score(feats), feats["date"], self.weight)
+
+    def explain(self, feats: pd.DataFrame, top: int = 3) -> list[list[str]]:
+        return self.own.explain(feats, top)
+
+
+def blend(own: pd.Series, peer: pd.Series, dates: pd.Series, weight: float) -> pd.Series:
+    """Per day: (1 - weight) x own rank + weight x peer rank (both 0..1)."""
+    r_own = own.groupby(dates.values).rank(pct=True)
+    r_peer = peer.groupby(dates.values).rank(pct=True)
+    return (1 - weight) * r_own + weight * r_peer
 # Held while model files are written or read (background training runs in another thread).
 MODEL_LOCK = threading.RLock()
 MIN_TRAIN_DAYS = 40
@@ -69,6 +100,7 @@ def _fit(train: pd.DataFrame, cols: list[str], params: dict | None = None) -> En
     params = {"early_stopping": True, "n_seeds": 3, **(params or current_params())}
     weights = sample_weights(train, params)
     params.pop("tail_weight", None)
+    params.pop("peer_weight", None)            # used when scoring (Blended), not by LightGBM
     return engine.fit(train, cols, params, weights, gap_days=1, default_rounds=NUM_ROUNDS)
 
 

@@ -37,7 +37,8 @@ AFTER_CLOSE = time(17, 15)
 LOCAL_FETCH_AFTER = time(17, 45)   # fetch prices ourselves if GitHub hasn't by then
 INTRADAY_PICKS = time(9, 46)       # first 30 minutes complete
 INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) until 14:30
-INTRADAY_SQUARE_OFF = time(12, 30)   # intraday trades close here (data.intraday.TRADE_EXIT)
+INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.intraday.TRADE_EXIT)
+CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
@@ -84,7 +85,8 @@ class Monitor:
         self._last_pick_try: datetime | None = None
         self.capital_intraday = capital_intraday
         E.ensure_account(conn, capital)
-        E.ensure_account(conn, capital_intraday, PI.HORIZON)
+        for book in PI.BOOKS:
+            E.ensure_account(conn, capital_intraday, book)
 
     # --- helpers -----------------------------------------------------------
     def ctx(self, reload: bool = False) -> E.MarketContext:
@@ -109,7 +111,7 @@ class Monitor:
 
     def watched_symbols(self) -> set[str]:
         syms = set(E.holdings(self.conn)) | set(E.holdings(self.conn, E.SHORT_HORIZON))
-        syms |= {t["symbol"] for t in PI.open_trades(self.conn)}
+        syms |= {t["symbol"] for h in PI.BOOKS for t in PI.open_trades(self.conn, h)}
         syms |= {r[0] for r in self.conn.execute(
             "SELECT symbol FROM paper_orders WHERE status = 'pending'")}
         for h in R.HORIZONS:
@@ -150,6 +152,9 @@ class Monitor:
             if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
                 self.square_off_job(now)
                 done.append("square-off")
+            if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "id_close_squareoff") != day:
+                self.square_off_job(now, PI.CLOSE_HORIZON)
+                done.append("square-off-close")
 
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
                 self.quarter_job(now)
@@ -171,7 +176,6 @@ class Monitor:
                 and _setting(self.conn, "id_last_squareoff") == day \
                 and _setting(self.conn, "live_learn_day") != day:
             _set(self.conn, "live_learn_day", day)
-            self.judge_close(day)
             if self.background is not None:
                 self.background.learn_from_today(now.date())
                 done.append("live-learn")
@@ -382,42 +386,39 @@ class Monitor:
         negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
         strengths = PI.recent_strengths(model, self.store_dir, ctx, rules) \
             if rules.skip_quantile > 0 else None
-        r = PI.run_picks(self.conn, feats, model, prices, pd.Timestamp(now.date()), rules,
-                         self.capital_intraday, negative, strengths)
+        # Each model may blend in the other's ranking (learning from each other).
         close_model = self.close_model()
-        if close_model is not None:              # predictions only: learns until the close
-            PI.predict_only(self.conn, feats, close_model, prices, pd.Timestamp(now.date()))
+        trade_view = MI.Blended(model, close_model,
+                                MI.current_params(MI.TRADE).get("peer_weight") or 0)
+        r = PI.run_picks(self.conn, feats, trade_view, prices, pd.Timestamp(now.date()), rules,
+                         self.capital_intraday, negative, strengths)
+        if close_model is not None:              # second book: 9:45 -> 15:15
+            close_view = MI.Blended(close_model, model,
+                                    MI.current_params(MI.CLOSE).get("peer_weight") or 0)
+            rc = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
+                              rules, self.capital_intraday, negative, horizon=PI.CLOSE_HORIZON)
+            log.info("Intraday picks (until close): %s", "; ".join(rc["picks"]) or "none")
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
 
-    def judge_close(self, day: str) -> None:
-        """Judge the 9:45 -> close predictions at the day's closing prices."""
-        syms = {r[0] for r in self.conn.execute(
-            "SELECT symbol FROM predictions WHERE horizon = ? AND date = ?", (MI.CLOSE.horizon, day))}
-        syms |= {r[0] for r in self.conn.execute(
-            "SELECT symbol FROM intraday_open WHERE date = ?", (day,))}
-        if not syms:
-            return
-        n = PI.evaluate_day(self.conn, day, self.prices.get(sorted(syms)), MI.CLOSE.horizon)
-        if n:
-            log.info("Judged %d 9:45 -> close predictions at the closing prices", n)
-
-    def square_off_job(self, now: datetime) -> None:
+    def square_off_job(self, now: datetime, book: str = PI.HORIZON) -> None:
+        """Close `book`'s trades (12:30 book, or the 15:15 'until close' book) and judge its
+        picks at these prices."""
         day = f"{now:%Y-%m-%d}"
-        _set(self.conn, "id_last_squareoff", day)
+        _set(self.conn, "id_last_squareoff" if book == PI.HORIZON else "id_close_squareoff", day)
         stamp = now.strftime("%Y-%m-%d %H:%M")
         opens = [r[0] for r in self.conn.execute(
             "SELECT symbol FROM intraday_open WHERE date = ?", (day,))]
-        symbols = sorted(set(opens) | {t["symbol"] for t in PI.open_trades(self.conn)})
+        symbols = sorted(set(opens) | {t["symbol"] for t in PI.open_trades(self.conn, book)})
         if not symbols:
             return
         prices = self.prices.get(symbols)
-        for line in PI.square_off(self.conn, prices, stamp):
-            alert(self.conn, "paper-intraday", "fill", line.split()[1], f"{stamp} {line}")
-        PI.evaluate_day(self.conn, day, prices)
+        for line in PI.square_off(self.conn, prices, stamp, book):
+            alert(self.conn, f"paper-{book}", "fill", line.split()[1], f"{stamp} {line}")
+        PI.evaluate_day(self.conn, day, prices, book)
         self.print_scoreboard(now)
 
     def quarter_job(self, now: datetime) -> None:

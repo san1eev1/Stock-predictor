@@ -407,6 +407,9 @@ def cmd_app(settings) -> None:
         print("Stopped.")
 
 
+BACKFILL_ATTEMPTS = 8        # Angel One history: tries, 30 minutes apart
+
+
 def _angel_startup(settings, store_dir: Path) -> None:
     """Check the Angel One login; download intraday history in the background if missing."""
     import threading
@@ -443,30 +446,46 @@ def _angel_startup(settings, store_dir: Path) -> None:
 
     def job():
         import logging
+        import time as _time
 
+        from stockpredictor.models import intraday as MI
         from stockpredictor.models import trainer as T
         from stockpredictor.paper.engine import MarketContext
 
         log = logging.getLogger("backfill")
+        remaining, total = list(todo), 0
+        for attempt in range(1, BACKFILL_ATTEMPTS + 1):
+            try:
+                tokens = angelone.fetch_nse_equity_tokens()
+                failed = []
+                total += intraday.angel_backfill(
+                    client, tokens, remaining, date.today() - timedelta(days=730),
+                    date.today() - timedelta(days=1),
+                    progress=lambda m: failed.append(m) if "error" in m else log.debug(m))
+            except Exception:
+                log.exception("Angel One backfill failed")
+            missing = (set(active) - intraday.backfill_symbols()) | \
+                (set(active) & intraday.backfill_missing_exit())
+            remaining = [s_ for s_ in remaining if s_ in missing]
+            if not remaining:
+                break
+            log.warning("Angel One history: %d stocks still missing (Angel One throttling); "
+                        "retrying in 30 minutes (attempt %d of %d)", len(remaining), attempt,
+                        BACKFILL_ATTEMPTS)
+            _time.sleep(30 * 60)
+        if not total:
+            log.info("Angel One backfill: nothing new downloaded (will retry next start)")
+            return
+        log.info("Angel One backfill: %s stock-days saved; retraining intraday models", total)
         try:
-            tokens = angelone.fetch_nse_equity_tokens()
-            failed = []
-            n = intraday.angel_backfill(client, tokens, todo, date.today() - timedelta(days=730),
-                                        date.today() - timedelta(days=1),
-                                        progress=lambda m: failed.append(m) if ": error" in m
-                                        else log.debug(m))
-            if failed:
-                log.warning("Angel One backfill: %d of %d stocks failed (retried next start), "
-                            "e.g. %s", len(failed), len(todo), failed[0])
-            if not n:
-                log.info("Angel One backfill: nothing new downloaded (will retry next start)")
-                return
-            log.info("Angel One backfill finished: %s stock-days; retraining intraday model", n)
             with db.connect(settings.db_path) as conn:
-                T.retrain_intraday(MarketContext.load(store_dir), store_dir, conn, force=True)
-            log.info("Intraday model retrained with Angel One history")
+                ctx = MarketContext.load(store_dir)
+                for target in MI.TARGETS:
+                    with MI.MODEL_LOCK:
+                        T.retrain_intraday(ctx, store_dir, conn, force=True, target=target)
+            log.info("Intraday models retrained with Angel One history")
         except Exception:
-            log.exception("Angel One backfill failed")
+            log.exception("retraining after the Angel One backfill failed")
 
     threading.Thread(target=job, daemon=True, name="angel-backfill").start()
 

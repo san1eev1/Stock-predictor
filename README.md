@@ -5,8 +5,10 @@ tracks:
 
 - **Long-term:** 1-week predictions — 10 buy and 10 sell candidates after every close, judged
   after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio.
-- **Intraday:** at 9:45, 10 buy and 10 sell candidates from the first 30 minutes; paper trades
-  are **squared off at 12:30**; the model keeps learning from the market until the 15:30 close.
+- **Intraday — two competing models:** at 9:45 each picks 10 buys and 10 sells from the first
+  30 minutes. One trades **until 12:30**, the other **until the close (15:15 square-off)**, each
+  on its own ₹1 lakh a day. After the close they are compared, both learn from the full session,
+  and each can learn from the other.
 
 Both have live prices every minute, paper trading, accuracy tracking (buy and sell picks
 separately), your real portfolio and a local dashboard. See [PLAN.md](PLAN.md) for the build
@@ -23,13 +25,14 @@ history and [DAILY_GUIDE.md](DAILY_GUIDE.md) for step-by-step daily use.
 | **History** | Long-term model trains on **all daily history since 2005**. Intraday model trains on ~2 years of Angel One 5-minute history plus Yahoo's daily-growing summaries. |
 | **Continuous training** | Models **keep training on historical data in the background**: GitHub retrains + self-tunes the long-term and news models **every hour**; the Mac tunes the intraday model **all day, market hours included**, without pausing live prices. |
 | **Learning from the live market** | The model **learns from the market until it closes**: after 15:30 the day's full live Angel One session is added and the intraday model retrains. |
-| **Intraday trading window** | Picks at 9:45, **all intraday trades end by 12:30** (square-off); stop-loss / target exits before that. The model predicts the 9:45 → 12:30 move. |
+| **Intraday: two trades** | Picks at 9:45. **Book 1 trades until 12:30**, **book 2 until the close (15:15 square-off)**, each with its own model (predicting 9:45 → 12:30 and 9:45 → 15:15), its own ₹1 lakh and stop-loss / target. Separate pages: *Intraday — until 12:30* and *Intraday — until close*. |
+| **Compete and learn from each other** | After the close both books are judged; a daily winner and running score are shown (🏆 Competition). Each model's tuning may blend in the other's ranking (`peer_weight`), kept only if it improves accuracy on unseen days. A walk-forward backtest compares 12:30 vs close exits on the same days (refreshed daily). |
 | **Train on buy and sell** | Both models rank every stock from strongest to weakest, so they learn both ends. Judged paper picks — **buy and sell** — feed back into training (wrong calls weigh 2×, right 1.5×); intraday tuning can also focus on the biggest risers and fallers. |
-| **Paper trading** | Intraday: **starts fresh with ₹1 lakh every day**; each day's result is saved and **compared day by day** (P&L, trades won, buy/sell accuracy vs random). Long-term: one running ₹1 lakh portfolio. Buying and selling shown in **separate tables**. |
+| **Paper trading** | Intraday: **two sections, each starting fresh with ₹1 lakh every day** (until 12:30 / until close); each day's result is saved and **compared day by day** (P&L, trades won, buy/sell accuracy vs random). Long-term: one running ₹1 lakh portfolio. Buying and selling shown in **separate tables**. |
 | **Accuracy** | Shown on every picks and paper page, for that page's model, with **predicted UP and predicted DOWN in separate tables**; always compared with random picks. Long-term pages include a live "today" row. |
 | **Live data** | Live prices **every minute** for all tradable stocks (Angel One, Yahoo fallback); the dashboard refreshes itself every minute. **Today %**, share move since entry and **P&L after costs** are shown side by side; live price on long-term picks. |
 | **Chart methods** | Candlestick patterns and classic technical / statistical methods are available to the model; only groups that improve out-of-sample accuracy are used (see below). |
-| **News** | **No buy/sell tips** (target prices, "stocks to buy/watch", broker calls, forecasts) — the model makes its own calls. A model **learns which headlines are really related to each stock** and weights news by it. |
+| **News** | **No buy/sell tips** (target prices, "stocks to buy/watch", broker calls, forecasts) and **no plain price-move reports** ("shares fall 2%", "share price today", 52-week highs, index moves) unless they name a company event — only news directly about the company (results, orders, deals, management, regulators…). A model **learns which headlines really move each stock** and weights news by it. |
 | **Storage** | Big history stays **on git**, not on the Mac: the Mac keeps only the last 4 years of daily prices (~13 MB) and downloads trained models (~2 MB). |
 | **Honesty** | Every change to the models is measured on data they never trained on and only kept if it helps; results always shown next to random picks. No method predicts markets with high certainty — expect a few points above 50%. |
 | **Secrets** | Angel One keys only in `.env` (git-ignored), never in `.env.example`, never logged. |
@@ -72,8 +75,8 @@ days the app isn't open), *Keep training now*, *Get latest data*, *Backtest long
 | Where | What | How often |
 |---|---|---|
 | **GitHub Actions** (free) | Long-term model on all history since 2005 + judged paper predictions, then self-tuning for the rest of a ~45-minute run; news relevance model; weekly backtest. Published to the `models` branch. | **Every hour** (`train-models.yml`) |
-| **Mac, background thread** | Intraday model self-tuning on its history (uses your Angel One data, which stays on the Mac) | Every ~5 minutes, all day |
-| **Mac, after the close** | Today's full live session is added; the intraday model retrains with it | Every trading day, 15:32 |
+| **Mac, background thread** | Both intraday models take turns self-tuning on their history (uses your Angel One data, which stays on the Mac) | Every ~5 minutes, all day |
+| **Mac, after the close** | Today's full live session is added; both intraday models retrain with it; the 12:30-vs-close comparison is refreshed | Every trading day, 15:32 |
 | **Mac, after each close** | Judged paper predictions (stock, date, right/wrong) sent to the `paper-feedback` branch for cloud training | Daily |
 
 New settings are adopted only if they beat the current ones out-of-sample over the last 3 years
@@ -120,12 +123,13 @@ starts in 2026).
 
 - **Long-term picks** — long-term accuracy (UP / DOWN tables, live today row); 10 buy and 10 sell
   candidates with live price, Today %, Since pick %, reasons, news, P/E, ROE; *Sell now*
-- **Intraday picks** — intraday accuracy; 10 buy / 10 sell at 9:45 with entry, stop-loss,
-  target, Today %, move since 9:45, result at 12:30
+- **Intraday — until 12:30** / **Intraday — until close** — each model's accuracy (UP / DOWN);
+  10 buy / 10 sell at 9:45 with entry, stop-loss, target, exit, live and 15:30 close prices;
+  the close page also compares 12:30 vs close exits
 - **Paper trading — Long-term** — accuracy; **Buying** (holdings + queued buys) and **Selling**
   (queued sells + sold) tables with P&L after costs
-- **Paper trading — Intraday** — accuracy; today on a fresh ₹1 lakh; buy trades and sell trades;
-  **Day by day** table and charts comparing every day
+- **Paper trading — Intraday** — two books (until 12:30 / until close), each on a fresh ₹1 lakh
+  a day with buy and sell trades and a **Day by day** comparison; **🏆 Competition** tab
 - **My portfolio** — your Groww trades; live P&L, Today %, stop-loss alerts
 - **Accuracy** — both models in detail, vs random; live strategy race
 - **Model** — what the model relies on, cloud training status, backtest, every training run

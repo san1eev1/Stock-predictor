@@ -38,8 +38,10 @@ LONGTERM_GRID = {**GRID, "mom_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
                                   ["trend", "candles"], ["trend", "statistics"],
                                   ["trend", "candles", "oscillators", "volume", "statistics"]]}
 FEEDBACK_WEIGHT = {1: 1.5, 0: 2.0}   # paper predictions: right / wrong
+MIN_STOCKS_PER_DAY = 50      # intraday days with fewer known outcomes are not used
 # Intraday: also try focusing on the biggest risers and fallers (both ends = buy and sell picks).
-INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0]}
+# Learning from each other: blend in the other intraday model's ranking (peer_weight).
+INTRADAY_GRID = {**GRID, "tail_weight": [0.0, 1.0, 2.0], "peer_weight": [0.0, 0.25, 0.5]}
 # IC gain needed to switch settings. Re-running the same settings with another random
 # seed moves IC by about +/-0.004, so smaller "gains" are noise.
 MARGIN = 0.01
@@ -252,14 +254,23 @@ def intraday_feats(ctx, store_dir, target: MI.Target = MI.TRADE) -> pd.DataFrame
     from stockpredictor.data import intraday as I
     from stockpredictor.features import intraday as FI
 
-    return FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats, store.load_actions(store_dir),
-                    exit_col=target.exit_col)
+    feats = FI.build(I.load_summaries(store_dir), ctx.daily, ctx.feats,
+                     store.load_actions(store_dir), exit_col=target.exit_col)
+    if feats.empty:
+        return feats
+    # A day only teaches ranking if enough stocks have its outcome (e.g. while the 12:30
+    # prices are still being downloaded, most days have them for only a few stocks).
+    n = feats.groupby("date")["target_ret"].transform("count")
+    feats.loc[n < MIN_STOCKS_PER_DAY, ["target", "target_ret"]] = np.nan
+    return feats
 
 
-def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120) -> dict:
+def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120,
+                      peer_scores: pd.DataFrame | None = None) -> dict:
     scores = MI.walk_forward(feats, params=params, last_days=last_days)
     if scores.empty:
         return {"ic": float("nan"), "days": 0}
+    scores = _with_peer(scores, peer_scores, params.get("peer_weight") or 0)
     m = scores.merge(feats[["symbol", "date", "target_ret"]], on=["symbol", "date"])
     ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
                                  include_groups=False).dropna()
@@ -269,6 +280,26 @@ def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120) -
     acc = pd.concat([longs["target_ret"] > 0, shorts["target_ret"] < 0]).mean()
     return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()),
             "direction_accuracy": float(acc), "days": int(len(ic))}
+
+
+def _with_peer(scores: pd.DataFrame, peer_scores: pd.DataFrame | None,
+               weight: float) -> pd.DataFrame:
+    """Blend out-of-sample scores with the peer model's (both walk-forward) when weight > 0."""
+    if not weight or peer_scores is None or peer_scores.empty:
+        return scores
+    m = scores.merge(peer_scores, on=["symbol", "date"], suffixes=("", "_peer"))
+    if m.empty:
+        return scores
+    return m.assign(score=MI.blend(m["score"], m["score_peer"], m["date"], weight).values)[
+        ["symbol", "date", "score"]]
+
+
+def peer_walk_forward(ctx, store_dir, target: MI.Target, last_days: int) -> pd.DataFrame:
+    """The other model's out-of-sample scores (its own settings, no blending)."""
+    peer = MI.peer_of(target)
+    feats = intraday_feats(ctx, store_dir, peer)
+    params = {**MI.current_params(peer), "peer_weight": 0.0}
+    return MI.walk_forward(feats, params=params, last_days=last_days)
 
 
 def retrain_intraday(ctx, store_dir, conn=None, force: bool = False,
@@ -308,12 +339,17 @@ def compare_exits(ctx, store_dir, rules=None, last_days: int = 120,
     common = set.intersection(*(set(f["date"].unique()) for f in feats.values()))
     if len(common) < MI.MIN_TRAIN_DAYS + 20:
         return None
-    out = {}
+    out, raw = {}, {}
     for t in MI.TARGETS:
         f = feats[t.horizon][feats[t.horizon]["date"].isin(common)]
-        scores = MI.walk_forward(f, params=MI.current_params(t), last_days=last_days)
-        if scores.empty:
+        raw[t.horizon] = MI.walk_forward(f, params={**MI.current_params(t), "peer_weight": 0.0},
+                                         last_days=last_days)
+        if raw[t.horizon].empty:
             return None
+    for t in MI.TARGETS:
+        f = feats[t.horizon][feats[t.horizon]["date"].isin(common)]
+        scores = _with_peer(raw[t.horizon], raw[MI.peer_of(t).horizon],
+                            MI.current_params(t).get("peer_weight") or 0)
         m = scores.merge(f[["symbol", "date", "target_ret"]], on=["symbol", "date"])
         ic = m.groupby("date").apply(lambda g: g["score"].rank().corr(g["target_ret"].rank()),
                                      include_groups=False).dropna()
@@ -358,9 +394,10 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
     if feats.empty or feats["date"].nunique() < MI.MIN_TRAIN_DAYS + 10:
         return None
     current = MI.current_params(target)
+    peer = peer_walk_forward(ctx, store_dir, target, check_days)
     results = []
     for i, params in enumerate(candidates(current, n_candidates, seed, INTRADAY_GRID)):
-        results.append({"params": params, **evaluate_intraday(feats, params), "current": i == 0})
+        results.append({"params": params, **evaluate_intraday(feats, params, peer_scores=peer), "current": i == 0})
     valid = [r for r in results if not np.isnan(r["ic"])]
     if not valid:
         return None
@@ -369,8 +406,8 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
     adopted = not best["current"] and best["ic"] >= base["ic"] + MARGIN
     check = None
     if adopted and feats["date"].nunique() >= check_days + MI.MIN_TRAIN_DAYS:
-        check = {"best": evaluate_intraday(feats, best["params"], check_days)["ic"],
-                 "current": evaluate_intraday(feats, base["params"], check_days)["ic"]}
+        check = {"best": evaluate_intraday(feats, best["params"], check_days, peer)["ic"],
+                 "current": evaluate_intraday(feats, base["params"], check_days, peer)["ic"]}
         adopted = not np.isnan(check["best"]) and (np.isnan(check["current"])
                                                    or check["best"] >= check["current"])
     if adopted:
