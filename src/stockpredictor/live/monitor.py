@@ -41,7 +41,7 @@ INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.int
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 21:00 IST)
-# GitHub runs only twice each weekday evening; its own schedules often start hours late,
+# GitHub runs only twice each evening (every day); its own schedules often start hours late,
 # so the Mac starts them on time (the schedules stay as a backup):
 #   21:00 data update -> training follows automatically; 23:00 second training run.
 GITHUB_RUNS = ((time(21, 0), "update-market-data.yml"), (time(23, 0), "train-models.yml"))
@@ -222,7 +222,7 @@ class Monitor:
             self.angel_topup(now)
             self.daily_mac_train(self.ctx())
             done.append("mac-train")
-        if config.CLOUD_TRAINING and now.weekday() < 5:
+        if config.CLOUD_TRAINING:                        # every day, weekends included
             for at, workflow in GITHUB_RUNS:
                 key = f"gh_run_{at:%H%M}"
                 slot = datetime.combine(now.date(), at)

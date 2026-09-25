@@ -4,7 +4,7 @@ name: Update market data
 
 on:
   schedule:
-    - cron: "30 15 * * 1-5"  # 21:00 IST, Mon-Fri: the first of GitHub's two evening runs
+    - cron: "30 15 * * *"    # 21:00 IST, every day: the first of GitHub's two evening runs
                              # (training follows automatically: train-models.yml)
   workflow_dispatch:
     inputs:

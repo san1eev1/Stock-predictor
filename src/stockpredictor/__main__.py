@@ -399,7 +399,13 @@ def cmd_cloud_train(settings, args) -> None:
             f"{k}: {v['cagr']:.1%}/yr, Sharpe {v['sharpe']:.2f}, worst fall {v['max_drawdown']:.1%}"
             for k, v in s.items()), flush=True)
 
-    conn = _cloud_intraday(settings, d, ctx, args, started + budget * 0.4)
+    # Until the Angel One history is complete, most of the run goes to downloading it so
+    # intraday training on the full data starts as soon as possible.
+    from stockpredictor.data import intraday as I
+
+    active = (ctx.universe["active"] == 1).sum()
+    share = 0.85 if len(I.backfill_symbols()) < 0.8 * active else 0.4
+    conn = _cloud_intraday(settings, d, ctx, args, started + budget * share)
 
     rounds = adopted = 0
     scores: dict = {}               # settings already scored this run are not re-tested
