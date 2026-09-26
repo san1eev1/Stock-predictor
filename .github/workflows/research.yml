@@ -32,6 +32,23 @@ jobs:
           git clone -q --depth 1 --branch market-data \
             "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" market-data
 
+      - name: Get trained models (learned rules)
+        run: |
+          git clone -q --depth 1 --branch models \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" trained-models \
+            || mkdir -p trained-models
+
+      # Angel One intraday history from the training runs' private cache (same paths/key
+      # prefix as train-models.yml, so it restores; read-only here).
+      - name: Restore Angel One intraday history
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/intraday_backfill.csv
+            data/intraday_fine.csv
+          key: angel-intraday-research-${{ github.run_id }}
+          restore-keys: angel-intraday-
+
       - name: Run
         env:
           FEATURE_CACHE: "0"
