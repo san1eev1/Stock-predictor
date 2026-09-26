@@ -378,8 +378,11 @@ def day_profit(days: pd.DataFrame) -> float:
     return float(days["pnl"].sum() / len(days)) if len(days) else float("nan")
 
 
+HOLDOUT_DAYS = 60     # newest days never used for choosing rules, only to confirm them
+
+
 def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int = 5,
-               capital: float = 100_000, days: int = 240) -> dict | None:
+               capital: float = 100_000, days: int = 300) -> dict | None:
     """Choose the trading rules by profit after costs: how many buys and sells (0..max_n,
     long-only or short-only allowed), skipping weak days, stop-loss and target. Scores are
     walk-forward (each day predicted by a model trained only on earlier days). A rule set
@@ -408,19 +411,29 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     except (KeyError, ValueError, TypeError):
         take_ok = False
     dates = sorted(scores["date"].unique())
-    recent = set(dates[len(dates) // 2:])
+    # Newest HOLDOUT_DAYS: untouched - rules are chosen on the days before and must ALSO do
+    # better here (rules that only fit the tuning days' noise fail this check).
+    holdout = set(dates[-HOLDOUT_DAYS:]) if len(dates) > HOLDOUT_DAYS + 60 else set()
+    tune_days = [x for x in dates if x not in holdout]
+    recent = set(tune_days[len(tune_days) // 2:])
     minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
     summ = B.summary_columns(feats, target.exit_col)
     results: dict = {}
 
-    def run(r) -> tuple[float, float, float]:    # (recent, earlier) profit per day, trade days
+    def run(r) -> tuple[float, float, float, float]:
+        """(recent, earlier) tuning-day profit per day, share of days traded, holdout profit."""
         if r not in results:
             sim = B.simulate(scores, summ, r, capital, exit_col=target.exit_col,
                              exit_minutes=minutes)
             d, t = sim["days"], sim["trades"]
+            held = d["date"].isin(holdout)
             late = d["date"].isin(recent)
-            traded = t["date"].nunique() / max(1, len(d)) if not t.empty else 0.0
-            results[r] = (day_profit(d[late]), day_profit(d[~late]), traded)
+            earlier = ~late & ~held
+            tuned = d[~held]
+            traded = (t[~t["date"].isin(holdout)]["date"].nunique() / max(1, len(tuned))
+                      if not t.empty else 0.0)
+            results[r] = (day_profit(d[late]), day_profit(d[earlier]), traded,
+                          day_profit(d[held]) if held.any() else float("nan"))
         return results[r]
 
     def best_of(options):
@@ -439,9 +452,11 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     # Known traps: skip results-day stocks / monthly expiry days - only if that earns more.
     best = best_of([best, *(replace(best, avoid_results=a, avoid_expiry=e)
                             for a in (False, True) for e in (False, True))])
-    (new_late, new_early, new_days), (cur_late, cur_early, _) = run(best), run(now)
+    (new_late, new_early, new_days, new_hold), (cur_late, cur_early, _, cur_hold) = \
+        run(best), run(now)
+    holdout_ok = not holdout or new_hold > cur_hold      # must win on the untouched days too
     adopted = (best != now and new_late > cur_late and new_early >= cur_early
-               and new_days >= MIN_TRADE_DAYS)
+               and new_days >= MIN_TRADE_DAYS and holdout_ok)
     chosen = best if adopted else now
     top = sorted((r for r in results if results[r][2] >= MIN_TRADE_DAYS),
                  key=lambda r: -results[r][0])[:5]
@@ -453,11 +468,14 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
                         "avoid_expiry": chosen.avoid_expiry},
               "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
               "current_day_profit_recent": cur_late, "tested": len(results),
+              "holdout_days": len(holdout), "day_profit_holdout": run(chosen)[3],
+              "current_day_profit_holdout": cur_hold,
               "trade_days": run(chosen)[2],
               "profitable": bool(run(chosen)[0] > 0 and run(chosen)[1] > 0),
               "top": [{"n_long": r.n_long, "n_short": r.n_short, "stop": r.stop_loss,
                        "target": r.target, "skip": r.skip_quantile, "min_prob": r.min_prob,
                        "recent": round(results[r][0]), "before": round(results[r][1]),
+                       "holdout": None if results[r][3] != results[r][3] else round(results[r][3]),
                        "trade_days": round(results[r][2], 2)} for r in top],
               "period": f"{pd.Timestamp(dates[0]):%Y-%m-%d} to {pd.Timestamp(dates[-1]):%Y-%m-%d}",
               "updated": datetime.now().isoformat(timespec="seconds")}

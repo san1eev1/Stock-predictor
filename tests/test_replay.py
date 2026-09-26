@@ -138,3 +138,26 @@ def test_github_evening_model_beats_mac_afternoon_model(tmp_path, monkeypatch):
     finally:
         os.environ.pop("TZ", None)
         _t.tzset()
+
+
+def test_rules_must_also_win_on_untouched_recent_days(tmp_path, monkeypatch):
+    from stockpredictor.backtest import intraday as B
+    from stockpredictor.data import intraday as I
+
+    target = MI.Target("intraday", "px_1230", tmp_path / "m", "until 12:30")
+    days = pd.bdate_range("2026-01-01", periods=200)
+    scores = pd.DataFrame({"symbol": "A", "date": days, "score": 1.0})
+    monkeypatch.setattr(MI, "walk_forward", lambda f, params, last_days: scores)
+    feats = pd.DataFrame(columns=["symbol", "date", "c30", "px_1230", *I.LEVEL_COLS])
+    hold = set(days[-T.HOLDOUT_DAYS:])
+
+    def fake_sim(sc, summ, r, capital, exit_col, exit_minutes):
+        # 2 buys + skip 0.5 looks great on the tuning days but loses on the newest days
+        special = (r.n_long, r.n_short, r.skip_quantile) == (2, 0, 0.5)
+        pnl = [(-500.0 if d in hold else 100.0) if special else -50.0 for d in days]
+        return {"days": pd.DataFrame({"date": days, "pnl": pnl}),
+                "trades": pd.DataFrame({"date": days})}
+
+    monkeypatch.setattr(B, "simulate", fake_sim)
+    rep = T.tune_rules(feats, target, B.IntradayRules(), max_n=5)
+    assert not rep["adopted"] and rep["holdout_days"] == T.HOLDOUT_DAYS
