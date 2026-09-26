@@ -991,7 +991,7 @@ def cmd_today(settings, args) -> None:
 def cmd_autostart(settings, args) -> None:
     """Keep the app running as a macOS background service (launchd): starts at login,
     restarts if it stops, runs every day and night - independent of any terminal or Claude
-    session. The app itself decides what to do when (market hours, GitHub runs at 18:30 and
+    session. The app itself decides what to do when (market hours, downloading the models GitHub trains at 18:30 and
     21:00). Also removes the older 09:00-21:30 weekday service and the old local training job."""
     import plistlib
     import subprocess
@@ -1030,7 +1030,7 @@ def cmd_autostart(settings, args) -> None:
         plistlib.dump(spec, f)
     subprocess.run(["launchctl", "load", str(agents / f"{label}.plist")], check=True)
     print("Background service on: the app runs all the time (starts at login, restarts if "
-          "it stops) and starts GitHub's 18:30 and 21:00 runs itself.")
+          "it stops) (GitHub runs on its own schedule).")
     print(f"Log: {logs / 'app.log'}  ·  Dashboard: http://localhost:8501")
     print("Turn off with: python -m stockpredictor autostart --off")
 

@@ -40,11 +40,9 @@ INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) unt
 INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.intraday.TRADE_EXIT)
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
-MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 18:30 IST)
-# GitHub runs only twice each evening (every day); its own schedules often start hours late,
-# so the Mac starts them on time (the schedules stay as a backup):
-#   18:30 data update -> training follows automatically; 21:00 second training run.
-GITHUB_RUNS = ((time(18, 30), "update-market-data.yml"), (time(21, 0), "train-models.yml"))
+MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains on its own at 18:30 IST)
+# GitHub trains on its own schedule (18:30 data update -> training; 21:00 second training);
+# the Mac never starts GitHub runs.
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -70,36 +68,6 @@ def alert(conn: sqlite3.Connection, source: str, kind: str, symbol: str | None, 
     if cur.rowcount:
         log.warning("ALERT %s %s %s", kind, symbol or "", message)
     return bool(cur.rowcount)
-
-
-def start_github_run(workflow: str) -> bool:
-    """Start a GitHub Actions workflow now (gh CLI), unless one is already queued/running."""
-    import shutil
-    import subprocess
-
-    gh = shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
-                                     if Path(p).exists()), None)
-    if gh is None:
-        log.warning("GitHub CLI (gh) not found: cannot start %s", workflow)
-        return False
-    cwd = config.PROJECT_ROOT
-    try:
-        busy = subprocess.run([gh, "run", "list", "--workflow", workflow, "--limit", "5",
-                               "--json", "status", "-q", ".[].status"], cwd=cwd, timeout=60,
-                              capture_output=True, text=True).stdout.split()
-        # One waiting run is enough; a run in progress is fine (the new one queues after it).
-        if any(s in ("queued", "pending", "waiting") for s in busy):
-            log.info("GitHub: %s already queued", workflow)
-            return False
-        r = subprocess.run([gh, "workflow", "run", workflow], cwd=cwd, timeout=60,
-                           capture_output=True, text=True)
-        if r.returncode == 0:
-            log.info("GitHub: started %s", workflow)
-            return True
-        log.warning("GitHub: could not start %s: %s", workflow, r.stderr.strip()[:200])
-    except Exception as exc:
-        log.warning("GitHub: could not start %s (%s)", workflow, exc)
-    return False
 
 
 def github_last_run(workflow: str) -> str | None:
@@ -243,15 +211,6 @@ class Monitor:
             self.angel_topup(now)
             self.daily_mac_train(self.ctx())
             done.append("mac-train")
-        if config.CLOUD_TRAINING:                        # every day, weekends included
-            for at, workflow in GITHUB_RUNS:
-                key = f"gh_run_{at:%H%M}"
-                slot = datetime.combine(now.date(), at)
-                clock = now.replace(tzinfo=None)
-                if slot <= clock < slot + timedelta(hours=1) and _setting(self.conn, key) != day:
-                    _set(self.conn, key, day)
-                    if start_github_run(workflow):
-                        done.append(f"github-{workflow.split('.')[0]}")
         # Without the background thread, tune in the monitor itself (only when idle).
         if self.background is None and config.MAC_TRAINING and self.market_idle(now) \
                 and self.idle_tune(now):

@@ -236,21 +236,14 @@ def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
     assert "mac-train" not in mon.tick() and calls == [1]  # once a day
 
 
-def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
+def test_mac_never_starts_github_runs(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
-    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 18, 29))  # Monday
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 18, 32))  # Monday
     monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "CLOUD_TRAINING", True)
     monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", False)
-    started = []
-    monkeypatch.setattr(MON, "start_github_run", lambda w: started.append(w) or True)
     mon._started = True
-    mon.tick()
-    assert started == []                             # 18:29: too early
-    clock["now"] = ist(2026, 9, 28, 18, 32)          # 18:30: data update (training follows)
-    assert "github-update-market-data" in mon.tick() and started == ["update-market-data.yml"]
-    mon.tick()
-    assert started == ["update-market-data.yml"]     # once per slot
-    clock["now"] = ist(2026, 9, 28, 21, 1)           # 21:00: second training run
-    mon.tick()
-    assert started == ["update-market-data.yml", "train-models.yml"]
+    for hh, mm in ((18, 32), (21, 1)):
+        clock["now"] = ist(2026, 9, 28, hh, mm)
+        assert not any(d.startswith("github-") for d in mon.tick())
+    assert not hasattr(MON, "start_github_run")
