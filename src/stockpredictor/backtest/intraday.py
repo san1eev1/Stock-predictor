@@ -34,6 +34,9 @@ class IntradayRules:
                                 # at least this chance of profit after costs (0 = off)
     unusual: str = "off"         # 'is today unusual?' (features day_oddness > ODD_LIMIT):
                                  # "half" = half-size trades, "skip" = no trades, "off"
+    max_gap: float = 0.0         # skip stocks that opened more than this away from yesterday's
+                                 # close (e.g. 0.015; 0 = no limit) - the model misreads them
+    skip_friday: bool = False    # no trades on Fridays (weakest day in the diagnosis)
     avoid_results: bool = False  # known traps: no trade in a stock on its results day ...
     avoid_expiry: bool = False   # ... nor on monthly F&O expiry days (picks still judged);
                                  # off until the profit tuning (trainer.tune_rules) shows
@@ -113,6 +116,12 @@ def is_trap(row, rules: IntradayRules) -> str | None:
         return "results day"
     if rules.avoid_expiry and get("is_expiry", 0) == 1:
         return "F&O expiry day"
+    gap = get("gap", np.nan)
+    if rules.max_gap and gap == gap and abs(gap) > rules.max_gap:
+        return "big opening gap"
+    d = get("date", None)
+    if rules.skip_friday and d is not None and pd.Timestamp(d).weekday() == 4:
+        return "Friday"
     return None
 
 
@@ -133,8 +142,8 @@ def summary_columns(feats: pd.DataFrame, exit_col: str) -> pd.DataFrame:
     """What the simulation needs from the intraday features (with range and volume for
     realistic slippage and position limits when available)."""
     cols = ["symbol", "date", "c30", exit_col, *I.LEVEL_COLS,
-            *[c for c in ("h30", "l30", "v30", "results_today", "is_expiry", "day_oddness")
-              if c in feats]]
+            *[c for c in ("h30", "l30", "v30", "results_today", "is_expiry", "day_oddness",
+                          "gap") if c in feats]]
     return feats[list(dict.fromkeys(cols))]
 
 

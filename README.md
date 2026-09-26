@@ -130,6 +130,25 @@ New inputs (most start mattering once their data has built up on GitHub):
   auction volume. NSE keeps no history, so it is collected daily from now on.
 - **Ridge model mixed into LightGBM**, recency weighting and ranking objective as tuning options.
 
+### Safety net (Sep 2026)
+
+- **Data-quality gate**: before each GitHub training run the data store is checked (stale or
+  missing prices, broken rows, duplicates); on errors the run stops and the last good models
+  stay in use. Issues are shown on the dashboard.
+- **Promotion gates**: new model settings must beat the current ones significantly (paired
+  t-statistic ≥ 2 on daily IC); new trading rules are chosen on older days, must also win on
+  the untouched newest 60 days, then run 5+ trading days in a **shadow period** before going live.
+- **Kill-switches** (no new trades; predictions still saved and judged): stale data or live
+  prices, broken predictions, an intraday book down 3% in a week, the long-term book 25% below
+  its peak.
+- **Health banner** on every page: failed GitHub runs, data issues, old models, active
+  kill-switches, **model decay** (live picks worse than random), paper vs simulation gaps.
+- **Paper vs simulation**: after each close the day's paper trades are re-run through the
+  backtest simulator; a big difference means live and backtest disagree.
+- **Stress tests**: `scripts/research_stress.py` (strategy through real crises) and a live
+  "Nifty falls 10%" estimate on *Paper trading — Long-term*.
+- **Research on GitHub** (`research.yml`, scripts in `scripts/`): experiments never run on the Mac.
+
 ### News
 
 Google News headlines for each stock, scored with FinBERT on GitHub 4× per trading day.

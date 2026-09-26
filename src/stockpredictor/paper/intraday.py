@@ -58,6 +58,8 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
             skip_quantile=float(learned["skip_quantile"]),
             min_prob=float(learned.get("min_prob", 0.0)),
             unusual=str(learned.get("unusual", "off")),
+            max_gap=float(learned.get("max_gap", 0.0)),
+            skip_friday=bool(learned.get("skip_friday", False)),
             avoid_results=bool(learned.get("avoid_results", False)),
             avoid_expiry=bool(learned.get("avoid_expiry", False)))
     return rules, s.get("id_enabled", "1") == "1"

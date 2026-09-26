@@ -391,6 +391,8 @@ def rules_for(target: MI.Target, base=None):
                            skip_quantile=float(r["skip_quantile"]),
                            min_prob=float(r.get("min_prob", 0.0)),
                            unusual=str(r.get("unusual", "off")),
+                           max_gap=float(r.get("max_gap", 0.0)),
+                           skip_friday=bool(r.get("skip_friday", False)),
                            avoid_results=bool(r.get("avoid_results", False)),
                            avoid_expiry=bool(r.get("avoid_expiry", False)))
 
@@ -506,6 +508,9 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
         best = best_of([best, *(replace(best, min_prob=p) for p in RULE_PROBS)])
     # Unusual mornings: half-size or no trades - only if that earns more.
     best = best_of([best, *(replace(best, unusual=u) for u in ("half", "skip"))])
+    # Big-gap stocks and Fridays (the diagnosis found the model weak there).
+    best = best_of([best, *(replace(best, max_gap=g) for g in (0.015, 0.03)),
+                    replace(best, skip_friday=True)])
     # Known traps: skip results-day stocks / monthly expiry days - only if that earns more.
     best = best_of([best, *(replace(best, avoid_results=a, avoid_expiry=e)
                             for a in (False, True) for e in (False, True))])
@@ -531,7 +536,8 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
               "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
                         "stop_loss": chosen.stop_loss, "target": chosen.target,
                         "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob,
-                        "unusual": chosen.unusual, "avoid_results": chosen.avoid_results,
+                        "unusual": chosen.unusual, "max_gap": chosen.max_gap,
+                        "skip_friday": chosen.skip_friday, "avoid_results": chosen.avoid_results,
                         "avoid_expiry": chosen.avoid_expiry},
               "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
               "current_day_profit_recent": cur_late, "tested": len(results),
