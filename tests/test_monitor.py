@@ -238,7 +238,7 @@ def test_mac_trains_once_at_four(tmp_path, ctx_model, monkeypatch):
 
 def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
     ctx, model = ctx_model
-    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 20, 59))  # Monday
+    mon, conn, clock = make(tmp_path, ctx, model, {}, ist(2026, 9, 28, 18, 29))  # Monday
     monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "CLOUD_TRAINING", True)
     monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", False)
@@ -246,11 +246,11 @@ def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
     monkeypatch.setattr(MON, "start_github_run", lambda w: started.append(w) or True)
     mon._started = True
     mon.tick()
-    assert started == []                             # 20:59: too early
-    clock["now"] = ist(2026, 9, 28, 21, 2)           # 21:00: data update (training follows)
+    assert started == []                             # 18:29: too early
+    clock["now"] = ist(2026, 9, 28, 18, 32)          # 18:30: data update (training follows)
     assert "github-update-market-data" in mon.tick() and started == ["update-market-data.yml"]
     mon.tick()
     assert started == ["update-market-data.yml"]     # once per slot
-    clock["now"] = ist(2026, 9, 28, 23, 1)           # 23:00: second training run
+    clock["now"] = ist(2026, 9, 28, 21, 1)           # 21:00: second training run
     mon.tick()
     assert started == ["update-market-data.yml", "train-models.yml"]

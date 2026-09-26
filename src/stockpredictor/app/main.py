@@ -419,7 +419,7 @@ def tuning_checks(c):
                "only if they also paper-trade at least as well (P&L per day and picks right).")
     t = history_table(c, "tune_checks").iloc[::-1].head(40)
     if t.empty:
-        st.caption("Appears after the next GitHub training run (16:45 and 21:00 IST).")
+        st.caption("Appears after the next GitHub training run (18:30 and 21:00 IST).")
         return
     st.dataframe(pd.DataFrame({
         "Time": t["run_at"].str[5:16].str.replace("T", " "),

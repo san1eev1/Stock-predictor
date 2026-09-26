@@ -40,11 +40,11 @@ INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) unt
 INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.intraday.TRADE_EXIT)
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
-MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 21:00 IST)
+MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 18:30 IST)
 # GitHub runs only twice each evening (every day); its own schedules often start hours late,
 # so the Mac starts them on time (the schedules stay as a backup):
-#   21:00 data update -> training follows automatically; 23:00 second training run.
-GITHUB_RUNS = ((time(21, 0), "update-market-data.yml"), (time(23, 0), "train-models.yml"))
+#   18:30 data update -> training follows automatically; 21:00 second training run.
+GITHUB_RUNS = ((time(18, 30), "update-market-data.yml"), (time(21, 0), "train-models.yml"))
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
 TUNE_CANDIDATES = 3               # new settings tried per model in each round
@@ -236,7 +236,7 @@ class Monitor:
                 self.background.learn_from_today(now.date())
                 done.append("live-learn")
         # The Mac's one training of the day: today's Angel One session, then long-term and
-        # both intraday models (config.MAC_DAILY_TRAINING; GitHub trains again at 21:00).
+        # both intraday models (config.MAC_DAILY_TRAINING; GitHub trains again at 18:30).
         if not config.MAC_TRAINING and config.MAC_DAILY_TRAINING and now.weekday() < 5 \
                 and now.time() >= MAC_TRAIN_AT and _setting(self.conn, "mac_train_day") != day:
             _set(self.conn, "mac_train_day", day)
