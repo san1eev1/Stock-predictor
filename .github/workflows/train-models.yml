@@ -75,6 +75,11 @@ jobs:
           key: angel-tried-${{ github.run_id }}
           restore-keys: angel-tried-
 
+      # Data-quality gate: on errors (stale/missing/broken data) this run stops here and
+      # the models from the last good run stay in use.
+      - name: Check data quality
+        run: python -m stockpredictor quality-check --dir market-data
+
       - name: Train and self-tune
         env:
           ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}

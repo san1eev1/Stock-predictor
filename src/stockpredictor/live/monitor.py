@@ -102,6 +102,27 @@ def start_github_run(workflow: str) -> bool:
     return False
 
 
+def github_last_run(workflow: str) -> str | None:
+    """'<conclusion>|<created>' of the newest finished run of `workflow` (gh CLI)."""
+    import shutil
+    import subprocess
+
+    gh = shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+                                     if Path(p).exists()), None)
+    if gh is None:
+        return None
+    try:
+        out = subprocess.run([gh, "run", "list", "--workflow", workflow, "--limit", "5",
+                              "--json", "status,conclusion,createdAt", "-q",
+                              '.[] | select(.status=="completed") | '
+                              '"\(.conclusion)|\(.createdAt)"'],
+                             cwd=config.PROJECT_ROOT, timeout=60, capture_output=True,
+                             text=True).stdout.split()
+        return next((o for o in out if not o.startswith("cancelled")), None)
+    except Exception:
+        return None
+
+
 class Monitor:
     def __init__(self, conn: sqlite3.Connection, store_dir: Path, prices: LivePrices,
                  capital: float, clock=now_ist, sync=store.sync,
@@ -444,6 +465,8 @@ class Monitor:
         close_model = self.close_model()
         trade_view = MI.Blended(model, close_model,
                                 MI.current_params(MI.TRADE).get("peer_weight") or 0)
+        rules = self.kill_switch(now, ctx, rules, PI.HORIZON, trade_view.score(feats), prices,
+                                 len(feats))
         r = PI.run_picks(self.conn, feats, trade_view, prices, pd.Timestamp(now.date()), rules,
                          self.capital_intraday, negative, strengths)
         if close_model is not None:              # second book: 9:45 -> 15:15, its own rules
@@ -452,6 +475,8 @@ class Monitor:
                 if crules.skip_quantile > 0 else None
             close_view = MI.Blended(close_model, model,
                                     MI.current_params(MI.CLOSE).get("peer_weight") or 0)
+            crules = self.kill_switch(now, ctx, crules, PI.CLOSE_HORIZON, close_view.score(feats),
+                                      prices, len(feats))
             rc = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
                               crules, self.capital_intraday, negative, cstrengths,
                               horizon=PI.CLOSE_HORIZON)
@@ -462,6 +487,24 @@ class Monitor:
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
+
+    def kill_switch(self, now: datetime, ctx, rules, horizon: str, scores: pd.Series,
+                    prices: dict | None = None, n_stocks: int = 0):
+        """Stale data/prices, broken predictions or this week's loss limit: no new trades
+        in this book today (predictions are still saved and judged)."""
+        from dataclasses import replace
+
+        from stockpredictor.live import safety as S
+
+        why = S.intraday_kill(self.conn, now, ctx.daily["date"].max(), horizon,
+                              self.capital_intraday, prices, n_stocks) or S.broken_scores(scores)
+        if not why:
+            return rules
+        key = "kill_intraday" if horizon == PI.HORIZON else "kill_intraday_close"
+        _set(self.conn, key, f"{now:%Y-%m-%d}|{why}")
+        alert(self.conn, f"paper-{horizon}", "info", None,
+              f"{now:%Y-%m-%d} no new {horizon} trades today: {why}")
+        return replace(rules, n_long=0, n_short=0)
 
     def square_off_job(self, now: datetime, book: str = PI.HORIZON) -> None:
         """Close `book`'s trades (12:30 book, or the 15:15 'until close' book) and judge its
@@ -595,6 +638,7 @@ class Monitor:
             alert(self.conn, "paper-longterm", "decision", None,
                   f"{r['date']:%Y-%m-%d} decision - buy: {buys}; sell: {sells}")
         self.push_feedback()
+        self.after_close_checks(now)
         _set(self.conn, "lt_after_close_day", f"{now:%Y-%m-%d}")
         if config.MAC_TRAINING:
             self.evening_tune(now)
@@ -674,6 +718,32 @@ class Monitor:
         except Exception:
             log.exception("local data catch-up failed")
             return False
+
+    def after_close_checks(self, now: datetime) -> None:
+        """Paper vs simulation for today's intraday trades, and the last GitHub run's result
+        (both shown on the dashboard when something is wrong)."""
+        import json as _json
+
+        from stockpredictor.data import intraday as I
+        from stockpredictor.live import safety as S
+
+        try:
+            summ = I.load_summaries(self.store_dir)
+            worst = None
+            for book in PI.BOOKS:
+                rules, _ = PI.get_rules(self.conn, book)
+                r = S.paper_vs_simulation(self.conn, f"{now:%Y-%m-%d}", summ, rules, book)
+                if r and (worst is None or r["avg_gap"] > worst["avg_gap"]):
+                    worst = r
+            if worst:
+                _set(self.conn, "paper_sim_check", _json.dumps(worst))
+                log.info("Paper vs simulation (%s): %d trades, average gap %.2f%%", worst["day"],
+                         worst["trades"], worst["avg_gap"] * 100)
+        except Exception:
+            log.exception("paper vs simulation check failed")
+        status = github_last_run("train-models.yml")
+        if status:
+            _set(self.conn, "gh_last_train", status)
 
     def daily_mac_train(self, ctx=None) -> None:
         """Once a day after the close: retrain the long-term model and both intraday models

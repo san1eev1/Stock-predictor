@@ -318,6 +318,11 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
                          negative_news=negative, severe_news=severe)
     if risk_off and rules.regime in ("no_buys", "exit"):
         buys = []
+    from stockpredictor.live.safety import longterm_drawdown
+
+    if buys and (why := longterm_drawdown(conn)):          # kill-switch: no new buys
+        _set_setting(conn, "kill_longterm", f"{date:%Y-%m-%d}|{why}")
+        buys = []
     if risk_off and rules.regime == "exit":
         sold = {s for s, _ in sells}
         sells = sells + [(s, "risk-off") for s in holdings(conn) if s not in sold]

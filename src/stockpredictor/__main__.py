@@ -168,6 +168,23 @@ def cmd_data_check(settings, args) -> None:
         print(quality.format_report(quality.daily_report(conn, symbols)))
 
 
+def cmd_quality_check(settings, args) -> None:
+    """Checks the market data store; exits with an error (so training is skipped and the
+    last good models stay in use) when the data is unusable."""
+    import json
+
+    from stockpredictor.config import SHARED_MODELS_DIR
+    from stockpredictor.data import quality
+
+    issues = quality.check_store(Path(args.dir))
+    print(quality.format_issues(issues), flush=True)
+    SHARED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    (SHARED_MODELS_DIR / "data_quality.json").write_text(json.dumps(
+        {"checked": date.today().isoformat(), "issues": issues}, indent=1))
+    if any(i["level"] == "error" for i in issues):
+        sys.exit(1)
+
+
 def cmd_export_store(settings, args) -> None:
     from stockpredictor import store
 
@@ -1039,6 +1056,8 @@ ARG_COMMANDS = {
     "intraday-backfill": (cmd_intraday_backfill, "Angel One 5-min history -> local summaries",
                           _backfill_args),
     "data-check": (cmd_data_check, "Report data coverage and gaps", _symbols_arg),
+    "quality-check": (cmd_quality_check, "Check the data store before training (fails on errors)",
+                      _dir_arg),
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),

@@ -85,3 +85,23 @@ def test_fine_opening_features_from_one_minute_bars():
     f = summarize_fine(bars)
     assert abs(f["r5"] - ((100 + 0.4) / 99.95 - 1)) < 1e-9 and f["orb15"] == 1.0
     assert f["up1_share"] == 1.0 and f["up3_share"] == 1.0 and f["vol_burst"] > 3
+
+
+def test_quality_check_catches_stale_and_missing_data(monkeypatch):
+    from datetime import date
+
+    from stockpredictor import store
+    from stockpredictor.data import quality
+
+    days = pd.bdate_range("2026-09-01", "2026-09-18")
+    daily = pd.DataFrame([(s, d, 100.0) for d in days for s in ("A", "B")],
+                         columns=["symbol", "date", "close"])
+    daily = daily[~((daily["symbol"] == "B") & (daily["date"] == days[-1]))]
+    uni = pd.DataFrame({"symbol": ["A", "B"], "active": [1, 1]})
+    monkeypatch.setattr(store, "load_daily", lambda d, **k: daily)
+    monkeypatch.setattr(store, "load_universe", lambda d: uni)
+    issues = quality.check_store("x", today=date(2026, 9, 25))
+    checks = {i["check"] for i in issues if i["level"] == "error"}
+    assert checks == {"stale data", "missing stocks"}
+    assert quality.check_store("x", today=date(2026, 9, 21)) == [
+        i for i in quality.check_store("x", today=date(2026, 9, 21)) if i["check"] != "stale data"]

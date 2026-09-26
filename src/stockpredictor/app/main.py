@@ -140,6 +140,20 @@ def need_data() -> bool:
 
 # --- Sidebar -----------------------------------------------------------------------
 
+def health_banner():
+    """Problems that need attention, on every page: failed GitHub runs, stale or broken data,
+    old models, active kill-switches, model decay, paper vs simulation differences."""
+    from stockpredictor.live import safety as S
+
+    try:
+        m = ctx()
+        items = S.health(conn(), now_ist(), m.daily["date"].max() if m is not None else None)
+    except Exception:
+        return
+    for i in items[:6]:
+        (st.error if i["level"] == "error" else st.warning)(i["text"], icon="⚠️")
+
+
 def sidebar():
     c = conn()
     with st.sidebar:
@@ -1317,4 +1331,5 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_model, title="Model", icon="🧠"),
          st.Page(page_settings, title="Settings", icon="⚙️")]
 sidebar()
+health_banner()
 st.navigation(pages).run()
