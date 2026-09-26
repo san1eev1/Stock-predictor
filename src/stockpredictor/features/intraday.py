@@ -92,6 +92,21 @@ def _daily_context(daily: pd.DataFrame, lt_feats: pd.DataFrame) -> pd.DataFrame:
 TRADE_LABEL_RULES = (1.0, 2.0)      # stop-loss %, target % behind the trade-outcome label
 
 
+ODD_COLS = ["mkt_r30", "mkt_gap", "breadth30", "disp30", "vix"]
+ODD_WINDOW = 40          # trading days of "normal" to compare today with
+
+
+def day_oddness(s: pd.DataFrame) -> pd.DataFrame:
+    """'Is today unusual?': per date, the largest |z-score| of the market's 9:45 mood (average
+    move and gap, breadth, dispersion, VIX) against the previous ODD_WINDOW days (only days
+    before: no look-ahead). Above ~3 the model has rarely seen a morning like it."""
+    cols = [c for c in ODD_COLS if c in s]
+    day = s.groupby("date")[cols].first().sort_index()
+    ref = day.shift(1).rolling(ODD_WINDOW, min_periods=20)
+    z = ((day - ref.mean()) / ref.std().replace(0, np.nan)).abs()
+    return z.max(axis=1).rename("day_oddness").reset_index()
+
+
 def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
           actions: pd.DataFrame | None = None, exit_col: str = I.EXIT_COL,
           sectors: dict | None = None, earnings: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -134,6 +149,8 @@ def build(summ: pd.DataFrame, daily: pd.DataFrame, lt_feats: pd.DataFrame,
     s["breadth30"] = by_day["r30"].transform(lambda x: (x > 0).mean())
     s["rel_r30"] = s["r30"] - s["mkt_r30"]
     s["rel_gap"] = s["gap"] - s["mkt_gap"]
+    s["disp30"] = by_day["r30"].transform("std")          # how spread out the moves are
+    s = s.merge(day_oddness(s), on="date", how="left")
     for col in RANKED:
         s[f"{col}_rank"] = s.groupby("date")[col].rank(pct=True)
 

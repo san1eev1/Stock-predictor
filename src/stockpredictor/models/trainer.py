@@ -369,6 +369,7 @@ def rules_for(target: MI.Target, base=None):
                            stop_loss=float(r["stop_loss"]), target=float(r["target"]),
                            skip_quantile=float(r["skip_quantile"]),
                            min_prob=float(r.get("min_prob", 0.0)),
+                           unusual=str(r.get("unusual", "off")),
                            avoid_results=bool(r.get("avoid_results", False)),
                            avoid_expiry=bool(r.get("avoid_expiry", False)))
 
@@ -449,6 +450,8 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     best = best_of([best, *(replace(best, stop_loss=sl, target=tp) for sl, tp in RULE_EXITS)])
     if take_ok:
         best = best_of([best, *(replace(best, min_prob=p) for p in RULE_PROBS)])
+    # Unusual mornings: half-size or no trades - only if that earns more.
+    best = best_of([best, *(replace(best, unusual=u) for u in ("half", "skip"))])
     # Known traps: skip results-day stocks / monthly expiry days - only if that earns more.
     best = best_of([best, *(replace(best, avoid_results=a, avoid_expiry=e)
                             for a in (False, True) for e in (False, True))])
@@ -464,7 +467,7 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
               "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
                         "stop_loss": chosen.stop_loss, "target": chosen.target,
                         "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob,
-                        "avoid_results": chosen.avoid_results,
+                        "unusual": chosen.unusual, "avoid_results": chosen.avoid_results,
                         "avoid_expiry": chosen.avoid_expiry},
               "day_profit_recent": run(chosen)[0], "day_profit_before": run(chosen)[1],
               "current_day_profit_recent": cur_late, "tested": len(results),

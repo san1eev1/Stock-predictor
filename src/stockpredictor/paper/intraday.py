@@ -57,6 +57,7 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
             stop_loss=float(learned["stop_loss"]), target=float(learned["target"]),
             skip_quantile=float(learned["skip_quantile"]),
             min_prob=float(learned.get("min_prob", 0.0)),
+            unusual=str(learned.get("unusual", "off")),
             avoid_results=bool(learned.get("avoid_results", False)),
             avoid_expiry=bool(learned.get("avoid_expiry", False)))
     return rules, s.get("id_enabled", "1") == "1"
@@ -154,8 +155,11 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         prob = take.get((p["symbol"], p["side"]))
         taken = rules.min_prob <= 0 or (prob is not None and prob >= rules.min_prob)
         trap = B.is_trap(p, rules)          # results day / F&O expiry day: judged, not traded
+        odd = B.odd_day(p, rules)           # unusual morning (rules.unusual)
         qty = B.position_qty(slot, entry, rules, capital, p.get("v30")) \
-            if rank <= limit and taken and not trap else 0
+            if rank <= limit and taken and not trap and not (odd and rules.unusual == "skip") else 0
+        if odd and rules.unusual == "half":
+            qty //= 2
         if qty <= 0:
             continue
         c = costs.cost("buy" if sign > 0 else "sell", qty * entry)

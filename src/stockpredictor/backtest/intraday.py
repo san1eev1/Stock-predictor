@@ -32,6 +32,8 @@ class IntradayRules:
                                 # this quantile of the previous 60 days (0 = never skip)
     min_prob: float = 0.0       # trade a pick only if the 'take this trade?' model gives it
                                 # at least this chance of profit after costs (0 = off)
+    unusual: str = "off"         # 'is today unusual?' (features day_oddness > ODD_LIMIT):
+                                 # "half" = half-size trades, "skip" = no trades, "off"
     avoid_results: bool = False  # known traps: no trade in a stock on its results day ...
     avoid_expiry: bool = False   # ... nor on monthly F&O expiry days (picks still judged);
                                  # off until the profit tuning (trainer.tune_rules) shows
@@ -95,6 +97,13 @@ SLIP_RANGE_SHARE = 0.05   # slippage = 5% of the stock's first-30-minute range .
 SLIP_MIN, SLIP_MAX = 0.0003, 0.002   # ... between 0.03% and 0.2% per order
 LIQUIDITY_SHARE = 0.01    # a position is at most 1% of the stock's first-30-minute volume
 RISK_PER_TRADE = 0.01     # a stop-loss hit loses at most 1% of the book's capital
+ODD_LIMIT = 3.0           # day_oddness above this = an unusual morning (rules.unusual)
+
+
+def odd_day(row, rules: IntradayRules) -> bool:
+    get = row.get if hasattr(row, "get") else (lambda k, d=None: d)
+    v = get("day_oddness", np.nan)
+    return rules.unusual != "off" and v == v and v > ODD_LIMIT
 
 
 def is_trap(row, rules: IntradayRules) -> str | None:
@@ -124,7 +133,8 @@ def summary_columns(feats: pd.DataFrame, exit_col: str) -> pd.DataFrame:
     """What the simulation needs from the intraday features (with range and volume for
     realistic slippage and position limits when available)."""
     cols = ["symbol", "date", "c30", exit_col, *I.LEVEL_COLS,
-            *[c for c in ("h30", "l30", "v30", "results_today", "is_expiry") if c in feats]]
+            *[c for c in ("h30", "l30", "v30", "results_today", "is_expiry", "day_oddness")
+              if c in feats]]
     return feats[list(dict.fromkeys(cols))]
 
 
@@ -169,9 +179,11 @@ def simulate(scores: pd.DataFrame, summ: pd.DataFrame, rules: IntradayRules = In
             continue
         pnl_day = 0.0
         for _, p in pick(day, rules).iterrows():
-            if is_trap(p, rules):
+            if is_trap(p, rules) or (odd_day(p, rules) and rules.unusual == "skip"):
                 continue
             qty = position_qty(slot, p["c30"], rules, capital, p.get("v30", np.nan))
+            if odd_day(p, rules) and rules.unusual == "half":
+                qty //= 2
             if qty <= 0:
                 continue
             if rules.min_prob > 0:
