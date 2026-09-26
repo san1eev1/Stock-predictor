@@ -28,6 +28,8 @@ class Rules:
                                 # market): "half" (half-size new positions; backtest: same
                                 # return, smaller falls), "no_buys", "exit" (sell all, hold
                                 # cash) or "off" (ignore)
+    crash: str = "off"          # crash guard (sudden VIX spike / sharp Nifty fall, see
+                                # crash_days): same choices as `regime`
 
 
 @dataclass
@@ -97,7 +99,8 @@ class SimResult:
 def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
              capital: float = 100_000, rebalance: str = "daily",
              costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1,
-             sectors: dict | None = None, risk_off: set | None = None) -> SimResult:
+             sectors: dict | None = None, risk_off: set | None = None,
+             crash_days: set | None = None) -> SimResult:
     """scores: symbol/date/score rows. close: date x symbol close prices.
 
     lag=1: scores computed after a day's close are traded on the next day's
@@ -123,10 +126,14 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         blocked = {s for s, until in cooldown.items() if d < until}
         sells, buys = decide(holdings, score_by_date[d], last_price, rules,
                              rebalance=d in rebalance_days, blocked=blocked, sectors=sectors)
-        off = rules.regime != "off" and risk_off is not None and d in risk_off
-        if off and rules.regime in ("no_buys", "exit"):
+        # most severe active guard: regime (Nifty below its 200-day avg) or crash guard
+        modes = [m for m, days_ in ((rules.regime, risk_off), (rules.crash, crash_days))
+                 if m != "off" and days_ is not None and d in days_]
+        mode = next((m for m in ("exit", "no_buys", "half") if m in modes), None)
+        off = mode is not None
+        if mode in ("no_buys", "exit"):
             buys = []
-        if off and rules.regime == "exit":
+        if mode == "exit":
             sold = {s for s, _ in sells}
             sells = sells + [(s, "risk-off") for s in holdings if s not in sold]
         for sym, reason in sells:
@@ -146,7 +153,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         for sym in buys:
             price = last_price[sym]
             size = slot * vol_scale(vol, d, sym) if vol is not None else slot
-            if off and rules.regime == "half":
+            if mode == "half":
                 size *= 0.5
             qty = int(min(size, cash) / (price * 1.003))
             if qty <= 0:
@@ -169,6 +176,18 @@ def risk_off_days(indices: pd.DataFrame, index: str = "NIFTY50", window: int = 2
     n = indices[indices["symbol"] == index].set_index("date")["close"].sort_index()
     below = (n < n.rolling(window).mean()).shift(1).fillna(False).astype(bool)
     return set(below[below].index)
+
+
+def crash_days(indices: pd.DataFrame, vix_jump: float = 1.4, week_fall: float = -0.05,
+               hold: int = 5) -> set:
+    """Crash guard days: India VIX above `vix_jump` x its 20-day average, or Nifty 50 down
+    more than `week_fall` over 5 days - judged on the PREVIOUS close; stays on `hold` days."""
+    n = indices[indices["symbol"] == "NIFTY50"].set_index("date")["close"].sort_index()
+    v = indices[indices["symbol"] == "INDIAVIX"].set_index("date")["close"].sort_index()
+    v = v.reindex(n.index).ffill()
+    trig = (v > vix_jump * v.rolling(20).mean()) | (n / n.shift(5) - 1 < week_fall)
+    on = trig.shift(1).fillna(False).astype(float).rolling(hold, min_periods=1).max() > 0
+    return set(on[on].index)
 
 
 def vol_scale(vol: pd.DataFrame, d, sym: str) -> float:
