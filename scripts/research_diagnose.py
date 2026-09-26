@@ -27,6 +27,12 @@ def ic_by(df: pd.DataFrame, group: str, score="score", outcome="outcome", min_n=
     return per_day.groupby(level=group).agg(["mean", "count"])
 
 
+def bins(x: pd.Series, n: int, labels=None) -> pd.Series:
+    """Per-day n-tiles by rank (works for any group size)."""
+    b = np.ceil(x.rank(pct=True) * n).clip(1, n).astype("Int64")
+    return b if labels is None else b.map(dict(enumerate(labels, 1)))
+
+
 def show(title: str, table) -> None:
     print(f"\n-- {title}", flush=True)
     print(table.round(4).to_string(), flush=True)
@@ -49,11 +55,9 @@ show("IC by market trend", ic_by(m, "market"))
 m["vix"] = pd.qcut(m["vix_pct_252"], 3, labels=["calm", "normal", "nervous"])
 show("IC by VIX level", ic_by(m, "vix"))
 for col, name in (("vol_63", "volatility"), ("turnover_log", "liquidity"), ("mom_12_1", "12-month momentum")):
-    m[name] = m.groupby("date")[col].transform(
-        lambda x: pd.qcut(x.rank(method="first"), 3, labels=["low", "mid", "high"]))
+    m[name] = m.groupby("date")[col].transform(lambda x: bins(x, 3, ["low", "mid", "high"]))
     show(f"IC within {name} thirds (does it rank well among similar stocks?)", ic_by(m, name))
-m["decile"] = m.groupby("date")["score"].transform(
-    lambda x: pd.qcut(x.rank(method="first"), 10, labels=False) + 1)
+m["decile"] = m.groupby("date")["score"].transform(lambda x: bins(x, 10))
 dec = m.groupby("decile")["outcome"].agg(["mean", lambda x: (x > 0).mean()])
 dec.columns = ["avg 1-week excess return", "share beating Nifty"]
 show("Where is the edge? (decile 10 = top picks)", dec)
@@ -100,11 +104,9 @@ for target in MI.TARGETS:
     show("IC by weekday", ic_by(x, "weekday", min_n=50))
     for col, name in (("atr_pct", "volatility"), ("vol30_adv", "early volume")):
         if col in x:
-            x[name] = x.groupby("date")[col].transform(
-                lambda v: pd.qcut(v.rank(method="first"), 3, labels=["low", "mid", "high"]))
+            x[name] = x.groupby("date")[col].transform(lambda v: bins(v, 3, ["low", "mid", "high"]))
             show(f"IC within {name} thirds", ic_by(x, name))
-    x["decile"] = x.groupby("date")["score"].transform(
-        lambda v: pd.qcut(v.rank(method="first"), 10, labels=False) + 1)
+    x["decile"] = x.groupby("date")["score"].transform(lambda v: bins(v, 10))
     show("Where is the edge? (decile 10 = top buys, 1 = top sells): average move",
          x.groupby("decile")["outcome"].agg(["mean", lambda v: (v > 0).mean()]))
     print("\n-- More data or better model? (IC on the last 120 days by training history)", flush=True)
