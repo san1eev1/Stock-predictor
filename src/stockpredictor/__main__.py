@@ -989,39 +989,49 @@ def cmd_today(settings, args) -> None:
 
 
 def cmd_autostart(settings, args) -> None:
-    """Start automatically at 09:00 on weekdays (macOS launchd); stops by itself at night."""
+    """Keep the app running as a macOS background service (launchd): starts at login,
+    restarts if it stops, runs every day and night - independent of any terminal or Claude
+    session. The app itself decides what to do when (market hours, GitHub runs at 21:00 and
+    23:00). Also removes the older 09:00-21:30 weekday service and the old local training job."""
     import plistlib
     import subprocess
 
+    from stockpredictor import scheduler
     from stockpredictor.config import PROJECT_ROOT
 
-    label = "com.stockpredictor.daily"
-    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    agents = Path.home() / "Library" / "LaunchAgents"
+    for old in ("com.stockpredictor.daily", "com.stockpredictor.app"):
+        subprocess.run(["launchctl", "unload", str(agents / f"{old}.plist")], check=False,
+                       capture_output=True)
+        if old != "com.stockpredictor.app" or args.off:
+            (agents / f"{old}.plist").unlink(missing_ok=True)
+    scheduler.remove()                  # old local training job (training runs on GitHub)
+    scheduler.PLIST_PATH.unlink(missing_ok=True)
     if args.off:
-        subprocess.run(["launchctl", "unload", str(plist)], check=False)
-        plist.unlink(missing_ok=True)
-        print("Autostart turned off.")
+        print("Background service turned off.")
         return
     logs = PROJECT_ROOT / "logs"
     logs.mkdir(exist_ok=True)
     python = PROJECT_ROOT / ".venv" / "bin" / "python"
+    label = "com.stockpredictor.app"
     spec = {
         "Label": label,
         "ProgramArguments": ["/usr/bin/caffeinate", "-i", str(python), "-m", "stockpredictor",
-                             "start", "--no-browser", "--until", "21:30"],
+                             "start", "--no-browser"],
         "WorkingDirectory": str(PROJECT_ROOT),
-        "StartCalendarInterval": [{"Weekday": d, "Hour": 9, "Minute": 0} for d in range(1, 6)],
-        "StandardOutPath": str(logs / "daily.log"),
-        "StandardErrorPath": str(logs / "daily.log"),
+        "RunAtLoad": True,
+        "KeepAlive": True,              # restarted automatically if it stops or crashes
+        "ThrottleInterval": 60,
+        "StandardOutPath": str(logs / "app.log"),
+        "StandardErrorPath": str(logs / "app.log"),
     }
-    plist.parent.mkdir(parents=True, exist_ok=True)
-    with open(plist, "wb") as f:
+    agents.mkdir(parents=True, exist_ok=True)
+    with open(agents / f"{label}.plist", "wb") as f:
         plistlib.dump(spec, f)
-    subprocess.run(["launchctl", "unload", str(plist)], check=False, capture_output=True)
-    subprocess.run(["launchctl", "load", str(plist)], check=True)
-    print("Autostart on: Mon-Fri at 09:00 (or when the Mac wakes, if it was asleep).")
-    print("It runs in the background and stops after 21:30 once the day's work is done.")
-    print(f"Log: {logs / 'daily.log'}  ·  Dashboard: python -m stockpredictor app")
+    subprocess.run(["launchctl", "load", str(agents / f"{label}.plist")], check=True)
+    print("Background service on: the app runs all the time (starts at login, restarts if "
+          "it stops) and starts GitHub's 21:00 and 23:00 runs itself.")
+    print(f"Log: {logs / 'app.log'}  ·  Dashboard: http://localhost:8501")
     print("Turn off with: python -m stockpredictor autostart --off")
 
 
@@ -1031,7 +1041,7 @@ def _autostart_args(p):
 
 ARG_COMMANDS = {
     "today": (cmd_today, "One-shot daily run: sync, learn, decide, print picks", _dir_arg),
-    "autostart": (cmd_autostart, "Start automatically at 09:00 on weekdays (macOS)",
+    "autostart": (cmd_autostart, "Run the app always as a background service (macOS launchd)",
                   _autostart_args),
     "start": (cmd_start, "Start everything: web dashboard + live monitor + training", _start_args),
     "improve": (cmd_improve, "Sync data, retrain both models, optionally self-tune",
