@@ -497,6 +497,7 @@ def paper_longterm():
                  "a tie-breaker (90% momentum, 10% model), and holds them until they fall out "
                  "of the top half. In the 2015-2026 backtest (5 holdings) this earned ~22.6% a "
                  "year after costs vs ~9% for Nifty 50, with falls of up to ~50% along the way.")
+    stress_scenario(c, prices)
     paper_book(c, E.HORIZON, "Holdings", prices)
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = ? ORDER BY date",
                      c, params=(E.HORIZON,))
@@ -510,6 +511,27 @@ def paper_longterm():
                         eq.assign(series="Nifty 50", value=n / n[0] * eq["equity"].iloc[0])])
         st.altair_chart(C.lines(df[["date", "series", "value"]], "date", "value", "series",
                                 ",.0f", "Value (₹)"), width="stretch")
+
+
+def stress_scenario(c, prices: dict[str, float], fall: float = 0.10):
+    """What a sudden market fall would do to the paper portfolio (each holding's beta)."""
+    m = ctx()
+    held = E.holdings(c)
+    if m is None or not held:
+        return
+    latest = m.feats[m.feats["date"] == m.feats["date"].max()].set_index("symbol")
+    loss, value = 0.0, 0.0
+    for sym, pos in held.items():
+        v = pos.qty * prices.get(sym, pos.entry_price)
+        beta = latest["beta_252"].get(sym, 1.0) if "beta_252" in latest else 1.0
+        beta = 1.0 if beta != beta else float(beta)
+        loss += v * beta * fall
+        value += v
+    eq = E.value(c, prices)["equity"]
+    st.caption(f"🧯 Stress test: if Nifty 50 fell {fall:.0%} in a day, the holdings would lose "
+               f"about **{rupees(loss)}** ({loss / eq:.1%} of the portfolio), based on how much "
+               "each stock has moved with the market over the last year (beta). Real crashes "
+               "can be worse: stocks tend to fall together.")
 
 
 def paper_book(c, h: str, title: str, prices: dict[str, float]):
