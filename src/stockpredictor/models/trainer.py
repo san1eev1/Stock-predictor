@@ -152,6 +152,26 @@ def load_runs(conn, run_log: Path | None = None) -> pd.DataFrame:
 TOP_TRADED = 5          # long-term: the 5 best stocks are bought (backtest.portfolio.Rules)
 
 
+MIN_T_STAT = 2.0      # promotion gate: new settings must beat the current ones significantly
+
+
+def significant(new: dict, current: dict, t_min: float = MIN_T_STAT) -> bool:
+    """Promotion gate: is the new settings' daily IC higher than the current settings' by a
+    statistically meaningful margin (paired t-statistic over the same dates >= t_min)? A
+    slightly higher average alone is often luck."""
+    a, b = new.get("_ic"), current.get("_ic")
+    if a is None or b is None:
+        return True                       # nothing to compare (e.g. no current results)
+    diff = (a - b).dropna()
+    if len(diff) < 20 or float(diff.std()) == 0:
+        return False
+    return float(diff.mean() / diff.std() * np.sqrt(len(diff))) >= t_min
+
+
+def _loggable(results: list[dict]) -> list[dict]:
+    return [{k: v for k, v in r.items() if not k.startswith("_")} for r in results]
+
+
 def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> dict:
     last = labeled.dropna(subset=["target"])["date"].max().year
     scores = M.walk_forward(labeled, labeled, last - years + 1, last, params=params)
@@ -163,7 +183,7 @@ def evaluate_longterm(labeled: pd.DataFrame, params: dict, years: int = 3) -> di
     m = scores.merge(labeled[["symbol", "date", "fwd_excess"]], on=["symbol", "date"]).dropna()
     rank = m.groupby("date")["score"].rank(ascending=False)
     top, best = m[rank <= 10], m[rank <= TOP_TRADED]
-    return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()),
+    return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()), "_ic": ic,
             "top10_hit": float((top["fwd_excess"] > 0).mean()),
             "top10_excess": float(top["fwd_excess"].mean()),
             "top5_hit": float((best["fwd_excess"] > 0).mean()),
@@ -215,7 +235,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
     adopted = (not best["current"] and not np.isnan(best["ic"])
                and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN)
                # paper check: the 5 stocks it would buy must beat Nifty at least as often
-               and not best.get("top5_hit", np.nan) < base.get("top5_hit", np.nan))
+               and not best.get("top5_hit", np.nan) < base.get("top5_hit", np.nan)
+               and significant(best, base))
     check = None
     if adopted and check_years > years:
         check = {"best": score(best["params"], check_years)["ic"],
@@ -228,7 +249,7 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
     report = {"adopted": adopted, "ic": chosen["ic"], "top10_hit": chosen["top10_hit"],
               "top10_excess": chosen["top10_excess"], "top5_hit": chosen.get("top5_hit"),
               "top5_excess": chosen.get("top5_excess"), "previous_ic": base["ic"],
-              "tested": len(results), "params": chosen["params"], "all": results,
+              "tested": len(results), "params": chosen["params"], "all": _loggable(results),
               "long_check": check}
     if log_all or adopted:     # continuous rounds only log the ones that changed something
         log_run(conn, "longterm", "tune", f"{labeled['date'].max():%Y-%m-%d}", report)
@@ -295,7 +316,7 @@ def evaluate_intraday(feats: pd.DataFrame, params: dict, last_days: int = 120,
     n = m.groupby("date")["score"].transform("size")
     longs, shorts = m[r <= 5], m[r > n - 5]
     acc = pd.concat([longs["target_ret"] > 0, shorts["target_ret"] < 0]).mean()
-    return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()),
+    return {"ic": float(ic.mean()), "ic_positive": float((ic > 0).mean()), "_ic": ic,
             "direction_accuracy": float(acc), "days": int(len(ic))}
 
 
@@ -380,6 +401,8 @@ def day_profit(days: pd.DataFrame) -> float:
 
 
 HOLDOUT_DAYS = 60     # newest days never used for choosing rules, only to confirm them
+CANDIDATE_FILE = "rules_candidate.json"   # new rules waiting in the shadow period
+SHADOW_DAYS = 5       # new trading days a candidate must also win before it goes live
 
 
 def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int = 5,
@@ -420,6 +443,7 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
     summ = B.summary_columns(feats, target.exit_col)
     results: dict = {}
+    sims: dict = {}
 
     def run(r) -> tuple[float, float, float, float]:
         """(recent, earlier) tuning-day profit per day, share of days traded, holdout profit."""
@@ -427,6 +451,7 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
             sim = B.simulate(scores, summ, r, capital, exit_col=target.exit_col,
                              exit_minutes=minutes)
             d, t = sim["days"], sim["trades"]
+            sims[r] = d
             held = d["date"].isin(holdout)
             late = d["date"].isin(recent)
             earlier = ~late & ~held
@@ -443,6 +468,35 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
 
     cap = lambda n: min(n, max_n)                              # noqa: E731
     now = replace(current, n_long=cap(current.n_long), n_short=cap(current.n_short))
+
+    # Shadow period: a candidate from an earlier run goes live only if it also did at least
+    # as well as the live rules on the SHADOW_DAYS+ trading days since it was found.
+    shadow = None
+    cand_path = target.model_dir / CANDIDATE_FILE
+    if cand_path.exists():
+        try:
+            cand = json.loads(cand_path.read_text())
+            since = pd.Timestamp(cand["since"])
+            new_days = [x for x in dates if x > since]
+            if len(new_days) >= SHADOW_DAYS:
+                cr = B.IntradayRules(**cand["rules"])
+                run(cr), run(now)
+                won = lambda r: day_profit(sims[r][sims[r]["date"].isin(new_days)])  # noqa: E731
+                ok = won(cr) >= won(now)
+                shadow = {"promoted": ok, "days": len(new_days), "candidate": won(cr),
+                          "live": won(now)}
+                if ok:
+                    rules_json = {"rules": cand["rules"], "adopted": True,
+                                  "updated": datetime.now().isoformat(timespec="seconds"),
+                                  "shadow": shadow}
+                    target.model_dir.mkdir(parents=True, exist_ok=True)
+                    (target.model_dir / RULES_FILE).write_text(json.dumps(rules_json, indent=1))
+                    now = cr
+                cand_path.unlink()
+            else:
+                shadow = {"waiting": len(new_days), "needed": SHADOW_DAYS}
+        except (OSError, ValueError, KeyError, TypeError):
+            cand_path.unlink(missing_ok=True)
     # Buys/sells per day together with skipping weak days (they interact), then stop/target,
     # then the 'take this trade?' threshold.
     best = best_of([now, *(replace(now, n_long=cap(a), n_short=cap(b), skip_quantile=q)
@@ -460,10 +514,20 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     holdout_ok = not holdout or new_hold > cur_hold      # must win on the untouched days too
     adopted = (best != now and new_late > cur_late and new_early >= cur_early
                and new_days >= MIN_TRADE_DAYS and holdout_ok)
-    chosen = best if adopted else now
+    waiting = bool(shadow and "waiting" in shadow)
+    # Passed all tests: goes into the shadow period first (not live yet).
+    if adopted and not waiting:
+        target.model_dir.mkdir(parents=True, exist_ok=True)
+        cand_path.write_text(json.dumps({"since": f"{pd.Timestamp(dates[-1]):%Y-%m-%d}",
+                                         "rules": {k: getattr(best, k) for k in
+                                                   best.__dataclass_fields__}}, indent=1))
+    chosen = now                        # live rules only change through the shadow period
     top = sorted((r for r in results if results[r][2] >= MIN_TRADE_DAYS),
                  key=lambda r: -results[r][0])[:5]
-    report = {"target": target.horizon, "adopted": adopted,
+    report = {"target": target.horizon, "adopted": adopted, "shadow": shadow,
+              "candidate": ({k: getattr(best, k) for k in ("n_long", "n_short", "stop_loss",
+                                                           "target", "skip_quantile")}
+                            if adopted else None),
               "rules": {"n_long": chosen.n_long, "n_short": chosen.n_short,
                         "stop_loss": chosen.stop_loss, "target": chosen.target,
                         "skip_quantile": chosen.skip_quantile, "min_prob": chosen.min_prob,
@@ -699,7 +763,8 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
         return None
     base = results[0]
     best = max(valid, key=lambda r: r["ic"])
-    adopted = not best["current"] and best["ic"] >= base["ic"] + MARGIN
+    adopted = (not best["current"] and best["ic"] >= base["ic"] + MARGIN
+               and significant(best, base))
     check = None
     if adopted and feats["date"].nunique() >= check_days + MI.MIN_TRAIN_DAYS:
         check = {"best": evaluate_intraday(feats, best["params"], check_days, peer)["ic"],
@@ -719,7 +784,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
     report = {"adopted": adopted, "ic": chosen["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
-              "all": results, "long_check": check,
+              "all": _loggable(results), "long_check": check,
               "paper": paper.get("new") if adopted else paper["current"],
               "paper_before": paper["current"]}
     if conn is not None and report["paper"]:

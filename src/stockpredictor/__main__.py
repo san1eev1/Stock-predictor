@@ -611,7 +611,13 @@ def _cloud_intraday(settings, d: Path, ctx, args, deadline: float):
                   f"{r['n_short']} sells, stop {r['stop_loss']}%, target {r['target'] or 'none'}"
                   f"%, skip weakest {r['skip_quantile']:.0%} of days -> Rs "
                   f"{rep['day_profit_recent']:+.0f}/day recently, Rs {rep['day_profit_before']:+.0f}"
-                  f"/day before" + (" (new)" if rep["adopted"] else " (kept)"), flush=True)
+                  f"/day before" + (" - new rules found, in the shadow period before going live"
+                                    if rep["adopted"] else ""), flush=True)
+            sh = rep.get("shadow") or {}
+            if "promoted" in sh:
+                print(f"   shadow period ({sh['days']} new days): candidate Rs {sh['candidate']:+.0f}"
+                      f"/day vs live Rs {sh['live']:+.0f}/day -> "
+                      + ("promoted to live" if sh["promoted"] else "dropped"), flush=True)
     out = T.replay_training(ctx, d, conn)
     for target in MI.TARGETS:
         r = out.get(target.horizon)

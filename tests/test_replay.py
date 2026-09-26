@@ -95,8 +95,18 @@ def test_rules_tuned_by_profit(tmp_path, monkeypatch):
 
     monkeypatch.setattr(B, "simulate", fake_sim)
     rep = T.tune_rules(feats, target, B.IntradayRules(), max_n=5)
-    assert rep["adopted"] and rep["rules"]["n_long"] == 2 and rep["rules"]["n_short"] == 0
-    assert rep["rules"]["skip_quantile"] == 0.5 and rep["day_profit_recent"] == 100
+    # passed every test, but first goes into the shadow period: live rules unchanged
+    assert rep["adopted"] and rep["candidate"]["n_long"] == 2 and rep["rules"]["n_long"] == 5
+    cand = target.model_dir / T.CANDIDATE_FILE
+    assert cand.exists()
+    # 5+ new trading days later it still wins on them -> promoted to live
+    import json
+    c = json.loads(cand.read_text())
+    c["since"] = f"{days[-7]:%Y-%m-%d}"
+    cand.write_text(json.dumps(c))
+    rep = T.tune_rules(feats, target, B.IntradayRules(), max_n=5)
+    assert rep["shadow"]["promoted"] and rep["rules"]["n_long"] == 2
+    assert rep["rules"]["skip_quantile"] == 0.5 and not cand.exists()
     # the learned rules apply, capped by the Settings maximum
     r = T.rules_for(target, B.IntradayRules(n_long=1, n_short=5))
     assert (r.n_long, r.n_short, r.skip_quantile) == (1, 0, 0.5)
