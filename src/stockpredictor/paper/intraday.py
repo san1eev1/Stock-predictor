@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -341,7 +343,16 @@ def evaluate_day(conn, day: str, exit_prices: dict[str, float],
 
 
 def value(conn, prices: dict[str, float], horizon: str = HORIZON) -> dict:
-    """Account value with open longs and shorts marked to `prices`."""
+    """Account value with open longs and shorts marked to `prices`. Each day starts fresh:
+    before the day's first trade the account is back at its full capital."""
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+    if not conn.execute("SELECT 1 FROM paper_trades WHERE horizon = ? AND "
+                        "(status = 'open' OR substr(entry_time, 1, 10) = ?) LIMIT 1",
+                        (horizon, today)).fetchone():
+        row = conn.execute("SELECT capital FROM paper_accounts WHERE horizon = ?",
+                           (horizon,)).fetchone()
+        if row is not None:
+            start_day(conn, row[0], horizon)
     acct = conn.execute("SELECT capital, cash FROM paper_accounts WHERE horizon = ?",
                         (horizon,)).fetchone()
     if acct is None:
