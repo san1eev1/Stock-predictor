@@ -566,6 +566,8 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
         st.caption("No open positions yet — orders fill at the next market price after a decision.")
     else:
         pos["Live price"] = pos["symbol"].map(prices).fillna(pos["entry_price"])
+        pos["Invested"] = pos["qty"] * pos["entry_price"]
+        pos["Value now"] = pos["qty"] * pos["Live price"]
         pos["P&L"] = sign * (pos["Live price"] - pos["entry_price"]) * pos["qty"] - pos["costs"]
         pos["P&L %"] = sign * (pos["Live price"] / pos["entry_price"] - 1)
         pos["Today %"] = as_pct(pct(pos["Live price"], pos["symbol"].map(prev_closes())))
@@ -573,15 +575,19 @@ def paper_book(c, h: str, title: str, prices: dict[str, float]):
         pos["Stop-loss"] = pos["entry_price"] * (1 - sign * rules.stop_loss)
         pos["Since"] = pd.to_datetime(pos["entry_time"]).dt.strftime("%d %b %Y")
         entry = "Buy price" if sign > 0 else "Short price"
-        st.dataframe(pos[["symbol", "qty", "entry_price", "Live price", "Today %", "Since entry %",
-                          "P&L", "P&L %", "Stop-loss", "Since"]].rename(
-            columns={"symbol": "Stock", "qty": "Qty", "entry_price": entry,
-                     "P&L": "P&L (after costs)"}),
+        st.dataframe(pos[["symbol", "Since", "qty", "entry_price", "Invested", "Live price",
+                          "Value now", "Today %", "P&L", "P&L %", "Stop-loss"]].rename(
+            columns={"symbol": "Stock", "Since": "Held since", "qty": "Qty", "entry_price": entry,
+                     "Live price": "Price now / close", "P&L": "P&L since bought (after costs)"}),
             hide_index=True, width="stretch", column_config={
                 c_: st.column_config.NumberColumn(format="₹%.2f")
-                for c_ in [entry, "Live price", "P&L (after costs)", "Stop-loss"]} | {
+                for c_ in [entry, "Invested", "Price now / close", "Value now",
+                           "P&L since bought (after costs)", "Stop-loss"]} | {
                 "P&L %": st.column_config.NumberColumn(format="percent"),
-                "Today %": PCT, "Since entry %": PCT})
+                "Today %": PCT})
+        t = pos[["Invested", "Value now", "P&L"]].sum()
+        st.caption(f"Total invested ₹{t['Invested']:,.0f} · value now ₹{t['Value now']:,.0f} · "
+                   f"P&L since bought ₹{t['P&L']:+,.0f}")
     buys = pending[pending["side"] == "buy"]
     if not buys.empty:
         st.caption(f"Queued {buy_word.lower()} orders (fill at the next market price):")
