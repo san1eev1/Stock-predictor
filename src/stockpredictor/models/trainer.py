@@ -477,18 +477,18 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     cand_path = target.model_dir / CANDIDATE_FILE
     if cand_path.exists():
         try:
-            cand = json.loads(cand_path.read_text())
-            since = pd.Timestamp(cand["since"])
+            pending = json.loads(cand_path.read_text())
+            since = pd.Timestamp(pending["since"])
             new_days = [x for x in dates if x > since]
             if len(new_days) >= SHADOW_DAYS:
-                cr = B.IntradayRules(**cand["rules"])
+                cr = B.IntradayRules(**pending["rules"])
                 run(cr), run(now)
                 won = lambda r: day_profit(sims[r][sims[r]["date"].isin(new_days)])  # noqa: E731
                 ok = won(cr) >= won(now)
                 shadow = {"promoted": ok, "days": len(new_days), "candidate": won(cr),
                           "live": won(now)}
                 if ok:
-                    rules_json = {"rules": cand["rules"], "adopted": True,
+                    rules_json = {"rules": pending["rules"], "adopted": True,
                                   "updated": datetime.now().isoformat(timespec="seconds"),
                                   "shadow": shadow}
                     target.model_dir.mkdir(parents=True, exist_ok=True)
