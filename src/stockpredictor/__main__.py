@@ -739,7 +739,16 @@ def _angel_startup(settings, store_dir: Path) -> None:
 
         log = logging.getLogger("backfill")
         remaining, total = list(todo), 0
+        from datetime import datetime, time as dtime
+        from zoneinfo import ZoneInfo
+
+        def market_open() -> bool:        # 9:00-15:45 IST on weekdays: live prices come first
+            n = datetime.now(ZoneInfo("Asia/Kolkata"))
+            return n.weekday() < 5 and dtime(9, 0) <= n.time() <= dtime(15, 45)
+
         for attempt in range(1, BACKFILL_ATTEMPTS + 1):
+            while market_open():          # never download history while the market is open
+                _time.sleep(5 * 60)
             try:
                 tokens = angelone.fetch_nse_equity_tokens()
                 failed = []

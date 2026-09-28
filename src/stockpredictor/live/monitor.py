@@ -420,9 +420,12 @@ class Monitor:
             E.evaluate_predictions(self.conn, ctx)
         except Exception:
             log.exception("startup training/decision failed")
+        # (also when an earlier run was stopped half-way: no picks saved for today yet)
+        picked = self.conn.execute("SELECT 1 FROM predictions WHERE horizon = 'intraday' AND "
+                                   "date = ? LIMIT 1", (f"{now:%Y-%m-%d}",)).fetchone()
         if in_market_hours(now) and self.trading_today(now) \
                 and INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
-                and _setting(self.conn, "id_last_picks") != f"{now:%Y-%m-%d}":
+                and (_setting(self.conn, "id_last_picks") != f"{now:%Y-%m-%d}" or not picked):
             self.intraday_picks_job(now)
         self.print_scoreboard(now)
 
