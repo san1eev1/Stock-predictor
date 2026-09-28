@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     pnl            REAL,
     status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed'))
 );
+-- A long-term stock is held at most once (two app copies once filled the same order twice).
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_longterm ON paper_trades(symbol)
+    WHERE horizon = 'longterm' AND status = 'open';
 
 -- Real trades entered manually (from Groww)
 CREATE TABLE IF NOT EXISTS portfolio_trades (

@@ -511,6 +511,19 @@ def paper_longterm():
                         eq.assign(series="Nifty 50", value=n / n[0] * eq["equity"].iloc[0])])
         st.altair_chart(C.lines(df[["date", "series", "value"]], "date", "value", "series",
                                 ",.0f", "Value (₹)"), width="stretch")
+    if len(eq):
+        # Each day as if it started fresh with ₹1 lakh: the day's return on ₹1,00,000
+        # (holdings are kept - selling and rebuying daily would cost ~0.6% a day).
+        st.subheader("Each day on a fresh ₹1,00,000")
+        capital = E.value(c, prices)["capital"]
+        prev = eq["equity"].shift(1).fillna(capital)
+        daily = pd.DataFrame({"date": pd.to_datetime(eq["date"]).dt.strftime("%d %b %Y"),
+                              "start": 100_000.0,
+                              "end": 100_000 * eq["equity"] / prev})
+        daily["P&L"] = daily["end"] - daily["start"]
+        st.dataframe(daily.iloc[::-1].style.format({"start": "₹{:,.0f}", "end": "₹{:,.0f}",
+                                                   "P&L": "₹{:+,.0f}"}),
+                     hide_index=True, width="stretch")
 
 
 def stress_scenario(c, prices: dict[str, float], fall: float = 0.10):
