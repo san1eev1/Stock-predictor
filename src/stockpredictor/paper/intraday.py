@@ -64,6 +64,11 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
             skip_friday=bool(learned.get("skip_friday", False)),
             avoid_results=bool(learned.get("avoid_results", False)),
             avoid_expiry=bool(learned.get("avoid_expiry", False)))
+    if s.get("id_every_day", "1") == "1":
+        # Trade every day (no day is skipped): each day's paper result feeds the learning.
+        from dataclasses import replace
+
+        rules = replace(rules, skip_quantile=0.0, unusual="off", skip_friday=False)
     return rules, s.get("id_enabled", "1") == "1"
 
 
