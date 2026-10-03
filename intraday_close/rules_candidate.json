@@ -1,0 +1,16 @@
+{
+ "since": "2026-09-28",
+ "rules": {
+  "n_long": 5,
+  "n_short": 5,
+  "stop_loss": 1.0,
+  "target": 0.0,
+  "skip_quantile": 0.7,
+  "min_prob": 0.5,
+  "unusual": "off",
+  "max_gap": 0.0,
+  "skip_friday": false,
+  "avoid_results": false,
+  "avoid_expiry": false
+ }
+}
