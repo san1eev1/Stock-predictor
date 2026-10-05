@@ -21,7 +21,11 @@ def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
     if client is not None:
         start = datetime(today.year, today.month, today.day, 9, 15)
         end = datetime(today.year, today.month, today.day, 9, 45)
+        refused = 0
         for s in symbols:
+            if refused >= 5:              # Angel One is throttling us: Yahoo for the rest
+                log.warning("first30: Angel One refusing requests; Yahoo for the remaining stocks")
+                break
             token = prices_client._tokens.get(s)
             if not token:
                 continue
@@ -36,7 +40,9 @@ def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
                     from stockpredictor.data.fine import summarize_fine
 
                     out[s] = {**summ, **(summarize_fine(bars) or {})}
+                refused = 0
             except Exception as exc:
+                refused += 1
                 log.warning("first30 %s: %s", s, exc)
     missing = [s for s in symbols if s not in out]
     if missing:
