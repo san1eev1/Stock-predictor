@@ -234,6 +234,11 @@ def build_features(daily: pd.DataFrame, indices: pd.DataFrame,
         from stockpredictor.data.delivery import features as delivery_features
 
         feats = feats.merge(delivery_features(delivery), on=["symbol", "date"], how="left")
+        # NSE publishes delivery after the close: carry the last known values forward (up
+        # to 5 trading days) so live / not-yet-published days aren't left blank.
+        dcols = ["deliv_pct", "deliv_pct_20", "deliv_pct_rel", "deliv_qty_rel"]
+        feats = feats.sort_values(["symbol", "date"])
+        feats[dcols] = feats.groupby("symbol")[dcols].ffill(limit=5)
     if earnings is not None and not earnings.empty:        # results dates (data/earnings.py)
         from stockpredictor.data.earnings import add_features as earnings_features
 

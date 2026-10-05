@@ -80,7 +80,7 @@ class MarketContext:
         return float(n["close"].iloc[-1])
 
 
-FEATURE_CACHE_VERSION = 4     # 4: cleaned prices (data/clean.py)
+FEATURE_CACHE_VERSION = 5     # 5: delivery carried forward up to 5 days
 
 
 def cached_features(store_dir, daily, indices, universe, delivery=None,

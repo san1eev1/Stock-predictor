@@ -568,7 +568,17 @@ class Monitor:
                               "close": p, "adj_close": p, "volume": float("nan"), "source": "live"}
                              for s, p in live.items()])
         idx = ctx.indices[ctx.indices["date"] >= start]
-        feats = F.build_features(pd.concat([hist, prov], ignore_index=True), idx, ctx.universe)
+        if getattr(self, "_lt_extra", (None,))[0] != ctx.daily["date"].max():
+            # delivery % and results dates, as the trained model saw them (once per data day)
+            from stockpredictor.data import delivery as DL
+            from stockpredictor.data import earnings as ER
+
+            dl = DL.load(self.store_dir)
+            self._lt_extra = (ctx.daily["date"].max(),
+                              dl[dl["date"] >= start - pd.Timedelta(days=250)] if len(dl) else dl,
+                              ER.load(self.store_dir))
+        feats = F.build_features(pd.concat([hist, prov], ignore_index=True), idx, ctx.universe,
+                                 self._lt_extra[1], self._lt_extra[2])
         now_rows = feats[feats["date"] == today]
         if now_rows.empty:
             return
