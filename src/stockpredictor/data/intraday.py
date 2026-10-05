@@ -158,13 +158,13 @@ def chunk_ranges(start: date, end: date, max_days: int) -> list[tuple[datetime, 
 
 
 def angel_bars(client, token: str, start: date, end: date,
-               interval: str = "FIVE_MINUTE") -> pd.DataFrame:
+               interval: str = "FIVE_MINUTE", waits=(0, 2, 6, 15)) -> pd.DataFrame:
     """5-minute bars from Angel One for [start, end] (chunked requests)."""
     from stockpredictor.data.angelone import MAX_DAYS_PER_REQUEST
 
     rows = []
     for frm, to in chunk_ranges(start, end, MAX_DAYS_PER_REQUEST[interval]):
-        rows += client.candles(token, interval, frm, to)
+        rows += client.candles(token, interval, frm, to, waits=waits)
     if not rows:
         return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
     df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])

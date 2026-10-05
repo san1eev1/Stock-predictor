@@ -27,7 +27,9 @@ def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
                 continue
             try:
                 # 1-minute bars: the same opening summary plus the fine 1/3-minute features
-                bars = I.angel_bars(client, token, today, today, interval="ONE_MINUTE")
+                # live picks can't wait: one quick retry, then Yahoo fills the gaps
+                bars = I.angel_bars(client, token, today, today, interval="ONE_MINUTE",
+                                    waits=(0, 1.5))
                 bars = bars[(bars["ts"] >= start) & (bars["ts"] < end)]
                 summ = I.summarize_first30(bars)
                 if summ:

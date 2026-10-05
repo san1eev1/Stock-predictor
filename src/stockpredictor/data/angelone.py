@@ -113,7 +113,7 @@ class AngelDataClient:
         return out
 
     def candles(self, token: str, interval: str,
-                start: datetime, end: datetime) -> list[tuple]:
+                start: datetime, end: datetime, waits=(0, 2, 6, 15)) -> list[tuple]:
         """Return [(ts, open, high, low, close, volume), ...] for one request window."""
         if interval not in INTERVALS:
             raise ValueError(f"Unknown interval {interval}")
@@ -125,7 +125,7 @@ class AngelDataClient:
             "todate": end.strftime("%Y-%m-%d %H:%M"),
         }
         # Angel One throttles bursts (answers with an unparsable page): back off and retry.
-        for wait in (0, 2, 6, 15):
+        for wait in waits:
             time.sleep(wait)
             try:
                 resp = self._require_login().getCandleData(params)
