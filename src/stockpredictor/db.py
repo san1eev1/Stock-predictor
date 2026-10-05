@@ -307,7 +307,11 @@ def _relax_horizon(conn: sqlite3.Connection, table: str) -> None:
     if row is None or "CHECK (horizon IN" not in row[0]:
         return
     cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+    # legacy rename: don't rewrite other tables' references (paper_trades -> predictions)
+    # to point at the temporary {table}_old, which is dropped below.
+    conn.execute("PRAGMA legacy_alter_table = ON")
     conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+    conn.execute("PRAGMA legacy_alter_table = OFF")
     create = SCHEMA[SCHEMA.index(f"CREATE TABLE IF NOT EXISTS {table} "):]
     conn.execute(create[:create.index(");") + 2])
     for t, col, typ in MIGRATIONS:
