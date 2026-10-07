@@ -1025,7 +1025,7 @@ def cmd_autostart(settings, args) -> None:
     label = "com.stockpredictor.app"
     spec = {
         "Label": label,
-        "ProgramArguments": ["/usr/bin/caffeinate", "-i", str(python), "-m", "stockpredictor",
+        "ProgramArguments": ["/usr/bin/caffeinate", "-ims", str(python), "-m", "stockpredictor",
                              "start", "--no-browser"],
         "WorkingDirectory": str(PROJECT_ROOT),
         "RunAtLoad": True,
