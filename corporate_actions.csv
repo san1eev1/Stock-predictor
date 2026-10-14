@@ -5342,6 +5342,7 @@ TCS,2025-10-15,dividend,11
 TCS,2026-01-16,dividend,57
 TCS,2026-05-25,dividend,31
 TCS,2026-07-15,dividend,12
+TCS,2026-10-14,dividend,12
 TECHM,2007-03-21,dividend,0.375
 TECHM,2008-07-17,dividend,1.375
 TECHM,2008-10-27,dividend,1
@@ -5784,6 +5785,7 @@ VEDL,2024-12-24,dividend,8.5
 VEDL,2025-06-24,dividend,7
 VEDL,2025-08-26,dividend,16
 VEDL,2026-03-27,dividend,11
+VEDL,2026-10-14,dividend,5
 VOLTAS,2005-07-29,dividend,0.5
 VOLTAS,2006-07-07,dividend,0.6
 VOLTAS,2006-09-22,split,10
