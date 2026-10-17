@@ -1,0 +1,92 @@
+{
+ "target": "intraday",
+ "adopted": false,
+ "shadow": null,
+ "candidate": null,
+ "rules": {
+  "n_long": 5,
+  "n_short": 5,
+  "stop_loss": 1.0,
+  "target": 2.0,
+  "skip_quantile": 0.7,
+  "min_prob": 0.0,
+  "unusual": "off",
+  "max_gap": 0.0,
+  "skip_friday": false,
+  "avoid_results": false,
+  "avoid_expiry": false
+ },
+ "day_profit_recent": -105.19087115867575,
+ "day_profit_before": -112.37261503754318,
+ "current_day_profit_recent": -105.19087115867575,
+ "tested": 72,
+ "holdout_days": 60,
+ "day_profit_holdout": 0.0,
+ "current_day_profit_holdout": 0.0,
+ "trade_days": 0.3375,
+ "profitable": false,
+ "top": [
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -64,
+   "before": -126,
+   "holdout": 0,
+   "trade_days": 0.32
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -64,
+   "before": -119,
+   "holdout": 0,
+   "trade_days": 0.32
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -66,
+   "before": -144,
+   "holdout": 0,
+   "trade_days": 0.34
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -66,
+   "before": -143,
+   "holdout": 0,
+   "trade_days": 0.34
+  },
+  {
+   "n_long": 3,
+   "n_short": 1,
+   "stop": 1.5,
+   "target": 3.0,
+   "skip": 0.7,
+   "min_prob": 0.0,
+   "recent": -70,
+   "before": -140,
+   "holdout": 0,
+   "trade_days": 0.28
+  }
+ ],
+ "period": "2025-07-30 to 2026-10-16",
+ "updated": "2026-10-17T18:39:43"
+}
