@@ -14,3 +14,5 @@ Status: discovered → prototyped → validated → integrated (or rejected).
 | Stop fills beyond the stop price | general practice | Stops filled exactly at the stop | **Integrated** (`STOP_SLIPPAGE` 0.1%) |
 | Frozen monthly holdout + trial-count promotion bar | López de Prado; deflated Sharpe | Rolling holdout reused nightly | **Integrated** (`tune_rules`, `trial_t_min`) |
 | Point-in-time universe from bhavcopy | general | Survivorship bias | **Validated as a test**, see E-000 |
+| Train on point-in-time history | own (E-000 data) | Model is data-limited and trained on survivors | **Rejected** (E-003: t = 0.66, lower CAGR) |
+| Trailing stop | LEAN `TrailingStopRiskManagementModel` | −51% worst fall | **Rejected** (E-004: −3.8 pts/yr); option kept in `simulate(trail_stop=)`, off |

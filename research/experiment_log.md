@@ -29,7 +29,18 @@ Lesson: the long-term model is data-limited, not model-limited (consistent with 
 ensemble and deep-learning findings). CPCV itself works and gives tighter comparisons: keep the
 script as the standard harness for future model changes.
 
-## E-003 / E-004 (2026-10-22) — running
+## E-003 / E-004 (2026-10-22) — **both REJECTED** (run 39749205814)
+E-003, evaluated on the point-in-time universe (1,930 stocks ever in a day's top 250):
+| Trained on | IC | CAGR | Sharpe | Worst |
+|---|---|---|---|---|
+| Survivors (production) | 0.0452 | 14.6% | 0.49 | −55.3% |
+| Point-in-time history | 0.0489 | 10.2% | 0.34 | −51.1% |
+Paired IC t = 0.66: no significant ranking gain, and lower CAGR/Sharpe. Keep training on survivors.
+E-004 trailing stop: chosen on 2015–20 = 20% (best Sharpe there, only 0.14). Confirmation 2021–26:
+worst −46.7% vs −55.3% (better) but CAGR 18.3% vs 22.1% (−3.8 points, over the 1-point limit).
+Tighter stops (10–15%) wrecked returns (whipsaw). Same lesson as the crash guard and vol targeting:
+cutting drawdowns with exits costs more return than it saves for this momentum book.
+Original plan below kept for the record.
 Script: `scripts/research_pit_training.py`. Both evaluated on the point-in-time universe.
 E-003: train on point-in-time history vs survivors (rule: IC paired t ≥ 2, CAGR and Sharpe not worse).
 E-004: trailing stop (LEAN), level chosen on 2015–20 and confirmed on 2021–26 (rule: worst fall
