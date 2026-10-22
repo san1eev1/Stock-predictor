@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 CREATE UNIQUE INDEX IF NOT EXISTS one_open_longterm ON paper_trades(symbol)
     WHERE horizon = 'longterm' AND status = 'open';
 
+-- F&O paper trading (paper/fno.py): contract tokens for live NFO prices
+CREATE TABLE IF NOT EXISTS fno_contracts (
+    symbol TEXT PRIMARY KEY,
+    token  TEXT NOT NULL,
+    name   TEXT NOT NULL,
+    lot    INTEGER NOT NULL
+);
+
 -- Real trades entered manually (from Groww)
 CREATE TABLE IF NOT EXISTS portfolio_trades (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

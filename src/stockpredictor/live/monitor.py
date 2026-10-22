@@ -210,6 +210,9 @@ class Monitor:
                 done.append("square-off")
             if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "id_close_squareoff") != day:
                 self.square_off_job(now, PI.CLOSE_HORIZON)
+            if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "fno_squareoff") != day:
+                _set(self.conn, "fno_squareoff", day)
+                self.fno_square_off(now)
                 done.append("square-off-close")
 
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
@@ -371,6 +374,8 @@ class Monitor:
                           f"{now:%Y-%m-%d} paper stop-loss ({'buy' if side == 'long' else 'sell'} "
                           f"book): closed {sym} at {p:.2f}")
 
+        self.fno_prices(stamp)
+
         # Intraday paper: stop-loss / target exits.
         for line in PI.check_exits(self.conn, prices, stamp):
             kind = "stop-loss" if "stop-loss" in line else "target"
@@ -485,11 +490,68 @@ class Monitor:
                               horizon=PI.CLOSE_HORIZON)
             log.info("Intraday picks (until close): %s", "skip today (weak signal)"
                      if rc["skipped"] else "; ".join(rc["picks"]) or "none")
+            self.fno_open(now, rc)
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
+
+    # --- F&O paper books (paper/fno.py) ------------------------------------------------
+    def _nfo_client(self):
+        try:
+            return self.prices._angel_client()
+        except Exception as exc:
+            log.warning("F&O paper: Angel One unavailable (%s)", exc)
+            return None
+
+    def fno_open(self, now: datetime, rc: dict | None = None) -> list[str]:
+        """Trade the 'until close' book's top 5 buy / 5 sell picks as futures and options."""
+        from stockpredictor.paper import fno as FO
+
+        client = self._nfo_client()
+        if client is None:
+            return []
+        day = f"{now:%Y-%m-%d}"
+        rows = self.conn.execute(
+            "SELECT symbol, direction FROM predictions WHERE horizon = ? AND date = ? AND rank <= ? "
+            "ORDER BY rank, direction DESC", (PI.CLOSE_HORIZON, day, FO.N_EACH_SIDE)).fetchall()
+        picks = [(r["symbol"], "long" if r["direction"] == "up" else "short") for r in rows]
+        if not picks:
+            return []
+        spot = self.prices.get(sorted({s for s, _ in picks}))
+        try:
+            opened = FO.open_books(self.conn, client, picks, spot, now.date(),
+                                   now.strftime("%Y-%m-%d %H:%M"), self.capital_intraday)
+        except Exception:
+            log.exception("F&O paper: could not open the books")
+            return []
+        log.info("F&O paper picks: %s", "; ".join(opened) or "none (lots too big for the slot)")
+        return opened
+
+    def fno_prices(self, stamp: str) -> dict[str, float]:
+        from stockpredictor.paper import fno as FO
+
+        tokens = FO.tokens_for_open(self.conn)
+        client = self._nfo_client() if tokens else None
+        if client is None:
+            return {}
+        try:
+            prices = FO.ltp(client, tokens)
+        except Exception as exc:
+            log.warning("F&O live prices failed: %s", exc)
+            return {}
+        self.conn.executemany("INSERT OR REPLACE INTO live_prices VALUES (?, ?, ?, ?)",
+                              [(s, p, stamp, "angelone") for s, p in prices.items()])
+        self.conn.commit()
+        return prices
+
+    def fno_square_off(self, now: datetime) -> None:
+        from stockpredictor.paper import fno as FO
+
+        stamp = now.strftime("%Y-%m-%d %H:%M")
+        for line in FO.square_off(self.conn, self.fno_prices(stamp), stamp):
+            alert(self.conn, "paper-fno", "fill", line.split()[1], f"{stamp} {line}")
 
     def kill_switch(self, now: datetime, ctx, rules, horizon: str, scores: pd.Series,
                     prices: dict | None = None, n_stocks: int = 0):

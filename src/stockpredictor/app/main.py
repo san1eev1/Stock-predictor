@@ -23,6 +23,7 @@ from stockpredictor.paper import daily as D
 from stockpredictor.backtest import intraday as BI
 from stockpredictor.models import intraday as MI
 from stockpredictor.paper import engine as E
+from stockpredictor.paper import fno as FO
 from stockpredictor.paper import intraday as PI
 from stockpredictor.paper import scoreboard as SB
 from stockpredictor.portfolio import real as R
@@ -359,6 +360,48 @@ def page_paper_intraday():
         competition()
     with tab4:
         replay_history()
+
+
+def page_paper_fno():
+    st.title("Paper trading — F&O")
+    st.caption("The 'until close' intraday model's top 5 buy and top 5 sell picks, traded at "
+               "about 9:46 as near-month stock futures (long / short, ~20% margin) and as bought "
+               "at-the-money options (call for buys, put for sells). Each book starts every day "
+               "with ₹1 lakh; whole lots only, so picks whose one lot needs more than ₹10,000 "
+               "(margin or premium) are skipped. Everything closes at 15:15. Paper only.")
+    c = conn()
+    prices = live_prices(c)
+    for tab, book in zip(st.tabs(["Futures", "Options"]), FO.BOOKS):
+        with tab:
+            v = FO.value(c, prices, book)
+            a, b, d = st.columns(3)
+            a.metric("Started today with", f"₹{v['capital']:,.0f}")
+            b.metric("Value now", f"₹{v['equity']:,.0f}", f"₹{v['pnl']:+,.0f}")
+            d.metric("Open positions", v["positions"])
+            t = pd.read_sql("SELECT symbol, side, qty, entry_time, entry_price, exit_price, costs, "
+                            "pnl, status, exit_reason FROM paper_trades WHERE horizon = ? "
+                            "ORDER BY id DESC LIMIT 200", c, params=(book,))
+            if t.empty:
+                st.caption("No trades yet — they open with the 9:46 intraday picks.")
+                continue
+            t["Price now"] = t["symbol"].map(prices)
+            live = t["status"] == "open"
+            sign = t["side"].map({"long": 1, "short": -1})
+            t.loc[live, "pnl"] = (sign * (t["Price now"] - t["entry_price"]) * t["qty"]
+                                  - t["costs"])[live]
+            t["date"] = t["entry_time"].str[:10]
+            st.dataframe(t[["date", "symbol", "side", "qty", "entry_price", "Price now",
+                            "exit_price", "pnl", "status", "exit_reason"]].rename(columns={
+                "symbol": "Contract", "qty": "Qty", "entry_price": "Entry", "exit_price": "Exit",
+                "pnl": "P&L (after costs)"}), hide_index=True, width="stretch",
+                column_config={k: st.column_config.NumberColumn(format="₹%.2f")
+                               for k in ("Entry", "Price now", "Exit", "P&L (after costs)")})
+            daily = t[t["status"] == "closed"].groupby("date")["pnl"].sum().sort_index(
+                ascending=False).rename("P&L on ₹1 lakh").reset_index()
+            if not daily.empty:
+                st.subheader("Each day on a fresh ₹1,00,000")
+                st.dataframe(daily, hide_index=True, width="stretch", column_config={
+                    "P&L on ₹1 lakh": st.column_config.NumberColumn(format="₹%+.0f")})
 
 
 def replay_history():
@@ -1367,6 +1410,7 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_intraday_close, title="Intraday — until close", icon="🔔"),
          st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
          st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
+         st.Page(page_paper_fno, title="Paper trading — F&O", icon="🧪"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),
          st.Page(page_model, title="Model", icon="🧠"),
