@@ -101,3 +101,13 @@ def test_no_buy_at_upper_circuit():
     scores = pd.DataFrame([("A", d, 1.0) for d in dates], columns=["symbol", "date", "score"])
     res = P.simulate(scores, close, P.Rules(n_hold=1, exit_rank=1), capital=10_000)
     assert res.trades.iloc[0]["date"] == dates[2]      # locked at +10% on day 2: bought next day
+
+
+def test_bootstrap_ci_brackets_estimate():
+    idx = pd.bdate_range("2020-01-01", periods=750)
+    rng = np.random.default_rng(1)
+    eq = pd.Series(100 * np.cumprod(1 + rng.normal(0.0005, 0.01, len(idx))), index=idx)
+    ci = P.bootstrap_ci(eq, n=200)
+    p = P.performance(eq)
+    assert ci["cagr_ci"][0] < p["cagr"] < ci["cagr_ci"][1]
+    assert "sortino" in p and "calmar" in p

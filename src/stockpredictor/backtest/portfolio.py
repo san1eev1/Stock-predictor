@@ -229,8 +229,33 @@ def performance(equity: pd.Series) -> dict:
     cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1 if years > 0 else np.nan
     vol = rets.std() * np.sqrt(252)
     dd = (equity / equity.cummax() - 1).min()
+    down = rets[rets < 0].std() * np.sqrt(252)
     return {"cagr": cagr, "volatility": vol, "sharpe": cagr / vol if vol else np.nan,
+            "sortino": cagr / down if down else np.nan,
+            "calmar": cagr / -dd if dd < 0 else np.nan,
             "max_drawdown": dd, "total_return": equity.iloc[-1] / equity.iloc[0] - 1}
+
+
+def bootstrap_ci(equity: pd.Series, n: int = 500, block: int = 21, level: float = 0.90,
+                 seed: int = 0) -> dict:
+    """Uncertainty of CAGR and Sharpe: moving-block bootstrap of daily returns (blocks keep
+    volatility clustering). Returns the `level` interval, e.g. 5th-95th percentiles."""
+    rets = equity.dropna().pct_change().dropna().to_numpy()
+    if len(rets) < block * 4:
+        return {}
+    rng = np.random.default_rng(seed)
+    k = int(np.ceil(len(rets) / block))
+    cagr, sharpe = [], []
+    for _ in range(n):
+        starts = rng.integers(0, len(rets) - block, k)
+        r = np.concatenate([rets[i:i + block] for i in starts])[:len(rets)]
+        g = (1 + r).prod() ** (252 / len(r)) - 1
+        v = r.std() * np.sqrt(252)
+        cagr.append(g)
+        sharpe.append(g / v if v else np.nan)
+    lo, hi = (1 - level) / 2 * 100, (1 + level) / 2 * 100
+    return {"cagr_ci": [float(np.nanpercentile(cagr, lo)), float(np.nanpercentile(cagr, hi))],
+            "sharpe_ci": [float(np.nanpercentile(sharpe, lo)), float(np.nanpercentile(sharpe, hi))]}
 
 
 def yearly_returns(equity: pd.Series) -> pd.Series:

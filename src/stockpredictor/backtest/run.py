@@ -68,7 +68,7 @@ def run(store_dir: Path, start_year: int = 2015, rules: P.Rules = P.Rules(),
     for reb in rebalances:
         res = P.simulate(scores, close, rules, capital, reb, risk_off=risk_off)
         curves[f"model_{reb}"] = res.equity
-        report["strategies"][reb] = {**P.performance(res.equity),
+        report["strategies"][reb] = {**P.performance(res.equity), **P.bootstrap_ci(res.equity),
                                      **P.trade_stats(res.trades, res.equity),
                                      "total_costs": res.total_costs}
     sectors = dict(zip(*store.load_universe(store_dir)[["symbol", "industry"]].T.values)) \
