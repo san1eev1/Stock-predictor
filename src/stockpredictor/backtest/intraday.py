@@ -58,6 +58,11 @@ def pick(scores: pd.DataFrame, rules: IntradayRules) -> pd.DataFrame:
     return out
 
 
+# A stop is a market order once touched: it fills a little beyond the stop price (gaps and
+# fast moves through it), never exactly at it. Targets are limit orders: filled at the price.
+STOP_SLIPPAGE = 0.001     # 0.1% worse than the stop price
+
+
 def replay(row, side: str, rules: IntradayRules, exit_col: str = I.EXIT_COL,
            exit_minutes: int = I.EXIT_MINUTES) -> tuple[float, str]:
     """Exit price and reason for one trade, from its intraday summary row."""
@@ -70,7 +75,7 @@ def replay(row, side: str, rules: IntradayRules, exit_col: str = I.EXIT_COL,
     t_tp = t_tp if t_tp <= exit_minutes else np.nan
     sign = 1 if side == "long" else -1
     if not np.isnan(t_sl) and (np.isnan(t_tp) or t_sl <= t_tp):
-        return c30 * (1 - sign * sl / 100), "stop-loss"
+        return c30 * (1 - sign * sl / 100) * (1 - sign * STOP_SLIPPAGE), "stop-loss"
     if not np.isnan(t_tp):
         return c30 * (1 + sign * tp / 100), "target"
     return row[exit_col], ("12:30 square-off" if exit_col == I.EXIT_COL else "15:15 square-off")
@@ -92,7 +97,7 @@ def trade_exits(df: pd.DataFrame, side: str, stop_loss: float, target: float,
     stop_first = ~np.isnan(t_sl) & (np.isnan(t_tp) | (t_sl <= t_tp))
     out = df[exit_col].to_numpy(float).copy()
     out = np.where(~np.isnan(t_tp), c30 * (1 + sign * tp / 100), out)
-    return np.where(stop_first, c30 * (1 - sign * sl / 100), out)
+    return np.where(stop_first, c30 * (1 - sign * sl / 100) * (1 - sign * STOP_SLIPPAGE), out)
 
 
 # Paper-trading realism

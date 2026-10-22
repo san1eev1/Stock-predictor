@@ -750,6 +750,11 @@ class Monitor:
         judged = T.judged_predictions(self.conn)
         intraday = pd.read_sql("SELECT horizon, symbol, date, correct FROM predictions WHERE "
                                "horizon LIKE 'intraday%' AND correct IS NOT NULL", self.conn)
+        # every closed paper trade (cash intraday, F&O) as feedback too: did it make money?
+        trades = T.paper_trade_outcomes(self.conn)
+        trades = trades[trades["horizon"].str.startswith("intraday")]
+        intraday = pd.concat([intraday, trades], ignore_index=True).drop_duplicates(
+            ["horizon", "symbol", "date"], keep="last")
         if judged.empty and intraday.empty:
             return
         key = f"{len(judged)}:{judged['date'].max()}:{len(intraday)}:{intraday['date'].max()}"

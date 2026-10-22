@@ -42,3 +42,28 @@ def test_contracts_and_books(tmp_path, monkeypatch):
     for b in FO.BOOKS:
         v = FO.value(conn, {}, b)
         assert v["positions"] == 0 and v["pnl"] > 0
+
+
+def test_trade_outcomes_feed_learning(tmp_path):
+    from stockpredictor.models import trainer as T
+
+    db.init_db(tmp_path / "t.db")
+    conn = db.connect(tmp_path / "t.db")
+    conn.execute("INSERT INTO fno_contracts VALUES ('ABC27OCT26FUT', '1', 'ABC', 100)")
+    for h, sym, pnl in (("fno_futures", "ABC27OCT26FUT", -50.0), ("intraday_close", "ABC", 20.0),
+                        ("intraday", "XYZ", 10.0)):
+        conn.execute("INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, "
+                     "costs, status, pnl) VALUES (?, ?, 'long', 1, '2026-10-22 09:46', 1, 0, "
+                     "'closed', ?)", (h, sym, pnl))
+    out = T.paper_trade_outcomes(conn).set_index(["horizon", "symbol"])["correct"]
+    assert out[("intraday_close", "ABC")] == 0      # the futures loss counts for the stock
+    assert out[("intraday", "XYZ")] == 1
+
+
+def test_trial_threshold_rises(tmp_path):
+    from stockpredictor.models import trainer as T
+
+    assert T.trial_t_min("x", 3, tmp_path) == T.MIN_T_STAT
+    assert T.trial_t_min("x", 500, tmp_path) > 3.4
+    T.reset_trials("x", tmp_path)
+    assert T.trial_t_min("x", 1, tmp_path) == T.MIN_T_STAT

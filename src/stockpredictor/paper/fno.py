@@ -118,6 +118,13 @@ def cost(kind: str, side: str, turnover: float) -> float:
     return stt + exch + stamp + sebi + (brokerage + exch + sebi) * 0.18 + brokerage
 
 
+def fill(price: float, kind: str, action: str) -> float:
+    """Paper fill price: crossing half the bid-ask spread. Stock options trade in Rs 0.05
+    ticks with wide spreads (at least 1 tick or 1% of the premium); futures ~0.02%."""
+    half = max(0.05, 0.01 * price) if kind != "FUT" else max(0.05, 0.0002 * price)
+    return price + half if action == "buy" else max(0.05, price - half)
+
+
 # --- Prices ----------------------------------------------------------------------------
 
 def ltp(client, tokens: dict[str, str]) -> dict[str, float]:
@@ -157,6 +164,7 @@ def _blocked(t) -> float:
 
 def _insert(conn, book, c: Contract, side, lots, price, stamp, reason) -> str:
     qty = lots * c.lot
+    price = fill(price, c.kind, "buy" if side == "long" else "sell")
     fee = cost(c.kind, "buy" if side == "long" else "sell", qty * price)
     blocked = qty * price * (MARGIN_RATE if book == FUT_BOOK else 1.0)
     conn.execute(
@@ -212,6 +220,7 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
 def close_trade(conn, t, price: float, reason: str, stamp: str) -> str:
     kind = "FUT" if t["horizon"] == FUT_BOOK else "OPT"
     sign = 1 if t["side"] == "long" else -1
+    price = fill(price, kind, "sell" if sign > 0 else "buy")
     fee = cost(kind, "sell" if sign > 0 else "buy", t["qty"] * price)
     gross = sign * (price - t["entry_price"]) * t["qty"]
     pnl = gross - t["costs"] - fee

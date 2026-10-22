@@ -131,8 +131,33 @@ def paper_feedback(ctx, conn, labeled: pd.DataFrame) -> pd.DataFrame:
 
 
 def judged_predictions(conn) -> pd.DataFrame:
-    return pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
-                       "AND correct IS NOT NULL AND horizon_days = ?", conn, params=(M.HORIZON,))
+    """Long-term feedback: judged picks, plus every closed long-term paper trade (won = made
+    money after costs) - the trade's outcome wins over the pick's judgement."""
+    picks = pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE horizon = 'longterm' "
+                        "AND correct IS NOT NULL AND horizon_days = ?", conn, params=(M.HORIZON,))
+    trades = paper_trade_outcomes(conn)
+    trades = trades.loc[trades["horizon"] == "longterm", ["symbol", "date", "correct"]]
+    out = pd.concat([picks, trades], ignore_index=True)
+    return out.drop_duplicates(["symbol", "date"], keep="last").reset_index(drop=True)
+
+
+def paper_trade_outcomes(conn) -> pd.DataFrame:
+    """Every closed paper trade in every book as (horizon, symbol, date, correct): correct =
+    1 if it made money after costs. F&O trades count for their underlying stock in the 'until
+    close' intraday model, whose picks they trade."""
+    try:
+        t = pd.read_sql("SELECT t.horizon, COALESCE(f.name, t.symbol) AS symbol, "
+                        "substr(t.entry_time, 1, 10) AS date, t.pnl FROM paper_trades t "
+                        "LEFT JOIN fno_contracts f ON f.symbol = t.symbol "
+                        "WHERE t.status = 'closed' AND t.pnl IS NOT NULL", conn)
+    except Exception:            # older database without the F&O table
+        t = pd.read_sql("SELECT horizon, symbol, substr(entry_time, 1, 10) AS date, pnl "
+                        "FROM paper_trades WHERE status = 'closed' AND pnl IS NOT NULL", conn)
+    t["horizon"] = t["horizon"].replace({"fno_futures": MI.CLOSE.horizon,
+                                         "fno_options": MI.CLOSE.horizon})
+    t["correct"] = (t["pnl"] > 0).astype(int)
+    # several trades on one stock/day (cash + futures + option): a loss anywhere counts
+    return (t.groupby(["horizon", "symbol", "date"], as_index=False)["correct"].min())
 
 
 def load_runs(conn, run_log: Path | None = None) -> pd.DataFrame:
@@ -166,6 +191,34 @@ def significant(new: dict, current: dict, t_min: float = MIN_T_STAT) -> bool:
     if len(diff) < 20 or float(diff.std()) == 0:
         return False
     return float(diff.mean() / diff.std() * np.sqrt(len(diff))) >= t_min
+
+
+def trial_t_min(name: str, n_new: int, folder: Path | None = None) -> float:
+    """Multiple-testing guard: every candidate tried since the last promotion counts. The
+    promotion bar rises with the number of tries (t >= sqrt(2 ln N), the expected maximum of
+    N luck-only t-stats), never below MIN_T_STAT. Counts persist in trials.json."""
+    path = (folder or M.MODEL_DIR.parent) / "trials.json"
+    try:
+        counts = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:
+        counts = {}
+    counts[name] = int(counts.get(name, 0)) + int(n_new)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(counts))
+    except Exception:
+        pass
+    return max(MIN_T_STAT, float(np.sqrt(2 * np.log(max(counts[name], 2)))))
+
+
+def reset_trials(name: str, folder: Path | None = None) -> None:
+    path = (folder or M.MODEL_DIR.parent) / "trials.json"
+    try:
+        counts = json.loads(path.read_text()) if path.exists() else {}
+        counts[name] = 0
+        path.write_text(json.dumps(counts))
+    except Exception:
+        pass
 
 
 def _loggable(results: list[dict]) -> list[dict]:
@@ -236,7 +289,7 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
                and (np.isnan(base["ic"]) or best["ic"] >= base["ic"] + MARGIN)
                # paper check: the 5 stocks it would buy must beat Nifty at least as often
                and not best.get("top5_hit", np.nan) < base.get("top5_hit", np.nan)
-               and significant(best, base))
+               and significant(best, base, trial_t_min("longterm", len(results) - 1)))
     check = None
     if adopted and check_years > years:
         check = {"best": score(best["params"], check_years)["ic"],
@@ -245,6 +298,7 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
                                                    or check["best"] >= check["current"])
     if adopted:
         _save_params(M.MODEL_DIR, best["params"])
+        reset_trials("longterm")
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"], "top10_hit": chosen["top10_hit"],
               "top10_excess": chosen["top10_excess"], "top5_hit": chosen.get("top5_hit"),
@@ -439,8 +493,15 @@ def tune_rules(feats: pd.DataFrame, target: MI.Target, current=None, max_n: int 
     dates = sorted(scores["date"].unique())
     # Newest HOLDOUT_DAYS: untouched - rules are chosen on the days before and must ALSO do
     # better here (rules that only fit the tuning days' noise fail this check).
-    holdout = set(dates[-HOLDOUT_DAYS:]) if len(dates) > HOLDOUT_DAYS + 60 else set()
-    tune_days = [x for x in dates if x not in holdout]
+    # The holdout is frozen for a calendar month (the HOLDOUT_DAYS before this month began):
+    # a window that rolled forward nightly would be looked at ~250 times a year and stop
+    # being out-of-sample. This month's days are neither tuned on nor in the holdout - they
+    # are what the shadow period below judges new rules on.
+    month_start = pd.Timestamp(dates[-1]).to_period("M").start_time if dates else None
+    before = [x for x in dates if pd.Timestamp(x) < month_start] if dates else []
+    holdout = set(before[-HOLDOUT_DAYS:]) if len(before) > HOLDOUT_DAYS + 60 else set()
+    tune_days = [x for x in before if x not in holdout] if holdout else \
+        [x for x in dates if x not in holdout]
     recent = set(tune_days[len(tune_days) // 2:])
     minutes = I.EXIT_MINUTES if target == MI.TRADE else I.WINDOW_MINUTES
     summ = B.summary_columns(feats, target.exit_col)
@@ -718,6 +779,8 @@ def intraday_feedback(conn, feats: pd.DataFrame, horizon: str = "intraday") -> p
     if conn is not None:                                          # real paper picks win
         parts.append(pd.read_sql("SELECT symbol, date, correct FROM predictions WHERE "
                                  "horizon = ? AND correct IS NOT NULL", conn, params=(horizon,)))
+        trades = paper_trade_outcomes(conn)                       # and real trade results
+        parts.append(trades.loc[trades["horizon"] == horizon, ["symbol", "date", "correct"]])
     if not parts:
         return feats
     judged = pd.concat(parts, ignore_index=True).drop_duplicates(["symbol", "date"], keep="last")
@@ -770,7 +833,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
     base = results[0]
     best = max(valid, key=lambda r: r["ic"])
     adopted = (not best["current"] and best["ic"] >= base["ic"] + MARGIN
-               and significant(best, base))
+               and significant(best, base, trial_t_min(target.horizon, len(results) - 1)))
     check = None
     if adopted and feats["date"].nunique() >= check_days + MI.MIN_TRAIN_DAYS:
         check = {"best": evaluate_intraday(feats, best["params"], check_days, peer)["ic"],
@@ -786,6 +849,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
             new["avg_day_pnl"] >= cur["avg_day_pnl"] and new["accuracy"] >= cur["accuracy"]))
     if adopted:
         _save_params(target.model_dir, best["params"])
+        reset_trials(target.horizon)
     chosen = best if adopted else base
     report = {"adopted": adopted, "ic": chosen["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
