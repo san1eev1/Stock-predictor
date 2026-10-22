@@ -1,0 +1,31 @@
+# Weekly: find new open-source quant / Indian-market repositories and record them in
+# research/repo_watchlist.md (study and testing happen separately, by hand).
+name: Repo scout
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"     # Sundays 08:47 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Search GitHub and update the watchlist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/repo_scout.py
+      - name: Commit
+        run: |
+          git config user.name "repo-scout"
+          git config user.email "actions@users.noreply.github.com"
+          git add research/repo_watchlist.md
+          git diff --cached --quiet || (git commit -q -m "Repo scout: new candidates" && git push -q)
