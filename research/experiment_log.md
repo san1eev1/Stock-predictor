@@ -20,6 +20,11 @@ Paired IC difference +0.0007, **t = 0.34** over 614 weeks: indistinguishable fro
 adopted (the small CAGR gain is within the noise; today's-universe backtest).
 Lesson: our 129 features already cover these families (trend R², slopes, 52-week range, up days).
 
-## E-002 CPCV + DoubleEnsemble-lite (2026-10-22) — running
-Script: `scripts/research_cpcv_double_ensemble.py` (run 39737604311). Rule: better on ≥80% of the
-15 CPCV paths and paired t ≥ 2.
+## E-002 CPCV + DoubleEnsemble-lite (2026-10-22) — **REJECTED**
+Script: `scripts/research_cpcv_double_ensemble.py` (run 39737604311). 15 CPCV paths (6 blocks,
+2 test blocks each, 14-day purge), 2008–2026 weekly data.
+Baseline IC 0.0747 ± 0.0131 vs DoubleEnsemble-lite 0.0750 ± 0.0137; better on 60% of paths,
+**paired t = 0.79** (needed ≥ 80% and t ≥ 2). Not adopted: +3× training cost for no measurable gain.
+Lesson: the long-term model is data-limited, not model-limited (consistent with the earlier
+ensemble and deep-learning findings). CPCV itself works and gives tighter comparisons: keep the
+script as the standard harness for future model changes.

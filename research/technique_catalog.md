@@ -7,8 +7,8 @@ Status: discovered → prototyped → validated → integrated (or rejected).
 | Circuit-limit guard (no buy at the upper band, no sell at the lower band) | qlib `Exchange(limit_threshold)` | Backtest could trade locked stocks | **Integrated** (`backtest/portfolio._at_circuit`, test `test_no_buy_at_upper_circuit`) |
 | Alpha158 extras: CORR, CORD, RSV, QTLU/QTLD, IMXD, CNTD (20/60 days) | qlib `Alpha158DL` | Possibly missing price-volume / timing information | **Rejected** (E-001: t = 0.34) |
 | Cross-sectional z-score label | qlib handler `CSZScoreNorm` | Market-wide moves add label noise | Discovered; we already train on excess-vs-market targets and have a rank-objective option |
-| DoubleEnsemble | qlib `double_ensemble.py` | Robustness to noisy samples | **Prototyped** (E-002) |
-| CPCV (combinatorial purged CV) | skfolio | Single-path walk-forward gives noisy promotion gates | **Prototyped** (E-002) |
+| DoubleEnsemble | qlib `double_ensemble.py` | Robustness to noisy samples | **Rejected** (E-002: t = 0.79) |
+| CPCV (combinatorial purged CV) | skfolio | Single-path walk-forward gives noisy promotion gates | **Validated** as the research harness (E-002); not yet used in the nightly gate |
 | Block-bootstrap CIs for CAGR / Sharpe; Sortino, Calmar | pybroker (idea), quantstats | Reports gave point estimates only | **Integrated** (`portfolio.bootstrap_ci`, `performance`; backtest report) |
 | Square-law market impact | zipline VolumeShareSlippage | Impact grows with size | Candidate (low impact at ₹1 lakh) |
 | Stop fills beyond the stop price | general practice | Stops filled exactly at the stop | **Integrated** (`STOP_SLIPPAGE` 0.1%) |
