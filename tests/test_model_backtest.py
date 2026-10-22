@@ -42,13 +42,13 @@ def test_decide_rules():
 
 def test_simulate_uses_next_day_and_charges_costs():
     dates = pd.bdate_range("2024-01-01", periods=6)
-    close = pd.DataFrame({"A": [100, 110, 120, 130, 140, 150],
+    close = pd.DataFrame({"A": [100, 108, 116, 124, 132, 140],
                           "B": [100, 100, 100, 100, 100, 100]}, index=dates, dtype=float)
     scores = pd.DataFrame([(s, d, 1.0 if s == "A" else 0.0) for d in dates for s in "AB"],
                           columns=["symbol", "date", "score"])
     res = P.simulate(scores, close, P.Rules(n_hold=1, exit_rank=1), capital=10_000)
     first = res.trades.iloc[0]
-    assert first["date"] == dates[1] and first["symbol"] == "A" and first["price"] == 110
+    assert first["date"] == dates[1] and first["symbol"] == "A" and first["price"] == 108
     assert res.total_costs > 0
     assert res.equity.iloc[-1] > 10_000
 
@@ -93,3 +93,11 @@ def test_walk_forward_trains_only_on_past(labeled, monkeypatch):
     out = M.walk_forward(lab, feats, start_year=2022)
     for year, last_train in zip(sorted(out["date"].dt.year.unique()), seen):
         assert last_train < pd.Timestamp(year=year, month=1, day=1) - pd.Timedelta(days=M.EMBARGO_DAYS)
+
+
+def test_no_buy_at_upper_circuit():
+    dates = pd.bdate_range("2024-01-01", periods=4)
+    close = pd.DataFrame({"A": [100, 110, 110, 111]}, index=dates, dtype=float)  # +10% = band
+    scores = pd.DataFrame([("A", d, 1.0) for d in dates], columns=["symbol", "date", "score"])
+    res = P.simulate(scores, close, P.Rules(n_hold=1, exit_rank=1), capital=10_000)
+    assert res.trades.iloc[0]["date"] == dates[2]      # locked at +10% on day 2: bought next day

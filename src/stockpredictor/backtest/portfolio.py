@@ -96,6 +96,17 @@ class SimResult:
     metrics: dict = field(default_factory=dict)
 
 
+CIRCUIT_BANDS = (0.05, 0.10, 0.20)   # NSE price bands (non-F&O stocks)
+
+
+def _at_circuit(ret, sign: int) -> bool:
+    """Close-to-close move within 0.2% of (or beyond) a price band in direction `sign`."""
+    if ret is None or ret != ret:
+        return False
+    move = sign * ret
+    return any(b - 0.002 <= move <= b + 0.002 for b in CIRCUIT_BANDS) or move >= 0.2
+
+
 def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
              capital: float = 100_000, rebalance: str = "daily",
              costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1,
@@ -119,6 +130,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
     cash, holdings, cooldown = capital, {}, {}
     equity, trades, total_costs = {}, [], 0.0
     last_price: dict[str, float] = {}
+    day_ret = close.pct_change(fill_method=None)
 
     for d in dates:
         row = close.loc[d]
@@ -136,6 +148,12 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         if mode == "exit":
             sold = {s for s, _ in sells}
             sells = sells + [(s, "risk-off") for s in holdings if s not in sold]
+        # NSE circuit limits (Qlib's limit_threshold): a stock closing locked at its upper
+        # band can't be bought, one locked at its lower band can't be sold that day.
+        r = day_ret.loc[d]
+        locked = lambda s_, sign: _at_circuit(r.get(s_), sign)  # noqa: E731
+        sells = [(s_, why) for s_, why in sells if not locked(s_, -1)]
+        buys = [s_ for s_ in buys if not locked(s_, +1)]
         for sym, reason in sells:
             pos, price = holdings.pop(sym), last_price[sym]
             value = pos.qty * price
