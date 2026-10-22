@@ -2,7 +2,8 @@
 stock futures and as bought options, each book starting every day with Rs 1 lakh.
 
 - Futures book: near-month stock future, long for buy picks, short for sell picks. Margin
-  ~MARGIN_RATE of the contract value is blocked from the book's cash; whole lots only.
+  ~MARGIN_RATE of the contract value is blocked from the book's cash; one lot per pick, best
+  picks first, while the margin fits the Rs 1 lakh (usually 1-3 contracts).
 - Options book: buy the at-the-money call for buy picks and the at-the-money put for sell
   picks (near-month expiry); the premium is paid from cash, so the loss is limited to it.
 Both square off at 15:15 with the cash 'until close' book. Prices: Angel One (NFO).
@@ -189,14 +190,19 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
             plans.append((OPT_BOOK, o, "long"))          # options are always bought
     prices = ltp(client, {c.symbol: c.token for _, c, _ in plans}) if plans else {}
     opened = []
-    for book, c, side in plans:
+    free = capital            # futures: one lot's margin is often Rs 50k+, so the best picks
+    for book, c, side in plans:     # take one lot each while the margin fits the Rs 1 lakh
         p = prices.get(c.symbol)
         if not p:
             continue
         per_lot = c.lot * p * (MARGIN_RATE if book == FUT_BOOK else 1.0)
-        lots = int(slot // per_lot)
+        if book == FUT_BOOK:
+            lots = 1 if per_lot + cost("FUT", "buy", c.lot * p) <= free else 0
+            free -= lots * per_lot
+        else:
+            lots = int(slot // per_lot)
         if lots <= 0:
-            continue        # one lot needs more than this pick's share of the Rs 1 lakh
+            continue        # doesn't fit (option: one lot's premium > this pick's share)
         opened.append(f"[{book}] " + _insert(conn, book, c, side, lots, p, stamp,
                                              f"9:45 pick ({c.name} {side})"))
     conn.commit()
