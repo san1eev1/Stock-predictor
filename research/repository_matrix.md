@@ -18,3 +18,16 @@ project environment. "Use" = what we took or could take.
 | KoshIndia/kite-algo-bot @b589d7f | MIT | `analytics/charges.py`, `docs/LIVE_CHECKLIST.md` | Zerodha-style Indian charges; live checklist | Our `costs.py` already matches (STT 0.1% delivery / 0.025% intraday sell, exchange, SEBI, stamp, GST, DP) | Verified, nothing to add |
 | thecoderpanda/openquant @3f8aa22 | Apache-2.0 | README | Indian quant scaffolding | Nothing beyond what we have | — |
 | luckyloneranger/backtest-platform @52ddbbc | none found | (structure) | — | **No licence: do not reuse code** | — |
+
+## Round 2 — 2026-10-22
+
+| Repo @ commit | Licence | Modules read | Useful technique | Compatible? | Status |
+|---|---|---|---|---|---|
+| AI4Finance-Foundation/FinRL-Meta @286fef6 | MIT | (structure) | Market environments for RL | RL is rejected for prediction (round 1) | — |
+| QuantConnect/Lean @f3d841e | Apache-2.0 | `Common/Orders/Fills/EquityFillModel.cs` (`StopMarketFill`: fill at the open when the bar gaps past the stop), `Algorithm.Framework/Risk/*` (TrailingStop, MaximumDrawdownPercentPerSecurity/Portfolio, MaximumSectorExposure) | Gap-aware stop fills; trailing-stop and sector-exposure risk models | Ideas re-implemented | Stop fill: our 0.1% `STOP_SLIPPAGE` stands in (summaries lack bar opens); sector cap already exists (`Rules.max_per_sector`); trailing stop **prototyped** (E-004) |
+| nautechsystems/nautilus_trader @e19fa98 | LGPL-3.0 | tree only (risk engine, Rust/Cython) | Pre-trade risk engine, order state machine | Relevant only if live orders are ever built | Recorded for later |
+| Quant-IQ/quantiq @6582de1 | **none found** | README, docs | NSE end-to-end design docs; `backtest/` is empty | No code to learn from, no licence | **Unsuitable** |
+| pmorissette/bt @3adebef | MIT | (structure) | Tree-of-algos portfolio backtests | Our simulator already covers our needs | — |
+| PyPortfolio/PyPortfolioOpt @a6638d2 | MIT | `pypfopt/hierarchical_portfolio.py` (HRPOpt) | HRP / risk-parity weights | With 5 holdings the gain is small; volatility sizing already tested (worse) | Candidate, low priority |
+| dcajasn/Riskfolio-Lib @7b1b26a | BSD-3 | (structure) | CVaR / drawdown-risk portfolio optimisation | As above | Candidate, low priority |
+| ceyyy427/finathink @f2520b9 | MIT | (structure) | Point-in-time research tooling | Our bhav-based point-in-time universe covers it | — |

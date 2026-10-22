@@ -28,3 +28,9 @@ Baseline IC 0.0747 ± 0.0131 vs DoubleEnsemble-lite 0.0750 ± 0.0137; better on 
 Lesson: the long-term model is data-limited, not model-limited (consistent with the earlier
 ensemble and deep-learning findings). CPCV itself works and gives tighter comparisons: keep the
 script as the standard harness for future model changes.
+
+## E-003 / E-004 (2026-10-22) — running
+Script: `scripts/research_pit_training.py`. Both evaluated on the point-in-time universe.
+E-003: train on point-in-time history vs survivors (rule: IC paired t ≥ 2, CAGR and Sharpe not worse).
+E-004: trailing stop (LEAN), level chosen on 2015–20 and confirmed on 2021–26 (rule: worst fall
+≥ 5 points better, CAGR ≥ −1 point, Sharpe not worse).

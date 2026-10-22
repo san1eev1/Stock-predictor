@@ -111,8 +111,10 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
              capital: float = 100_000, rebalance: str = "daily",
              costs: DeliveryCosts = DEFAULT_COSTS, lag: int = 1,
              sectors: dict | None = None, risk_off: set | None = None,
-             crash_days: set | None = None) -> SimResult:
+             crash_days: set | None = None, trail_stop: float | None = None) -> SimResult:
     """scores: symbol/date/score rows. close: date x symbol close prices.
+    trail_stop: sell a holding whose close falls this share below its highest close since
+    it was bought (LEAN's TrailingStopRiskManagementModel); None = off.
 
     lag=1: scores computed after a day's close are traded on the next day's
     close, so no trade uses information it could not have had.
@@ -131,6 +133,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
     equity, trades, total_costs = {}, [], 0.0
     last_price: dict[str, float] = {}
     day_ret = close.pct_change(fill_method=None)
+    peak: dict[str, float] = {}
 
     for d in dates:
         row = close.loc[d]
@@ -148,6 +151,13 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         if mode == "exit":
             sold = {s for s, _ in sells}
             sells = sells + [(s, "risk-off") for s in holdings if s not in sold]
+        if trail_stop:
+            for s_ in holdings:
+                peak[s_] = max(peak.get(s_, 0.0), last_price[s_])
+            listed = {x for x, _ in sells}
+            sells = sells + [(s_, "trailing-stop") for s_ in holdings if s_ not in listed
+                             and last_price[s_] < peak[s_] * (1 - trail_stop)]
+            buys = [x for x in buys if x not in {y for y, _ in sells}]
         # NSE circuit limits (Qlib's limit_threshold): a stock closing locked at its upper
         # band can't be bought, one locked at its lower band can't be sold that day.
         r = day_ret.loc[d]
@@ -156,6 +166,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
         buys = [s_ for s_ in buys if not locked(s_, +1)]
         for sym, reason in sells:
             pos, price = holdings.pop(sym), last_price[sym]
+            peak.pop(sym, None)
             value = pos.qty * price
             c = costs.cost("sell", value)
             cash += value - c
@@ -163,7 +174,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
             trades.append(dict(date=d, symbol=sym, side="sell", qty=pos.qty, price=price,
                                cost=c, reason=reason, entry_date=pos.entry_date,
                                ret=price / pos.entry_price - 1))
-            if reason == "stop-loss":
+            if reason in ("stop-loss", "trailing-stop"):
                 cooldown[sym] = d + pd.Timedelta(days=rules.cooldown_days)
 
         equity_now = cash + sum(p.qty * last_price[s] for s, p in holdings.items())

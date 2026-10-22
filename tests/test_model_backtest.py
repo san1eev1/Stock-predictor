@@ -111,3 +111,14 @@ def test_bootstrap_ci_brackets_estimate():
     p = P.performance(eq)
     assert ci["cagr_ci"][0] < p["cagr"] < ci["cagr_ci"][1]
     assert "sortino" in p and "calmar" in p
+
+
+def test_trailing_stop_sells_after_fall_from_peak():
+    dates = pd.bdate_range("2024-01-01", periods=8)
+    close = pd.DataFrame({"A": [100, 104, 108, 112, 100, 99, 98, 97],
+                          "B": [100] * 8}, index=dates, dtype=float)
+    scores = pd.DataFrame([(s, d, 1.0 if s == "A" else 0.0) for d in dates for s in "AB"],
+                          columns=["symbol", "date", "score"])
+    res = P.simulate(scores, close, P.Rules(n_hold=1, exit_rank=1), 10_000, trail_stop=0.10)
+    sold = res.trades[(res.trades["side"] == "sell") & (res.trades["symbol"] == "A")]
+    assert sold.iloc[0]["reason"] == "trailing-stop" and sold.iloc[0]["date"] == dates[4]
