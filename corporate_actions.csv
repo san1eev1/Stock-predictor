@@ -19,6 +19,7 @@ symbol,date,kind,value
 360ONE,2025-04-29,dividend,6
 360ONE,2025-10-27,dividend,6
 360ONE,2026-04-27,dividend,6
+360ONE,2026-10-23,dividend,7.5
 3MINDIA,2022-11-21,dividend,850
 3MINDIA,2023-07-26,dividend,100
 3MINDIA,2024-07-05,dividend,685
@@ -2309,6 +2310,7 @@ HCLTECH,2026-07-17,dividend,12
 HCLTECH,2026-10-16,dividend,12
 HDBFS,2025-10-24,dividend,2
 HDBFS,2026-06-18,dividend,2
+HDBFS,2026-10-23,dividend,2
 HDFCAMC,2019-03-06,dividend,6
 HDFCAMC,2019-07-04,dividend,6
 HDFCAMC,2020-07-09,dividend,14
@@ -2635,6 +2637,7 @@ ICICIGI,2024-10-28,dividend,5.5
 ICICIGI,2025-06-06,dividend,7
 ICICIGI,2025-10-23,dividend,6.5
 ICICIGI,2026-05-29,dividend,7
+ICICIGI,2026-10-23,dividend,7
 ICICIPRULI,2016-11-02,dividend,1.75
 ICICIPRULI,2017-07-07,dividend,3.5
 ICICIPRULI,2017-11-02,dividend,3.4
@@ -2907,6 +2910,7 @@ IRFC,2024-11-12,dividend,0.8
 IRFC,2025-03-21,dividend,0.8
 IRFC,2025-10-24,dividend,1.05
 IRFC,2026-03-13,dividend,1.05
+IRFC,2026-10-23,dividend,1.15
 ITC,2005-07-18,dividend,0.6889
 ITC,2005-09-21,split,10
 ITC,2006-07-10,dividend,0.8833
@@ -3302,6 +3306,7 @@ LTM,2024-10-25,dividend,20
 LTM,2025-05-23,dividend,45
 LTM,2025-10-24,dividend,22
 LTM,2026-05-25,dividend,53
+LTM,2026-10-23,dividend,25
 LTTS,2016-11-21,dividend,3
 LTTS,2017-08-14,dividend,4
 LTTS,2017-11-14,dividend,4
@@ -4061,6 +4066,7 @@ OBEROIRLTY,2025-10-20,dividend,2
 OBEROIRLTY,2026-01-23,dividend,2
 OBEROIRLTY,2026-05-14,dividend,2
 OBEROIRLTY,2026-07-23,dividend,2
+OBEROIRLTY,2026-10-23,dividend,2
 OFSS,2005-08-04,dividend,5
 OFSS,2006-08-03,dividend,5
 OFSS,2014-09-24,dividend,485
@@ -5373,6 +5379,7 @@ TECHM,2024-10-31,dividend,15
 TECHM,2025-07-04,dividend,30
 TECHM,2025-10-20,dividend,15
 TECHM,2026-07-03,dividend,36
+TECHM,2026-10-23,dividend,15
 THERMAX,2005-07-14,dividend,2.4
 THERMAX,2006-03-31,split,5
 THERMAX,2006-07-06,dividend,3.4
