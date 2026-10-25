@@ -31,3 +31,31 @@ project environment. "Use" = what we took or could take.
 | PyPortfolio/PyPortfolioOpt @a6638d2 | MIT | `pypfopt/hierarchical_portfolio.py` (HRPOpt) | HRP / risk-parity weights | With 5 holdings the gain is small; volatility sizing already tested (worse) | Candidate, low priority |
 | dcajasn/Riskfolio-Lib @7b1b26a | BSD-3 | (structure) | CVaR / drawdown-risk portfolio optimisation | As above | Candidate, low priority |
 | ceyyy427/finathink @f2520b9 | MIT | (structure) | Point-in-time research tooling | Our bhav-based point-in-time universe covers it | — |
+
+## Round 3 — 2026-10-25 (all 21 remaining watchlist repos)
+
+| Repo @ commit | Licence | What was read | Finding | Status |
+|---|---|---|---|---|
+| HKUDS/Vibe-Trading @41f333b | MIT | `agent/backtest/engines/india_equity.py`, `china_a.py` (`_blocked_by_limit`), `factor_costs.py` (`apply_adv_capacity`), kill-switch tests | Indian delivery engine: T+1, no overnight shorts, one ±20% circuit band, same cost stack as ours (STT 0.1% both sides, exchange 0.00297%, SEBI, stamp 0.015% buy, GST 18%) | **Verified ours matches**; our circuit guard is finer (5/10/20% bands). Capacity = our 1%-of-volume cap |
+| cvxgrp/cvxportfolio @351c782 | GPL-3.0 | `cvxportfolio/costs.py` (`StocksTransactionCost`: a·|z| + b·σ·|z|^1.5/V^0.5) | Square-law/3⁄2-power market impact | Ideas only (GPL). Impact is negligible at ₹1 lakh; matters only at much larger capital. Recorded |
+| ricequant/rqalpha @6a996af | own (Chinese) licence | `utils/price_limits.py`, simulation matcher tests | Limit-up/down blocking, volume-share matching | Same ideas as qlib `limit_threshold`, already integrated |
+| zvtvz/zvt @8509990 | MIT | factor and trader modules | A-share factor framework with a simulated account | Nothing new for us |
+| fasiondog/hikyuu @47e4236 | Apache-2.0 | signal/slippage tests | C++ A-share system | Nothing new |
+| kernc/backtesting.py @ca2e261 | **AGPL-3.0** | structure, optimisation example | Single-asset event backtester, parameter heatmaps | Ideas only; our tuning already uses walk-forward and holdouts |
+| cloudQuant/backtrader @7196567 | GPL-3.0 | structure | Event-driven backtester | Nothing new |
+| Lumiwealth/lumibot @e14453b | GPL-3.0 | broker tests | Multi-broker live trading | Relevant only for real orders (not authorised) |
+| coding-kitties/investing-algorithm-framework @f8e82c7 | Apache-2.0 | live-hardening tests | Live-trading hardening patterns (idempotent orders, restart) | Recorded for if real orders are ever built |
+| OpenByteInc/QuantDinger @af83394 | Apache-2.0 | resource guard, data sources | LLM-assisted platform | LLMs stay out of the prediction path |
+| cuemacro/finmarketpy @afeaef2 | Apache-2.0 | `backtest/tradeanalysis.py` | FX-focused backtests | Not applicable |
+| mbk-dev/okama @4d222a8 | MIT | structure | Portfolio analytics on monthly data | Not applicable |
+| fortitudo-tech/fortitudo.tech @1d839a9 | GPL-3.0 | structure | Entropy pooling, CVaR | Not applicable at 5 holdings |
+| shashankvemuri/Finance @2079903 | MIT | scripts | Collection of TA scripts | Nothing new (we have ~130 features) |
+| wangzhe3224/awesome-systematic-trading @1cab7c2 | MIT | README | Curated list | Leads below |
+| leoncuhk/awesome-quant-ai @9cae34a | Apache-2.0 | README | Curated list | Leads below |
+| hummingbot, pycryptobot, botflow, polymarket-kalshi-weather-bot | various | structure | Crypto / prediction-market bots | **Not applicable** (different markets) |
+| bqth29/simulated-bifurcation-algorithm @dcff6d6 | MIT | structure | Combinatorial optimiser | Not applicable |
+
+### New leads from the curated lists (need new data or compute: ask before building)
+- **FII/DII daily flows and shareholding patterns** (via Tapetide MCP / NSE): new information we don't use. NSE serves only the current day's FII/DII figures; a history must be collected daily before it can be tested.
+- **Kronos** (shiyu-coder/Kronos): OHLCV foundation model pre-trained on 45+ exchanges. Pre-training on outside data is one way around our data limit (E-002, E-003). Test cost: heavy CPU inference on GitHub.
+- **PatchTST / Moirai**: time-series transformers; same caution as Kronos.

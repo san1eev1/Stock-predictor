@@ -45,3 +45,10 @@ Script: `scripts/research_pit_training.py`. Both evaluated on the point-in-time 
 E-003: train on point-in-time history vs survivors (rule: IC paired t ≥ 2, CAGR and Sharpe not worse).
 E-004: trailing stop (LEAN), level chosen on 2015–20 and confirmed on 2021–26 (rule: worst fall
 ≥ 5 points better, CAGR ≥ −1 point, Sharpe not worse).
+
+## Round 3 study (2026-10-25): no new experiment
+All 21 remaining watchlist repos were inspected (see repository_matrix.md, round 3). None offered a
+technique that is both new to us and testable on our current data: Indian costs and circuit rules
+are confirmed (Vibe-Trading), and impact/capacity models are irrelevant at ₹1 lakh. The open leads
+need new data (FII/DII flow history, shareholding) or heavy compute (Kronos), so they wait for
+approval rather than becoming a forced experiment.
