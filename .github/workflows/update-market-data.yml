@@ -66,6 +66,8 @@ jobs:
           python -m stockpredictor data-check | tail -1
           python -m stockpredictor intraday-collect --dir market-data --period "${{ inputs.intraday_period || '7d' }}" \
             || echo "::warning::intraday collection failed"
+          python -m stockpredictor fiidii-update --dir market-data \
+            || echo "::warning::FII/DII flows failed (NSE may block cloud servers)"
           python -m stockpredictor preopen-update --dir market-data \
             || echo "::warning::pre-open data failed (NSE may block cloud servers)"
           # NSE delivery share: newest days first, then history back to 2005 in chunks.

@@ -52,3 +52,11 @@ technique that is both new to us and testable on our current data: Indian costs 
 are confirmed (Vibe-Trading), and impact/capacity models are irrelevant at ₹1 lakh. The open leads
 need new data (FII/DII flow history, shareholding) or heavy compute (Kronos), so they wait for
 approval rather than becoming a forced experiment.
+
+## E-005 Foundation models (Kronos, Chronos-Bolt, Moirai) vs our model (2026-10-25) — running
+Script: `scripts/research_foundation.py`, workflow `research-dl.yml` (torch only in that job).
+Protocol in the script header. PatchTST excluded: it needs training per dataset (not zero-shot).
+
+## FII/DII flows collection started (2026-10-25)
+`data/fiidii.py`, `fiidii-update` in the evening data workflow → `market-data/fiidii.csv`.
+Test as a market-wide feature once ≥ 1 year has accumulated (≈ Nov 2027).

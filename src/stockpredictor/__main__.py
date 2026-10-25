@@ -128,6 +128,13 @@ def cmd_earnings_update(settings, args) -> None:
     print(f"Results dates: {n} announcements stored")
 
 
+def cmd_fiidii_update(settings, args) -> None:
+    """Today's NSE FII/DII cash-market flows -> fiidii.csv in the git store."""
+    from stockpredictor.data import fiidii
+
+    print(f"FII/DII flows: {fiidii.update(Path(args.dir))} new rows")
+
+
 def cmd_preopen_update(settings, args) -> None:
     """Today's NSE pre-open auction -> preopen/<year>.csv in the git store."""
     from stockpredictor import store
@@ -1086,6 +1093,7 @@ ARG_COMMANDS = {
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
+    "fiidii-update": (cmd_fiidii_update, "Today's NSE FII/DII flows (git store)", _dir_arg),
     "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
     "mac-train": (cmd_mac_train, "The Mac's daily training on all history (own process)",
                   _dir_arg),

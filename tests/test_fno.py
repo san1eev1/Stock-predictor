@@ -67,3 +67,14 @@ def test_trial_threshold_rises(tmp_path):
     assert T.trial_t_min("x", 500, tmp_path) > 3.4
     T.reset_trials("x", tmp_path)
     assert T.trial_t_min("x", 1, tmp_path) == T.MIN_T_STAT
+
+
+def test_fiidii_parse_and_update(tmp_path, monkeypatch):
+    from stockpredictor.data import fiidii
+
+    js = [{"buyValue": "19232.31", "category": "DII", "date": "23-Oct-2026", "netValue": "3235.36",
+           "sellValue": "15996.95"}, {"buyValue": "14445.54", "category": "FII/FPI",
+                                      "date": "23-Oct-2026", "netValue": "887.65", "sellValue": "13557.89"}]
+    monkeypatch.setattr(fiidii, "fetch", lambda: fiidii.parse(js))
+    assert fiidii.update(tmp_path) == 2 and fiidii.update(tmp_path) == 0   # no duplicates
+    assert set(fiidii.load(tmp_path)["category"]) == {"FII", "DII"}
