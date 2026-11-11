@@ -1117,8 +1117,10 @@ def cmd_autostart(settings, args) -> None:
     label = "com.stockpredictor.app"
     spec = {
         "Label": label,
-        "ProgramArguments": ["/usr/bin/caffeinate", "-ims", str(python), "-m", "stockpredictor",
-                             "start", "--no-browser"],
+        # Paper trading runs on GitHub (config.CLOUD_PAPER): the Mac is only a viewer and may
+        # sleep or be off; when it trades itself it must stay awake (caffeinate).
+        "ProgramArguments": ([] if config.CLOUD_PAPER else ["/usr/bin/caffeinate", "-ims"])
+        + [str(python), "-m", "stockpredictor", "start", "--no-browser"],
         "WorkingDirectory": str(PROJECT_ROOT),
         "RunAtLoad": True,
         "KeepAlive": True,              # restarted automatically if it stops or crashes
@@ -1130,8 +1132,8 @@ def cmd_autostart(settings, args) -> None:
     with open(agents / f"{label}.plist", "wb") as f:
         plistlib.dump(spec, f)
     subprocess.run(["launchctl", "load", str(agents / f"{label}.plist")], check=True)
-    print("Background service on: the app runs all the time (starts at login, restarts if "
-          "it stops) and starts GitHub's 18:30 and 21:00 runs itself.")
+    print("Background service on: the dashboard runs whenever the Mac is on. Paper trading "
+          "and training run on GitHub, Mac on or off.")
     print(f"Log: {logs / 'app.log'}  ·  Dashboard: http://localhost:8501")
     print("Turn off with: python -m stockpredictor autostart --off")
 

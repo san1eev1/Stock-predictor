@@ -276,7 +276,8 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
         color=alt.condition(alt.datum.Gain >= 0, alt.value(UI.UP), alt.value(UI.DOWN)),
         tooltip=["Day", alt.Tooltip("Gain:Q", format="+,.0f"), "Trades"]).properties(height=200),
         width="stretch")
-    st.dataframe(days.reset_index(), hide_index=True, width="stretch", column_config={
+    st.dataframe(UI.pnl_colors(days.reset_index(), ["Gain", "% on invested"]), hide_index=True,
+                 width="stretch", column_config={
         "Invested": st.column_config.NumberColumn(f"Money in {what}", format="₹%,.0f"),
         "Gain": st.column_config.NumberColumn("Gain / loss (after costs)", format="₹%+,.0f"),
         "% on invested": st.column_config.NumberColumn(format="%+.2f%%")})
@@ -655,10 +656,11 @@ def paper_fno_books(cap: float):
                 st.caption("No trades yet — they open with the 9:46 picks (one lot must fit "
                            f"the ₹{cap:,.0f}).")
                 continue
-            st.dataframe(t[["Day", "symbol", "side", "qty", "entry_price", "now", "invested",
-                            "gain", "status", "exit_reason"]].rename(columns={
+            st.dataframe(UI.pnl_colors(t[["Day", "symbol", "side", "qty", "entry_price", "now",
+                                          "invested", "gain", "status", "exit_reason"]].rename(columns={
                 "symbol": "Contract", "qty": "Qty", "entry_price": "Entry", "now": "Now / exit",
-                "invested": "Money in", "gain": "Gain / loss"}), hide_index=True, width="stretch",
+                "invested": "Money in", "gain": "Gain / loss"}), ["Gain / loss"]),
+                hide_index=True, width="stretch",
                 column_config={k: st.column_config.NumberColumn(format="₹%.2f")
                                for k in ("Entry", "Now / exit", "Money in", "Gain / loss")})
 
@@ -1123,11 +1125,13 @@ def paper_intraday(horizon: str = PI.HORIZON):
                         for s_, lv, st_ in zip(t["symbol"], t["Live/Exit"], t["status"])]
         t["Status"] = ["⏳ open" if x == "open" else ("✅ " if p > 0 else "❌ ") + (r or "")
                        for x, p, r in zip(t["status"], t["P&L"], t["exit_reason"])]
-        st.dataframe(t[["Day", "symbol", "qty", "entry_price", "Exit", "Live", "Close 15:30",
-                        "Share move %", "Today %", "stop_loss", "target", "P&L", "Status"]].rename(columns={
+        st.dataframe(UI.pnl_colors(t[["Day", "symbol", "qty", "entry_price", "Exit", "Live",
+                                      "Close 15:30", "Share move %", "Today %", "stop_loss",
+                                      "target", "P&L", "Status"]].rename(columns={
             "symbol": "Stock", "qty": "Qty", "entry_price": "Entry 9:45",
             "Exit": exit_name, "stop_loss": "Stop-loss",
-            "target": "Target", "P&L": "P&L (after costs)"}), hide_index=True, width="stretch",
+            "target": "Target", "P&L": "P&L (after costs)"}),
+            ["P&L (after costs)", "Share move %", "Today %"]), hide_index=True, width="stretch",
             column_config={k_: st.column_config.NumberColumn(format="₹%.2f")
                            for k_ in ["Entry 9:45", exit_name, "Live",
                                       "Close 15:30", "Stop-loss", "Target", "P&L (after costs)"]}
@@ -1572,6 +1576,10 @@ def model_intraday():
 
 def page_settings():
     st.title("Settings")
+    if config.CLOUD_PAPER:
+        st.info("Paper trading runs on GitHub, so changes here only affect this Mac's copy and "
+                "are replaced by GitHub's state within a minute. Ask for rule changes to be made "
+                "in the code.")
     c = conn()
     rules, mode = D.get_rules(c)
     st.subheader("Long-term paper trading rules")

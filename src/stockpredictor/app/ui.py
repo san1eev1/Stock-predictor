@@ -115,3 +115,15 @@ def share_card(label: str, part: float, whole: float, value: str, sub: str = "")
     """A part of a whole (e.g. money invested of the capital) as a ring."""
     f = part / whole if whole else 0.0
     return card(label, value, sub, f, "neutral", f"{f:.0%}")
+
+
+def pnl_colors(df, cols):
+    """Green / red text for gain-loss columns (like broker apps); a Styler for st.dataframe."""
+    def tint(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return ""
+        return f"color: {UP}; font-weight: 600" if v > 0 else \
+            f"color: {DOWN}; font-weight: 600" if v < 0 else ""
+    return df.style.map(tint, subset=[c for c in cols if c in df.columns])
