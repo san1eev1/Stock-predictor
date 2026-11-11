@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -27,6 +28,7 @@ from stockpredictor.paper import fno as FO
 from stockpredictor.paper import intraday as PI
 from stockpredictor.paper import scoreboard as SB
 from stockpredictor.portfolio import real as R
+from stockpredictor.app import ui as UI
 
 st.set_page_config(page_title="Stock Predictor", page_icon="📈", layout="wide")
 
@@ -244,16 +246,25 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
     today = f"{now_ist():%Y-%m-%d}"
     d = t[t["Day"] == today] if not t.empty else t
     g = float(d["gain"].sum()) if not d.empty else 0.0
-    k = st.columns(3)
-    k[0].metric(f"Money in {what} today", rupees(float(d["invested"].sum()) if not d.empty else 0),
-                help=f"Capital ₹{capital:,.0f}")
-    k[1].metric("Gain / loss today", C.money(g), f"{g / capital:+.2%} of ₹{capital:,.0f}")
-    k[2].metric("Open now", int((d["status"] == "open").sum()) if not d.empty else 0)
+    inv = float(d["invested"].sum()) if not d.empty else 0.0
+    n_open = int((d["status"] == "open").sum()) if not d.empty else 0
+    month = float(t["gain"].sum()) if not t.empty else 0.0
+    UI.cards([UI.gain_card("Gain / loss today", g, capital),
+              UI.share_card(f"Money in {what}", inv, capital, rupees(inv), f"of ₹{capital:,.0f}"),
+              UI.share_card("Open now", n_open, max(1, len(d)), f"{n_open} of {len(d)}",
+                            "positions still running"),
+              UI.gain_card("Last 30 days", month, capital, scale=0.10)])
     if t.empty:
         return
     days = t.groupby("Day").agg(Invested=("invested", "sum"), Gain=("gain", "sum"),
                                 Trades=("id", "count")).sort_index(ascending=False)
     days["% of capital"] = days["Gain"] / capital * 100
+    bars = days.reset_index().sort_values("Day")
+    st.altair_chart(alt.Chart(bars).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+        x=alt.X("Day:N", title=None, sort=None), y=alt.Y("Gain:Q", title="Gain / loss (₹)"),
+        color=alt.condition(alt.datum.Gain >= 0, alt.value(UI.UP), alt.value(UI.DOWN)),
+        tooltip=["Day", alt.Tooltip("Gain:Q", format="+,.0f"), "Trades"]).properties(height=200),
+        width="stretch")
     st.dataframe(days.reset_index(), hide_index=True, width="stretch", column_config={
         "Invested": st.column_config.NumberColumn(f"Money in {what}", format="₹%,.0f"),
         "Gain": st.column_config.NumberColumn("Gain / loss (after costs)", format="₹%+,.0f"),
@@ -382,6 +393,47 @@ def page_ipo():
 - Loughran & Ritter (2002), *Why Don't Issuers Get Upset About Leaving Money on the Table in IPOs?*,
   Review of Financial Studies.
 """)
+
+
+# --- Overview ------------------------------------------------------------------------
+
+def page_overview():
+    now = now_ist()
+    st.markdown(f'<div class="sp-hero"><div class="sp-label">{now:%A, %d %B %Y · %H:%M} IST</div>'
+                f'<div style="font-size:1.9rem;font-weight:700;margin-top:4px">Today at a glance</div>'
+                f'<div class="sp-sub">Every paper book starts each day with its own '
+                f'₹{SETTINGS.paper_capital_intraday:,.0f}. Live prices from Angel One.</div></div>',
+                unsafe_allow_html=True)
+    overview_cards()
+
+
+@st.fragment(run_every=REFRESH)
+def overview_cards():
+    c = conn()
+    live = live_prices(c)
+    cap = SETTINGS.paper_capital_intraday
+    today = f"{now_ist():%Y-%m-%d}"
+    books = [("Intraday · 12:30", PI.HORIZON, False), ("Intraday · close", PI.CLOSE_HORIZON, False),
+             ("Candle experiment", PI.CANDLE_HORIZON, False), ("F&O futures", FO.FUT_BOOK, True),
+             ("F&O options", FO.OPT_BOOK, True)]
+    items, total, month = [], 0.0, 0.0
+    for name, book, fno in books:
+        t = book_trades(c, book, live, fno=fno)
+        d = t[t["Day"] == today] if not t.empty else t
+        g = float(d["gain"].sum()) if not d.empty else 0.0
+        total += g
+        month += float(t["gain"].sum()) if not t.empty else 0.0
+        items.append(UI.gain_card(name, g, cap))
+    UI.cards([UI.gain_card("All intraday books today", total, cap * len(books)),
+              UI.gain_card("All books · last 30 days", month, cap * len(books), scale=0.10)])
+    st.subheader("Books today")
+    UI.cards(items)
+    lt = E.value(c, live)
+    if lt.get("capital"):
+        st.subheader("Long-term book")
+        UI.cards([UI.gain_card("Since start", lt["equity"] - lt["capital"], lt["capital"], 0.2),
+                  UI.share_card("Invested", lt["equity"] - lt["cash"], lt["equity"],
+                                rupees(lt["equity"] - lt["cash"]), f"{lt.get('positions', 0)} holdings")])
 
 
 # --- Pages -------------------------------------------------------------------------
@@ -1582,8 +1634,9 @@ def page_settings():
 
 
 pages = {
+    "Home": [st.Page(page_overview, title="Overview", icon="🏠", default=True)],
     "Today's picks": [
-        st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
+        st.Page(page_picks, title="Long-term picks", icon="📈"),
         st.Page(page_intraday_1230, title="Intraday — until 12:30", icon="⚡"),
         st.Page(page_intraday_close, title="Intraday — until close", icon="🔔")],
     "Paper trading (₹10,000 books)": [
@@ -1598,8 +1651,7 @@ pages = {
         st.Page(page_portfolio, title="My portfolio", icon="💼"),
         st.Page(page_settings, title="Settings", icon="⚙️")],
 }
-st.markdown("<style>.block-container{padding-top:2rem;padding-bottom:2rem}"
-            "[data-testid='stMetricValue']{font-size:1.6rem}</style>", unsafe_allow_html=True)
+UI.setup()
 sidebar()
 health_banner()
 def angel_status() -> None:
