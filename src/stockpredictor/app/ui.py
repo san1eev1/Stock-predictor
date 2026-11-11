@@ -99,12 +99,14 @@ def cards(items: list[str]) -> None:
     st.markdown(f'<div class="sp-grid">{"".join(items)}</div>', unsafe_allow_html=True)
 
 
-def gain_card(label: str, gain: float, base: float, scale: float = 0.03) -> str:
+def gain_card(label: str, gain: float, base: float, scale: float = 0.03,
+              label_base: str = "") -> str:
     """Rupee gain/loss with a ring showing it as % of `base` (full ring = ±scale)."""
     pct = gain / base if base else 0.0
     tone = "up" if gain > 0 else "down" if gain < 0 else "neutral"
+    sub = f"{pct:+.2%} on ₹{base:,.0f} {label_base}".rstrip() if label_base else f"{pct:+.2%} of ₹{base:,.0f}"
     return card(label, f"{'+' if gain > 0 else '−' if gain < 0 else ''}₹{abs(gain):,.0f}",
-                f"{pct:+.2%} of ₹{base:,.0f}", abs(pct) / scale, tone, f"{pct:+.1%}")
+                sub, abs(pct) / scale, tone, f"{pct:+.1%}")
 
 
 def share_card(label: str, part: float, whole: float, value: str, sub: str = "") -> str:

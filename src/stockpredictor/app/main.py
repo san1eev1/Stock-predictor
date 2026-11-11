@@ -249,16 +249,19 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
     inv = float(d["invested"].sum()) if not d.empty else 0.0
     n_open = int((d["status"] == "open").sum()) if not d.empty else 0
     month = float(t["gain"].sum()) if not t.empty else 0.0
-    UI.cards([UI.gain_card("Gain / loss today", g, capital),
-              UI.share_card(f"Money in {what}", inv, capital, rupees(inv), f"of ₹{capital:,.0f}"),
+    month_inv = float(t["invested"].sum()) if not t.empty else 0.0
+    UI.cards([UI.gain_card("Gain / loss today", g, inv or capital, label_base="invested"),
+              UI.share_card(f"Money in {what}", min(inv, capital), capital, rupees(inv),
+                            f"of ₹{capital:,.0f} capital"),
               UI.share_card("Open now", n_open, max(1, len(d)), f"{n_open} of {len(d)}",
                             "positions still running"),
-              UI.gain_card("Last 30 days", month, capital, scale=0.10)])
+              UI.gain_card("Last 30 days", month, month_inv or capital, scale=0.05,
+                           label_base="invested")])
     if t.empty:
         return
     days = t.groupby("Day").agg(Invested=("invested", "sum"), Gain=("gain", "sum"),
                                 Trades=("id", "count")).sort_index(ascending=False)
-    days["% of capital"] = days["Gain"] / capital * 100
+    days["% on invested"] = days["Gain"] / days["Invested"].where(days["Invested"] > 0) * 100
     bars = days.reset_index().sort_values("Day")
     st.altair_chart(alt.Chart(bars).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
         x=alt.X("Day:N", title=None, sort=None), y=alt.Y("Gain:Q", title="Gain / loss (₹)"),
@@ -268,7 +271,7 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
     st.dataframe(days.reset_index(), hide_index=True, width="stretch", column_config={
         "Invested": st.column_config.NumberColumn(f"Money in {what}", format="₹%,.0f"),
         "Gain": st.column_config.NumberColumn("Gain / loss (after costs)", format="₹%+,.0f"),
-        "% of capital": st.column_config.NumberColumn(format="%+.2f%%")})
+        "% on invested": st.column_config.NumberColumn(format="%+.2f%%")})
 
 
 # --- IPO analysis --------------------------------------------------------------------
@@ -416,16 +419,20 @@ def overview_cards():
     books = [("Intraday · 12:30", PI.HORIZON, False), ("Intraday · close", PI.CLOSE_HORIZON, False),
              ("Candle experiment", PI.CANDLE_HORIZON, False), ("F&O futures", FO.FUT_BOOK, True),
              ("F&O options", FO.OPT_BOOK, True)]
-    items, total, month = [], 0.0, 0.0
+    items, total, month, total_inv, month_inv = [], 0.0, 0.0, 0.0, 0.0
     for name, book, fno in books:
         t = book_trades(c, book, live, fno=fno)
         d = t[t["Day"] == today] if not t.empty else t
         g = float(d["gain"].sum()) if not d.empty else 0.0
+        inv = float(d["invested"].sum()) if not d.empty else 0.0
         total += g
+        total_inv += inv
         month += float(t["gain"].sum()) if not t.empty else 0.0
-        items.append(UI.gain_card(name, g, cap))
-    UI.cards([UI.gain_card("All intraday books today", total, cap * len(books)),
-              UI.gain_card("All books · last 30 days", month, cap * len(books), scale=0.10)])
+        month_inv += float(t["invested"].sum()) if not t.empty else 0.0
+        items.append(UI.gain_card(name, g, inv or cap, label_base="invested"))
+    UI.cards([UI.gain_card("All intraday books today", total, total_inv or cap, label_base="invested"),
+              UI.gain_card("All books · last 30 days", month, month_inv or cap, scale=0.05,
+                           label_base="invested")])
     st.subheader("Books today")
     UI.cards(items)
     E.ensure_account(c, SETTINGS.paper_capital_longterm)

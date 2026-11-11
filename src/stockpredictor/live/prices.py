@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
@@ -65,16 +66,23 @@ class LivePrices:
         symbols = sorted(set(symbols))
         if not symbols:
             return {}
-        try:
-            client = self._angel_client()
-            if client is not None:
+        # Angel One first; a network blip (SSL/DNS) gets one fresh login and retry 2 s later,
+        # so the books stay on Angel One; only then Yahoo.
+        for attempt in (1, 2):
+            try:
+                client = self._angel_client()
+                if client is None:
+                    break
                 prices = client.ltp_many({s: self._tokens[s] for s in symbols if s in self._tokens})
                 self.source, self.last_error = "angelone", None
                 return prices
-        except Exception as exc:  # fall back to Yahoo, retry Angel next time
-            self.last_error = f"Angel One: {exc}"
-            log.warning("Angel One live prices failed, using Yahoo: %s", exc)
-            self._angel = None
+            except Exception as exc:
+                self.last_error = f"Angel One: {exc}"
+                self._angel = None
+                if attempt == 1:
+                    time.sleep(2)
+                    continue
+                log.warning("Angel One live prices failed twice, using Yahoo: %s", exc)
         prices, _ = yahoo_prices(symbols)
         self.source = "yahoo"
         return prices
