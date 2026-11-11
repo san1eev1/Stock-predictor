@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
@@ -46,18 +46,34 @@ def conn():
 
 
 def _store_version() -> float:
-    files = list(STORE.glob("*/*.csv"))
+    """Newest price input. News is left out: it changes several times a day and each change
+    would reload all market data (~7 s freeze); news has its own cache (news())."""
+    files = [f for f in STORE.glob("*/*.csv") if f.parent.name != "news"]
     return max((f.stat().st_mtime for f in files), default=0)
 
 
 # One copy only (max_entries=1): each data update replaces the old copy instead of adding
-# another (the old copies used to pile up to several GB). Recent years only, like the monitor.
+# another. One year only (the monitor keeps 3 for scoring): a third of the memory.
 @st.cache_resource(show_spinner="Loading market data…", max_entries=1)
 def market(version: float) -> E.MarketContext | None:
     try:
-        return E.MarketContext.load(STORE, years=config.LIVE_CONTEXT_YEARS)
+        return E.MarketContext.load(STORE, years=1 if config.LIVE_CONTEXT_YEARS else None)
     except FileNotFoundError:
         return None
+
+
+@st.cache_data(show_spinner=False, max_entries=1)
+def _news(version: float) -> pd.DataFrame:
+    from stockpredictor.nlp import relevance as REL
+
+    df = N.load_news(STORE)
+    if "published" in df and not df.empty:
+        df = df[df["published"] >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=30)]
+    return REL.add_relevance(df, store.load_universe(STORE))
+
+
+def news() -> pd.DataFrame:
+    return _news(max((f.stat().st_mtime for f in STORE.glob("news/*.csv")), default=0))
 
 
 def ctx() -> E.MarketContext | None:
@@ -202,6 +218,49 @@ def accuracy_now_sidebar():
                if lj["n"] else "Long-term judged: first results after 1 week")
 
 
+# --- Money in each paper book ---------------------------------------------------------
+
+def book_trades(c, book: str, live: dict, fno: bool = False, days: int = 30) -> pd.DataFrame:
+    """The book's trades of the last `days` days with the money put in and the gain/loss now
+    (closed: final after costs; open: at the live price, after costs)."""
+    since = f"{now_ist() - timedelta(days=days):%Y-%m-%d}"
+    t = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? AND entry_time >= ? "
+                    "ORDER BY entry_time DESC, id", c, params=(book, since))
+    if t.empty:
+        return t
+    sign = t["side"].map({"long": 1, "short": -1})
+    now_p = t["symbol"].map(live).fillna(t["entry_price"])
+    t["now"] = now_p.where(t["status"] == "open", t["exit_price"])
+    t["gain"] = t["pnl"].where(t["status"] == "closed",
+                               sign * (now_p - t["entry_price"]) * t["qty"] - t["costs"])
+    t["invested"] = [FO._blocked(r) for r in t.to_dict("records")] if fno \
+        else t["qty"] * t["entry_price"]
+    t["Day"] = t["entry_time"].str[:10]
+    return t
+
+
+def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
+    """Today: money in trades and the live gain/loss in rupees; then each day's result."""
+    today = f"{now_ist():%Y-%m-%d}"
+    d = t[t["Day"] == today] if not t.empty else t
+    g = float(d["gain"].sum()) if not d.empty else 0.0
+    k = st.columns(3)
+    k[0].metric(f"Money in {what} today", rupees(float(d["invested"].sum()) if not d.empty else 0),
+                help=f"Capital ₹{capital:,.0f}" + (" (intraday margin: up to 5× in positions)"
+                                                   if what == "shares" else ""))
+    k[1].metric("Gain / loss today", C.money(g), f"{g / capital:+.2%} of ₹{capital:,.0f}")
+    k[2].metric("Open now", int((d["status"] == "open").sum()) if not d.empty else 0)
+    if t.empty:
+        return
+    days = t.groupby("Day").agg(Invested=("invested", "sum"), Gain=("gain", "sum"),
+                                Trades=("id", "count")).sort_index(ascending=False)
+    days["% of capital"] = days["Gain"] / capital * 100
+    st.dataframe(days.reset_index(), hide_index=True, width="stretch", column_config={
+        "Invested": st.column_config.NumberColumn(f"Money in {what}", format="₹%,.0f"),
+        "Gain": st.column_config.NumberColumn("Gain / loss (after costs)", format="₹%+,.0f"),
+        "% of capital": st.column_config.NumberColumn(format="%+.2f%%")})
+
+
 # --- Pages -------------------------------------------------------------------------
 
 def page_picks():
@@ -213,7 +272,7 @@ def page_picks():
     accuracy_now_panel("longterm")
     preds = pd.read_sql("SELECT * FROM predictions WHERE horizon = 'longterm' AND date = ? "
                         "AND horizon_days = ?", c, params=(last, M.HORIZON))
-    summary = N.news_summary(m.news, pd.Timestamp(now_ist())).set_index("symbol")
+    summary = N.news_summary(news(), pd.Timestamp(now_ist())).set_index("symbol")
     fund = FUND.load_latest(STORE).set_index("symbol")
     st.caption(f"Predictions for the **next week** (5 trading days), made after the close of "
                f"**{pd.Timestamp(last):%d %b %Y}**. Each is judged after one week against Nifty 50. "
@@ -224,7 +283,7 @@ def page_picks():
 
     st.subheader("📰 Latest headlines for picks")
     picks = preds.loc[preds["direction"] == "up", "symbol"].tolist()
-    heads = m.news[m.news["symbol"].isin(picks)].sort_values("published", ascending=False).head(15)
+    heads = news()[news()["symbol"].isin(picks)].sort_values("published", ascending=False).head(15)
     if heads.empty:
         st.caption("No news collected yet — the news job runs 4 times per trading day.")
     for h in heads.itertuples():
@@ -331,7 +390,7 @@ def live_block():
 def page_paper_longterm():
     st.title("Paper trading — Long-term")
     rules, _ = D.get_rules(conn())
-    st.caption(f"Buy-only virtual portfolio (₹1 lakh). It holds the top {rules.n_hold} stocks "
+    st.caption(f"Buy-only virtual portfolio (results shown on ₹{SETTINGS.paper_capital_longterm:,.0f} a day). It holds the top {rules.n_hold} stocks "
                "with the strongest sustained buy signal (the Long-term picks page lists the top "
                "10) and sells a holding when the model expects it to fall (rank drops below the "
                "exit rank), on a stop-loss, or on severe bad news. Decisions after the close, "
@@ -344,7 +403,7 @@ def page_paper_longterm():
 
 def page_paper_intraday():
     st.title("Paper trading — Intraday")
-    st.caption("Two books, each starting every day with its own ₹1 lakh. At 9:46 each model buys "
+    st.caption("Two books, each starting every day with its own ₹10,000 (intraday margin: up to 5× in positions). At 9:46 each model buys "
                "the stocks it expects to rise and short-sells the ones it expects to fall, with "
                "a stop-loss and target. Book 1 closes everything at 12:30, book 2 at 15:15 "
                "(the close). After the close they are compared and both learn.")
@@ -362,63 +421,48 @@ def page_paper_intraday():
         replay_history()
 
 
+def page_paper_candles():
+    st.title("Candle experiment (paper, ₹10,000)")
+    st.caption("Separate from the main books, which trade only what the models learned. At 9:46 "
+               "the 'until close' model's 25 best buys and 25 best sells (50 stocks) are checked "
+               "on their 9:15-9:45 one-minute candles from Angel One (closed up/down, where it "
+               "closed in its range, vs VWAP, 15-minute breakout, share of green candles). Model "
+               "rank and candles count half each; the best 10 buys and 10 sells are traded. A "
+               "trade that slips below its entry price is cut at once; winners run to 15:15. If "
+               "it beats the main 'until close' book over several weeks, it can be adopted.")
+    paper_intraday(PI.CANDLE_HORIZON)
+
+
 def page_paper_fno():
     st.title("Paper trading — F&O")
-    st.caption("The 'until close' intraday model's top 5 buy and top 5 sell picks, traded at "
-               "about 9:46 as near-month stock futures (long / short, ~20% margin) and as bought "
-               "at-the-money options (call for buys, put for sells). Each book starts every day "
-               "with ₹1 lakh; whole lots only, so picks whose one lot needs more than ₹10,000 "
-               "(margin or premium) are skipped. Everything closes at 15:15. Paper only.")
+    cap = SETTINGS.paper_capital_intraday
+    st.caption(f"The 'until close' model's best buy and sell picks, traded at about 9:46 as "
+               f"near-month stock futures (long / short, ~20% margin) and as bought at-the-money "
+               f"options (call for buys, put for sells). Each book starts every day with "
+               f"₹{cap:,.0f}; whole lots only, best pick first while the money lasts. A contract "
+               f"that slips below its entry price is cut at once; the rest close at 15:15. "
+               f"Prices from Angel One. Paper only.")
+    paper_fno_books(cap)
+
+
+@st.fragment(run_every=REFRESH)
+def paper_fno_books(cap: float):
     c = conn()
-    prices = live_prices(c)
+    live = live_prices(c)
     for tab, book in zip(st.tabs(["Futures", "Options"]), FO.BOOKS):
         with tab:
-            v = FO.value(c, prices, book)
-            a, b, d = st.columns(3)
-            a.metric("Started today with", f"₹{v['capital']:,.0f}")
-            b.metric("Value now", f"₹{v['equity']:,.0f}", f"₹{v['pnl']:+,.0f}")
-            d.metric("Open positions", v["positions"])
-            t = pd.read_sql("SELECT symbol, side, qty, entry_time, entry_price, exit_price, costs, "
-                            "pnl, status, exit_reason FROM paper_trades WHERE horizon = ? "
-                            "ORDER BY id DESC LIMIT 200", c, params=(book,))
+            t = book_trades(c, book, live, fno=True)
+            money_panel(t, cap, "margin" if book == FO.FUT_BOOK else "premium")
             if t.empty:
-                st.caption("No trades yet — they open with the 9:46 intraday picks.")
+                st.caption("No trades yet — they open with the 9:46 picks (one lot must fit "
+                           f"the ₹{cap:,.0f}).")
                 continue
-            t["Price now"] = t["symbol"].map(prices)
-            live = t["status"] == "open"
-            sign = t["side"].map({"long": 1, "short": -1})
-            t.loc[live, "pnl"] = (sign * (t["Price now"] - t["entry_price"]) * t["qty"]
-                                  - t["costs"])[live]
-            t["date"] = t["entry_time"].str[:10]
-            st.dataframe(t[["date", "symbol", "side", "qty", "entry_price", "Price now",
-                            "exit_price", "pnl", "status", "exit_reason"]].rename(columns={
-                "symbol": "Contract", "qty": "Qty", "entry_price": "Entry", "exit_price": "Exit",
-                "pnl": "P&L (after costs)"}), hide_index=True, width="stretch",
+            st.dataframe(t[["Day", "symbol", "side", "qty", "entry_price", "now", "invested",
+                            "gain", "status", "exit_reason"]].rename(columns={
+                "symbol": "Contract", "qty": "Qty", "entry_price": "Entry", "now": "Now / exit",
+                "invested": "Money in", "gain": "Gain / loss"}), hide_index=True, width="stretch",
                 column_config={k: st.column_config.NumberColumn(format="₹%.2f")
-                               for k in ("Entry", "Price now", "Exit", "P&L (after costs)")})
-            closed = t[t["status"] == "closed"]
-            daily = closed.groupby("date").agg({
-                "pnl": ["sum", "count"],
-                "side": "count"
-            }).rename(columns={"sum": "Total P&L", "count": "Trades"}).reset_index()
-            daily.columns = ["date", "P&L", "Wins", "Trades"]
-            daily["Wins"] = (closed.groupby("date")["pnl"].apply(lambda g: (g > 0).sum())).values
-            daily["Win %"] = (daily["Wins"] / daily["Trades"] * 100).round(0).astype(int)
-            daily["Return %"] = (daily["P&L"] / 100_000 * 100).round(2)
-            if not daily.empty:
-                st.subheader("Each day on a fresh ₹1,00,000")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total P&L (all days)", f"₹{daily['P&L'].sum():+,.0f}")
-                col2.metric("Win rate", f"{(daily['Wins'].sum() / daily['Trades'].sum() * 100):.0f}%")
-                col3.metric("Avg daily return", f"{daily['Return %'].mean():+.2f}%")
-                rets = daily["Return %"].dropna()
-                if len(rets) > 1:
-                    sharpe = rets.mean() / rets.std() * np.sqrt(252)
-                    col1.metric("Sharpe (annualized)", f"{sharpe:.2f}")
-                st.dataframe(daily[["date", "P&L", "Wins", "Trades", "Win %", "Return %"]],
-                            hide_index=True, width="stretch", column_config={
-                                "P&L": st.column_config.NumberColumn(format="₹%+.0f"),
-                                "Return %": st.column_config.NumberColumn(format="%.2f%")})
+                               for k in ("Entry", "Now / exit", "Money in", "Gain / loss")})
 
 
 def replay_history():
@@ -572,14 +616,15 @@ def paper_longterm():
         st.altair_chart(C.lines(df[["date", "series", "value"]], "date", "value", "series",
                                 ",.0f", "Value (₹)"), width="stretch")
     if len(eq):
-        # Each day as if it started fresh with ₹1 lakh: the day's return on ₹1,00,000
+        # Each day as if it started fresh with the paper capital: the day's return on it
         # (holdings are kept - selling and rebuying daily would cost ~0.6% a day).
-        st.subheader("Each day on a fresh ₹1,00,000")
+        fresh = SETTINGS.paper_capital_longterm
+        st.subheader(f"Each day on a fresh ₹{fresh:,.0f}")
         capital = E.value(c, prices)["capital"]
         prev = eq["equity"].shift(1).fillna(capital)
         daily = pd.DataFrame({"date": pd.to_datetime(eq["date"]).dt.strftime("%d %b %Y"),
-                              "start": 100_000.0,
-                              "end": 100_000 * eq["equity"] / prev})
+                              "start": float(fresh),
+                              "end": fresh * eq["equity"] / prev})
         daily["P&L"] = daily["end"] - daily["start"]
         st.dataframe(daily.iloc[::-1].style.format({"start": "₹{:,.0f}", "end": "₹{:,.0f}",
                                                    "P&L": "₹{:+,.0f}"}),
@@ -847,38 +892,23 @@ def intraday_live(day: str, target: MI.Target = MI.TRADE):
 @st.fragment(run_every=REFRESH)
 def paper_intraday(horizon: str = PI.HORIZON):
     c = conn()
-    E.ensure_account(c, SETTINGS.paper_capital_intraday, horizon)
+    cap = SETTINGS.paper_capital_intraday
+    E.ensure_account(c, cap, horizon)
     live = live_prices(c)
-    v = PI.value(c, live, horizon)
-    k = st.columns(4)
-    k[0].metric("Started today with", rupees(v["capital"]),
-                help="Every trading day starts fresh with ₹1 lakh")
-    k[1].metric("Value now", rupees(v["equity"]), C.money(v["pnl"]))
-    k[2].metric("Cash", rupees(v["cash"]))
-    k[3].metric("Open positions", f"{v['positions']}")
-    exit_name = "Exit (12:30 or stop/target)" if horizon == PI.HORIZON \
-        else "Exit (15:15 or stop/target)"
-    trades = pd.read_sql("SELECT * FROM paper_trades WHERE horizon = ? "
-                         "ORDER BY entry_time DESC, id", c, params=(horizon,))
+    exit_name = {PI.HORIZON: "Exit (12:30 or stop/target)"}.get(horizon, "Exit (15:15 or cut/target)")
+    trades = book_trades(c, horizon, live)
+    money_panel(trades, cap)
     if trades.empty:
         st.caption("No intraday paper trades yet — they open at 9:46 on trading days.")
         return
     trades["Day"] = trades["entry_time"].str[:10]
     trades["sign"] = trades["side"].map({"long": 1, "short": -1})
-    rules, _ = PI.get_rules(c, horizon)
-    for side, title in (("long", f"▲ Buy trades — the top {rules.n_long} of the 10 buy candidates"),
-                        ("short", f"▼ Sell trades (short) — the top {rules.n_short} of the 10 "
-                                  "sell candidates")):
+    for side, title in (("long", "▲ Buy trades"), ("short", "▼ Sell trades (short)")):
         t = trades[trades["side"] == side].copy()
         st.subheader(title)
         if t.empty:
             st.caption("None yet.")
             continue
-        closed = t[t["status"] == "closed"]
-        if not closed.empty:
-            by_day = closed.groupby("Day")["pnl"].sum()
-            st.caption(f"{len(closed)} closed trades · won {(closed['pnl'] > 0).mean():.0%} · "
-                       f"profitable days {(by_day > 0).mean():.0%} · total P&L {C.money(closed['pnl'].sum())}")
         t["Live/Exit"] = [live.get(s_, e) if st_ == "open" else x
                           for s_, e, x, st_ in zip(t["symbol"], t["entry_price"], t["exit_price"], t["status"])]
         today = f"{now_ist():%Y-%m-%d}"
@@ -904,7 +934,6 @@ def paper_intraday(horizon: str = PI.HORIZON):
                            for k_ in ["Entry 9:45", exit_name, "Live",
                                       "Close 15:30", "Stop-loss", "Target", "P&L (after costs)"]}
             | {"Share move %": PCT, "Today %": PCT})
-    intraday_days(c, horizon)
 
 
 def intraday_days(c, horizon: str = PI.HORIZON):
@@ -1428,6 +1457,7 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
          st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
          st.Page(page_paper_fno, title="Paper trading — F&O", icon="🧪"),
+         st.Page(page_paper_candles, title="Candle experiment", icon="🕯️"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),
          st.Page(page_model, title="Model", icon="🧠"),
@@ -1435,69 +1465,3 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
 sidebar()
 health_banner()
 st.navigation(pages).run()
-
-
-def page_ipo_analysis():
-    """IPO scoring and recommendation: buy, caution, or skip."""
-    from stockpredictor.analysis import ipo_analyzer as IA
-    from stockpredictor.data import ipo as IPO_data
-    
-    st.title("IPO Analysis")
-    st.caption("Score incoming IPOs and decide: buy, caution, or skip. "
-               "See research/ipo_resources.md for learning materials.")
-    
-    c = conn()
-    watchlist = IPO_data.load(d)
-    
-    # Show scoring for IPOs listing this week
-    today = pd.Timestamp.now().date()
-    week_end = today + pd.Timedelta(days=7)
-    upcoming = watchlist[(watchlist["listing_date"].isna()) | 
-                         ((watchlist["listing_date"] >= today) & 
-                          (watchlist["listing_date"] <= week_end))]
-    
-    if upcoming.empty:
-        st.info("No IPOs scheduled for the next 7 days. Add one with `ipo add` command.")
-        return
-    
-    for _, ipo in upcoming.iterrows():
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.subheader(ipo["symbol"])
-        with col2:
-            st.caption(f"{ipo['listing_date']:%b %d}" if ipo["listing_date"] else "TBD")
-        
-        # Score it
-        score = IA.analyze_ipo(
-            symbol=ipo["symbol"],
-            listing_date=str(ipo["listing_date"]),
-            allocation_ratio=float(ipo["alloc_ratio"] or 0),
-            gmp_estimate=float(ipo["gmp_estimate"] or 0),
-            lot_size=int(ipo["lot_size"]),
-            sector=ipo.get("sector", "Unknown"),
-            sector_momentum="neutral",  # would fetch live
-            price_band=(float(ipo["price_band_low"]), float(ipo["price_band_high"]))
-        )
-        
-        # Display
-        color = {"BUY": "green", "CAUTION": "orange", "SKIP": "red"}.get(score.recommendation, "gray")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Recommendation", score.recommendation, f"Score {score.overall_score:.0f}/100",
-                     delta_color=color)
-        with col2:
-            st.metric("Lot size", f"₹{score.lot_size * score.price_band[1]:,.0f}",
-                     f"{score.lot_size} shares @ ₹{score.price_band[1]:.0f}")
-        with col3:
-            st.metric("GMP", f"{score.gmp_estimate:+.1f}%",
-                     f"Alloc {score.allocation_ratio:.1f}x")
-        
-        # Reasons
-        st.caption("**Factors:**")
-        for reason in score.reasons:
-            st.caption(f"• {reason}")
-        
-        if score.red_flags:
-            st.warning("**Red flags:**\n\n" + "\n\n".join([f"⚠️ {f}" for f in score.red_flags]))
-        
-        st.divider()

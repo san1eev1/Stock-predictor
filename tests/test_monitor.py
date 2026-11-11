@@ -242,6 +242,7 @@ def test_mac_starts_github_runs_on_time(tmp_path, ctx_model, monkeypatch):
     monkeypatch.setattr(E.MarketContext, "load", classmethod(lambda cls, d, **k: ctx))
     monkeypatch.setattr(MON.config, "CLOUD_TRAINING", True)
     monkeypatch.setattr(MON.config, "MAC_DAILY_TRAINING", False)
+    monkeypatch.setattr(MON.config, "MAC_STARTS_GITHUB_RUNS", True)
     started = []
     monkeypatch.setattr(MON, "start_github_run", lambda w: started.append(w) or True)
     mon._started = True

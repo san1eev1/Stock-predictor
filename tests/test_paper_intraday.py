@@ -98,3 +98,25 @@ def test_daily_loss_limit_closes_the_book(setup):
     assert PI.check_exits(conn, {"X": 990}, "2026-09-28 10:00") == []       # -1%: keep
     out = PI.check_exits(conn, {"X": 984}, "2026-09-28 10:05")               # -1.6%: stop
     assert len(out) == 1 and not PI.open_trades(conn, PI.HORIZON)
+
+
+def test_candle_points_mirror_for_sells():
+    bull = {"open": 100, "h30": 104, "l30": 99, "c30": 103.5, "vwap30": 101, "orb15": 1,
+            "up1_share": 0.7}
+    assert PI.candle_points(bull, "long") == 5 and PI.candle_points(bull, "short") == 0
+    assert PI.candle_points({"c30": 100}, "long") == 0          # missing data: no points
+
+
+def test_candle_book_trades_ten_a_side_and_cuts_below_entry(setup):
+    conn, model, today = setup
+    prices = dict(zip(today["symbol"], today["c30"]))
+    rules = IntradayRules(n_long=10, n_short=10, breakeven=True)
+    r = PI.run_picks(conn, today, model, prices, today["date"].iloc[0], rules, 10_000,
+                     horizon=PI.CANDLE_HORIZON, candles=True)
+    trades = PI.open_trades(conn, PI.CANDLE_HORIZON)
+    assert r["picks"] and all(t["stop_loss"] == t["entry_price"] for t in trades)
+    t = trades[0]
+    sign = 1 if t["side"] == "long" else -1
+    log = PI.check_exits(conn, {t["symbol"]: t["entry_price"] * (1 - sign * 0.001)}, "09:50",
+                         books=(PI.CANDLE_HORIZON,))
+    assert any("below entry" in x for x in log)

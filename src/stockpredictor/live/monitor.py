@@ -41,9 +41,8 @@ INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.int
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
 MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 18:30 IST)
-# GitHub runs only twice each evening (every day); its own schedules often start hours late,
-# so the Mac starts them on time (the schedules stay as a backup):
-#   18:30 data update -> training follows automatically; 21:00 second training run.
+# GitHub's own schedules start the evening runs (config.MAC_STARTS_GITHUB_RUNS=1: the Mac
+# starts them on time instead): 18:30 data update -> training follows; 21:00 second training.
 GITHUB_RUNS = ((time(18, 30), "update-market-data.yml"), (time(21, 0), "train-models.yml"))
 PRE_MARKET = time(8, 30)          # no background tuning from here until the day's work is done
 TUNE_EVERY_MIN = 60               # market closed: one tuning round on history per hour
@@ -210,6 +209,7 @@ class Monitor:
                 done.append("square-off")
             if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "id_close_squareoff") != day:
                 self.square_off_job(now, PI.CLOSE_HORIZON)
+                self.square_off_job(now, PI.CANDLE_HORIZON)
             if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "fno_squareoff") != day:
                 _set(self.conn, "fno_squareoff", day)
                 self.fno_square_off(now)
@@ -246,7 +246,7 @@ class Monitor:
             self.angel_topup(now)
             self.daily_mac_train(self.ctx())
             done.append("mac-train")
-        if config.CLOUD_TRAINING:                        # every day, weekends included
+        if config.CLOUD_TRAINING and config.MAC_STARTS_GITHUB_RUNS:   # every day
             for at, workflow in GITHUB_RUNS:
                 key = f"gh_run_{at:%H%M}"
                 slot = datetime.combine(now.date(), at)
@@ -374,11 +374,19 @@ class Monitor:
                           f"{now:%Y-%m-%d} paper stop-loss ({'buy' if side == 'long' else 'sell'} "
                           f"book): closed {sym} at {p:.2f}")
 
-        self.fno_prices(stamp)
+        fno_live = self.fno_prices(stamp)
+        from stockpredictor.paper import fno as FO
+
+        for line in FO.check_exits(self.conn, fno_live, stamp):
+            alert(self.conn, "paper-fno", "stop-loss", line.split()[1], f"{stamp} {line}")
+        if _setting(self.conn, "fno_retry_day") == now.strftime("%Y-%m-%d") \
+                and now.time() <= INTRADAY_LATEST:
+            _set(self.conn, "fno_retry_day", "")
+            self.fno_open(now)
 
         # Intraday paper: stop-loss / target exits.
         for line in PI.check_exits(self.conn, prices, stamp):
-            kind = "stop-loss" if "stop-loss" in line else "target"
+            kind = "target" if "target" in line else "stop-loss"
             alert(self.conn, "paper-intraday", kind, line.split()[1], f"{stamp} {line}")
 
         # Real portfolio: alerts only (you place trades yourself on Groww).
@@ -491,6 +499,16 @@ class Monitor:
             log.info("Intraday picks (until close): %s", "skip today (weak signal)"
                      if rc["skipped"] else "; ".join(rc["picks"]) or "none")
             self.fno_open(now, rc)
+            # Candle experiment (own Rs 10,000 book): the same model's 25 best buys and sells,
+            # re-ranked by their 9:15-9:45 one-minute candles, best 10 a side, cut below entry.
+            try:
+                krules, _ = PI.get_rules(self.conn, PI.CANDLE_HORIZON)
+                rk = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
+                                  krules, self.capital_intraday, negative, None,
+                                  horizon=PI.CANDLE_HORIZON, candles=True)
+                log.info("Candle experiment picks: %s", "; ".join(rk["picks"]) or "none")
+            except Exception:
+                log.exception("candle experiment picks failed")
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
@@ -523,10 +541,11 @@ class Monitor:
         try:
             opened = FO.open_books(self.conn, client, picks, spot, now.date(),
                                    now.strftime("%Y-%m-%d %H:%M"), self.capital_intraday)
-        except Exception:
-            log.exception("F&O paper: could not open the books")
+        except Exception as exc:
+            log.warning("F&O paper: could not open the books (%s) - retrying next minute", exc)
+            _set(self.conn, "fno_retry_day", day)
             return []
-        log.info("F&O paper picks: %s", "; ".join(opened) or "none (lots too big for the slot)")
+        log.info("F&O paper picks: %s", "; ".join(opened) or "none (no lot fits the Rs 1 lakh)")
         return opened
 
     def fno_prices(self, stamp: str) -> dict[str, float]:

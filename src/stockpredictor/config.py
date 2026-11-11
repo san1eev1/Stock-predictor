@@ -22,6 +22,9 @@ MAC_TRAINING = os.getenv("MAC_TRAINING", "0" if CLOUD_TRAINING else "1") != "0"
 # All learning runs on GitHub (all history since 2005, twice every evening). MAC_DAILY_TRAINING=1
 # adds one retrain a day on the Mac at 16:00, in its own short-lived process.
 MAC_DAILY_TRAINING = os.getenv("MAC_DAILY_TRAINING", "0") != "0"
+# GitHub starts its own runs on schedule (data 18:37 IST, training after it, 21:07 IST);
+# MAC_STARTS_GITHUB_RUNS=1 makes the Mac start them on time instead.
+MAC_STARTS_GITHUB_RUNS = os.getenv("MAC_STARTS_GITHUB_RUNS", "0") != "0"
 # The live monitor and dashboard keep only this many recent years in memory (predictions
 # need recent data; training loads everything in its own short-lived process). 0 = all.
 LIVE_CONTEXT_YEARS = 0 if MAC_TRAINING else int(os.getenv("LIVE_CONTEXT_YEARS", "3"))
@@ -68,6 +71,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
             pin=os.getenv("ANGEL_PIN", ""),
             totp_secret=os.getenv("ANGEL_TOTP_SECRET", ""),
         ),
-        paper_capital_intraday=float(os.getenv("PAPER_CAPITAL_INTRADAY", "100000")),
-        paper_capital_longterm=float(os.getenv("PAPER_CAPITAL_LONGTERM", "100000")),
+        paper_capital_intraday=float(os.getenv("PAPER_CAPITAL_INTRADAY", "10000")),
+        paper_capital_longterm=float(os.getenv("PAPER_CAPITAL_LONGTERM", "10000")),
     )

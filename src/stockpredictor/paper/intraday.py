@@ -26,8 +26,13 @@ from stockpredictor.paper import engine as E
 
 HORIZON = "intraday"                 # 9:45 -> 12:30 book
 CLOSE_HORIZON = MI.CLOSE.horizon     # 9:45 -> 15:15 book ("until the close")
-BOOKS = (HORIZON, CLOSE_HORIZON)
-N_CANDIDATES = 10        # buy and sell candidates shown and judged each day
+CANDLE_HORIZON = "intraday_candle"   # experiment: model shortlist re-ranked by candles
+BOOKS = (HORIZON, CLOSE_HORIZON, CANDLE_HORIZON)
+LEVERAGE = 5             # intraday (MIS) margin ~20%: Rs 10,000 can hold ~Rs 50,000 of trades
+N_CANDIDATES = 10        # buy and sell picks traded, shown and judged each day
+SHORTLIST = 25           # the model's best 25 buys + 25 sells (50 stocks) are analysed on their
+                         # 9:15-9:45 one-minute candles; the best 10 of each side are traded
+CANDLE_WEIGHT = 0.5      # final order = (1 - w) x model rank in the shortlist + w x candle score
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
 
@@ -51,7 +56,8 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
         stop_loss=float(s.get("id_stop_loss", d.stop_loss)),
         target=float(s.get("id_target", d.target)),
         skip_quantile=float(s.get("id_skip_q", d.skip_quantile)))
-    learned = (learned_rules(horizon) or {}).get("rules")
+    learned = (learned_rules(CLOSE_HORIZON if horizon == CANDLE_HORIZON else horizon)
+               or {}).get("rules")
     if learned and s.get("id_learned_rules", "1") == "1":
         rules = B.IntradayRules(
             n_long=min(rules.n_long, int(learned["n_long"])),
@@ -69,6 +75,12 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
         from dataclasses import replace
 
         rules = replace(rules, skip_quantile=0.0, unusual="off", skip_friday=False)
+    if horizon == CANDLE_HORIZON:
+        # Candle experiment: the best 10 buys and 10 sells of the 50-stock shortlist, each cut
+        # as soon as it slips below its entry price; winners run to 15:15 (or the target).
+        from dataclasses import replace
+
+        rules = replace(rules, n_long=N_CANDIDATES, n_short=N_CANDIDATES, breakeven=True)
     return rules, s.get("id_enabled", "1") == "1"
 
 
@@ -110,11 +122,49 @@ def recent_strengths(model: MI.IntradayModel, store_dir: Path, ctx: E.MarketCont
     return f.groupby("date")["score"].apply(lambda s: B.signal_strength(s, rules)).tail(days)
 
 
+CANDLE_CHECKS = ("30-minute candle closed up", "closed in the top half of its range",
+                 "above VWAP", "broke out of the first 15 minutes' range",
+                 "most 1-minute candles green")
+
+
+def candle_points(row, side: str) -> int:
+    """How many of the 9:15-9:45 candle checks agree with the trade's direction (0-5);
+    for a sell each check is mirrored (closed down, bottom half, below VWAP, ...)."""
+    def num(k):
+        v = row.get(k) if hasattr(row, "get") else None
+        return float(v) if v is not None and pd.notna(v) else None
+
+    o, h, l, c, vw = (num(k) for k in ("open", "h30", "l30", "c30", "vwap30"))
+    orb, green = num("orb15"), num("up1_share")
+    up = 1 if side == "long" else -1
+    checks = [
+        o is not None and c is not None and up * (c - o) > 0,
+        None not in (h, l, c) and h > l and up * ((c - l) / (h - l) - 0.5) > 0,
+        vw is not None and c is not None and up * (c - vw) > 0,
+        orb is not None and up * orb > 0,
+        green is not None and up * (green - 0.5) > 0,
+    ]
+    return int(sum(bool(x) for x in checks))
+
+
+def shortlist_by_candles(short: pd.DataFrame, side: str) -> pd.DataFrame:
+    """`short`: the model's shortlist for one side, best first. Re-ordered by model rank and
+    the morning candles together; adds model_rank, candle and side."""
+    if short.empty:
+        return short.assign(side=side, model_rank=[], candle=[])
+    out = short.assign(side=side, model_rank=range(1, len(short) + 1))
+    out["candle"] = [candle_points(r, side) for _, r in out.iterrows()]
+    model_part = 1 - (out["model_rank"] - 1) / max(1, len(out) - 1)
+    out["final"] = (1 - CANDLE_WEIGHT) * model_part + CANDLE_WEIGHT * out["candle"] / len(CANDLE_CHECKS)
+    return out.sort_values(["final", "model_rank"], ascending=[False, True])
+
+
 def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.IntradayModel,
               prices: dict[str, float], today: pd.Timestamp, rules: B.IntradayRules,
               capital: float, negative_news: set[str] = frozenset(),
               strengths: pd.Series | None = None,
-              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS, horizon: str = HORIZON) -> dict:
+              costs: IntradayCosts = DEFAULT_INTRADAY_COSTS, horizon: str = HORIZON,
+              candles: bool = False) -> dict:
     """Score, pick, save predictions and open paper trades at live prices (in `horizon`'s
     own Rs 1 lakh book)."""
     E.ensure_account(conn, capital, horizon)
@@ -132,11 +182,16 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     # strongest n_long / n_short of them (fewer, larger positions keep costs down).
     ranked = day.sort_values("score", ascending=False)
     n_buy, n_sell = max(N_CANDIDATES, rules.n_long), max(N_CANDIDATES, rules.n_short)
-    longs = ranked[~ranked["symbol"].isin(negative_news)].head(n_buy).assign(side="long")
-    shorts = ranked.tail(n_sell).iloc[::-1].assign(side="short")
-    shorts = shorts[~shorts["symbol"].isin(longs["symbol"])]
-    longs["rank"] = range(1, len(longs) + 1)
-    shorts["rank"] = range(1, len(shorts) + 1)
+    clean = ranked[~ranked["symbol"].isin(negative_news)]
+    if candles:     # 50-stock shortlist re-ranked by the 9:15-9:45 one-minute candles
+        longs = shortlist_by_candles(clean.head(SHORTLIST), "long").head(n_buy)
+        shorts = shortlist_by_candles(ranked.tail(SHORTLIST).iloc[::-1], "short")
+    else:
+        longs = clean.head(n_buy).assign(side="long")
+        shorts = ranked.tail(n_sell).iloc[::-1].assign(side="short")
+    shorts = shorts[~shorts["symbol"].isin(longs["symbol"])].head(n_sell)
+    longs = longs.assign(rank=range(1, len(longs) + 1))
+    shorts = shorts.assign(rank=range(1, len(shorts) + 1))
     picks = pd.concat([longs, shorts])
     pct = day["score"].rank(pct=True)
     picks["confidence"] = pct.loc[picks.index].where(picks["side"] == "long",
@@ -144,15 +199,18 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     reasons = [why if side == "long" else
                [x for x in why if x.startswith("-")] + [x for x in why if x.startswith("+")]
                for why, side in zip(model.explain(picks), picks["side"])]
+    if candles:
+        reasons = [w + [f"model #{int(m)} of {SHORTLIST}, candles {int(c)}/{len(CANDLE_CHECKS)}"]
+                   for w, m, c in zip(reasons, picks["model_rank"], picks["candle"])]
     take = take_probs(day, feats_today, horizon) if rules.min_prob > 0 else {}
-    slot = capital / max(1, rules.n_long + rules.n_short)
+    slot = capital * LEVERAGE / max(1, rules.n_long + rules.n_short)
     sl, tp = B.snap(rules.stop_loss), B.snap(rules.target)
     opened = []
     for (_, p), why in zip(picks.iterrows(), reasons):
         rank = int(p["rank"])
         entry = prices.get(p["symbol"], p["c30"])
         sign = 1 if p["side"] == "long" else -1
-        stop = entry * (1 - sign * sl / 100)
+        stop = entry if rules.breakeven else entry * (1 - sign * sl / 100)
         target = entry * (1 + sign * tp / 100) if tp else None
         conn.execute(
             "INSERT OR REPLACE INTO predictions (horizon, date, symbol, direction, confidence, rank, "
@@ -296,8 +354,10 @@ def check_exits(conn, prices: dict[str, float], stamp: str,
         if p is None:
             continue
         long_ = t["side"] == "long"
-        if (long_ and p <= t["stop_loss"]) or (not long_ and p >= t["stop_loss"]):
-            log.append(close_trade(conn, t, p, "stop-loss", stamp))
+        if (long_ and p < t["stop_loss"]) or (not long_ and p > t["stop_loss"]):
+            at_entry = abs(t["stop_loss"] - t["entry_price"]) < 1e-9
+            log.append(close_trade(conn, t, p, "below entry - cut" if at_entry else "stop-loss",
+                                   stamp))
         elif t["target"] and ((long_ and p >= t["target"]) or (not long_ and p <= t["target"])):
             log.append(close_trade(conn, t, p, "target", stamp))
     # Daily loss limit: close everything left in a book once its day's loss reaches the limit.

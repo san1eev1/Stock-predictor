@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 FUT_BOOK = "fno_futures"
 OPT_BOOK = "fno_options"
 BOOKS = (FUT_BOOK, OPT_BOOK)
-N_EACH_SIDE = 5          # top 5 buy picks and top 5 sell picks
+N_EACH_SIDE = 10         # the "until close" book's 10 buy and 10 sell picks, best first
 MARGIN_RATE = 0.20       # SPAN + exposure margin, roughly, for stock futures
 SKIP_EXPIRY_WITHIN = 2   # days: roll to next month this close to expiry (thin, erratic prices)
 
@@ -185,7 +185,6 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
     items = instruments(today)
     for b in BOOKS:
         _start_day(conn, capital, b)
-    slot = capital / max(1, len(picks))
     plans = []
     for sym, side in picks:
         if sym not in spot:
@@ -198,19 +197,22 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
             plans.append((OPT_BOOK, o, "long"))          # options are always bought
     prices = ltp(client, {c.symbol: c.token for _, c, _ in plans}) if plans else {}
     opened = []
-    free = capital            # futures: one lot's margin is often Rs 50k+, so the best picks
-    for book, c, side in plans:     # take one lot each while the margin fits the Rs 1 lakh
+    if plans and not prices:
+        raise RuntimeError("Angel One returned no F&O prices")
+    # One lot's futures margin is Rs 90k-160k and an option lot's premium Rs 5k-20k, so a
+    # fixed share per pick fits almost nothing: the best picks take one lot each while the
+    # book's Rs 1 lakh lasts (futures: ~1 position, options: ~6-8).
+    free = {FUT_BOOK: capital, OPT_BOOK: capital}
+    for book, c, side in plans:
         p = prices.get(c.symbol)
         if not p:
             continue
+        kind = "FUT" if book == FUT_BOOK else "OPT"
         per_lot = c.lot * p * (MARGIN_RATE if book == FUT_BOOK else 1.0)
-        if book == FUT_BOOK:
-            lots = 1 if per_lot + cost("FUT", "buy", c.lot * p) <= free else 0
-            free -= lots * per_lot
-        else:
-            lots = int(slot // per_lot)
+        lots = 1 if per_lot + cost(kind, "buy", c.lot * p) <= free[book] else 0
         if lots <= 0:
-            continue        # doesn't fit (option: one lot's premium > this pick's share)
+            continue
+        free[book] -= per_lot
         opened.append(f"[{book}] " + _insert(conn, book, c, side, lots, p, stamp,
                                              f"9:45 pick ({c.name} {side})"))
     conn.commit()
@@ -239,6 +241,18 @@ def tokens_for_open(conn) -> dict[str, str]:
     q = ",".join("?" * len(syms))
     return dict(conn.execute(f"SELECT symbol, token FROM fno_contracts WHERE symbol IN ({q})",
                              syms).fetchall())
+
+
+def check_exits(conn, prices: dict[str, float], stamp: str) -> list[str]:
+    """Cut a contract as soon as it trades below its entry price (short future: above)."""
+    out = []
+    for b in BOOKS:
+        for t in open_trades(conn, b):
+            p = prices.get(t["symbol"])
+            if p is not None and (p - t["entry_price"]) * (1 if t["side"] == "long" else -1) < 0:
+                out.append(close_trade(conn, t, p, "below entry - cut", stamp))
+    conn.commit()
+    return out
 
 
 def square_off(conn, prices: dict[str, float], stamp: str) -> list[str]:

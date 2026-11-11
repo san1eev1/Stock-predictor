@@ -41,6 +41,8 @@ class IntradayRules:
     avoid_expiry: bool = False   # ... nor on monthly F&O expiry days (picks still judged);
                                  # off until the profit tuning (trainer.tune_rules) shows
                                  # that avoiding them earns more
+    breakeven: bool = False      # stop at the entry price: a trade that slips below its entry
+                                 # is cut at once (live paper books; stop_loss is then unused)
 
 
 def snap(pct: float) -> float:
