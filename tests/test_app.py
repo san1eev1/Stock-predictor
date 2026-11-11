@@ -13,4 +13,4 @@ def test_app_starts_without_errors(tmp_path, monkeypatch):
     at = AppTest.from_file(str(APP), default_timeout=300)
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Long-term picks"
+    assert any("Today at a glance" in m.value for m in at.markdown)   # Overview is the home page
