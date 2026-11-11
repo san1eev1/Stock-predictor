@@ -347,6 +347,74 @@ def close_trade(conn, t, price: float, reason: str, stamp: str,
     return f"{t['side']} {t['symbol']} closed @ {price:.2f} ({reason}), P&L {gross - t['costs'] - c:+.0f}"
 
 
+# Mid-day review (every intraday book): keep only what is paying, put the money in the best.
+REVIEW_EVERY = 30          # minutes; first review 30 minutes after the 9:45 entry
+SIDEWAYS = 0.003           # a trade that has moved less than this since entry (or lost) is cut:
+                           # it isn't covering its ~0.37% round-trip costs
+STRONG = 0.005             # freed money goes only to winners up at least this much
+TOP_WINNERS = 2            # ... at most the 2 strongest
+MAX_IN_ONE = 0.40          # no stock above 40% of the book's buying power
+
+
+def review(conn, prices: dict[str, float], stamp: str, horizon: str, capital: float,
+           costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> list[str]:
+    """Cut the book's losing and sideways trades (open at least REVIEW_EVERY minutes) and add
+    the freed buying power to its 1-2 strongest winners. Each top-up is its own trade whose
+    stop is its entry price (cut at once if it slips back)."""
+    now = pd.Timestamp(stamp)
+    log, keep = [], []
+    for t in open_trades(conn, horizon):
+        p = prices.get(t["symbol"])
+        if p is None:
+            continue
+        move = (1 if t["side"] == "long" else -1) * (p / t["entry_price"] - 1)
+        age = (now - pd.Timestamp(t["entry_time"])).total_seconds() / 60
+        if age >= REVIEW_EVERY - 1 and move < SIDEWAYS:
+            log.append(close_trade(conn, t, p, "review: losing" if move < 0 else "review: sideways",
+                                   stamp, costs))
+        else:
+            keep.append((move, t, p))
+    power = capital * LEVERAGE
+    held: dict[str, float] = {}
+    for _, t, _ in keep:
+        held[t["symbol"]] = held.get(t["symbol"], 0.0) + t["qty"] * t["entry_price"]
+    free = power - sum(held.values())
+    best = {}
+    for move, t, p in sorted(keep, key=lambda x: -x[0]):
+        if move >= STRONG and t["symbol"] not in best:
+            best[t["symbol"]] = (t, p)
+        if len(best) == TOP_WINNERS:
+            break
+    for sym, (t, p) in best.items():
+        room = min(free / len(best), MAX_IN_ONE * power - held[sym])
+        qty = int(room / p)
+        if qty <= 0:
+            continue
+        sign = 1 if t["side"] == "long" else -1
+        c = costs.cost("buy" if sign > 0 else "sell", qty * p)
+        conn.execute(
+            "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, costs, "
+            "status, reason, stop_loss, target) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+            (horizon, sym, t["side"], qty, stamp, p, c, "added to winner", p, t["target"]))
+        conn.execute("UPDATE paper_accounts SET cash = cash - ? WHERE horizon = ?",
+                     (qty * p + c, horizon))
+        log.append(f"added {t['side']} {sym} {qty} @ {p:.2f} (winner, up "
+                   f"{sign * (p / t['entry_price'] - 1):+.2%})")
+    conn.commit()
+    return log
+
+
+def review_times(horizon: str) -> list[str]:
+    """HH:MM of the book's reviews: every REVIEW_EVERY minutes from 10:15 until 30 minutes
+    before its square-off."""
+    end = I.TRADE_EXIT if horizon == HORIZON else I.CLOSE_EXIT
+    t, out = pd.Timestamp("2000-01-01 09:45"), []
+    last = pd.Timestamp(f"2000-01-01 {end:%H:%M}") - pd.Timedelta(minutes=REVIEW_EVERY)
+    while (t := t + pd.Timedelta(minutes=REVIEW_EVERY)) <= last:
+        out.append(f"{t:%H:%M}")
+    return out
+
+
 DAILY_LOSS_LIMIT = 0.015   # a book that is down 1.5% of its capital today stops for the day
 
 

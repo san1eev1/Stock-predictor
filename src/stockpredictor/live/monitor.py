@@ -393,6 +393,16 @@ class Monitor:
         for line in PI.check_exits(self.conn, prices, stamp):
             kind = "target" if "target" in line else "stop-loss"
             alert(self.conn, "paper-intraday", kind, line.split()[1], f"{stamp} {line}")
+        # Every 30 minutes: cut losing / sideways trades, move the money to the best 1-2 winners.
+        day, hhmm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+        for book in PI.BOOKS:
+            due = [x for x in PI.review_times(book) if x <= hhmm]
+            key = f"review_{book}"
+            if due and _setting(self.conn, key) != f"{day} {due[-1]}":
+                _set(self.conn, key, f"{day} {due[-1]}")
+                for line in PI.review(self.conn, prices, stamp, book, self.capital_intraday):
+                    alert(self.conn, f"paper-{book}", "review", line.split()[1], f"{stamp} {line}")
+                    log.info("Review %s: %s", book, line)
 
         # Real portfolio: alerts only (you place trades yourself on Groww).
         for h in R.HORIZONS:

@@ -191,7 +191,7 @@ def sidebar():
         alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 8").fetchall()
         if not alerts:
             st.caption("No alerts yet.")
-        icons = {"stop-loss": "🛑", "negative-news": "📰", "decision": "🧭", "fill": "✅",
+        icons = {"stop-loss": "🛑", "negative-news": "📰", "decision": "🧭", "fill": "✅", "review": "🔄",
                  "info": "ℹ️"}
         for a in alerts:
             st.caption(f"{icons.get(a['kind'], '•')} {a['message']}")
@@ -530,8 +530,11 @@ def page_paper_intraday():
     st.caption("Every book starts each day with its own ₹10,000 (intraday margin: up to 5× in "
                "positions). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
                "stocks, all judged and learned from) and trades the best 10 of each, with the "
-               "learned stop-loss and target. Book 1 closes at 12:30, book 2 at 15:15; the candle "
-               "experiment re-ranks the same shortlist by its morning candles.")
+               "learned stop-loss and target. Every 30 minutes from 10:15 trades that are losing or "
+               "going sideways (moved < 0.3%) are cut and the money goes to the 1-2 strongest "
+               "winners (up ≥ 0.5%, at most 40% of the book in one stock). Book 1 closes at "
+               "12:30, book 2 at 15:15; the candle experiment re-ranks the same shortlist by its "
+               "morning candles.")
     tab1, tab2, tab5, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)",
                                             "🕯️ Candle experiment", "🏆 Competition",
                                             "🔁 Historical replays"])

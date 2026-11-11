@@ -120,3 +120,34 @@ def test_candle_book_trades_ten_a_side_and_cuts_below_entry(setup):
     log = PI.check_exits(conn, {t["symbol"]: t["entry_price"] * (1 - sign * 0.001)}, "09:50",
                          books=(PI.CANDLE_HORIZON,))
     assert any("below entry" in x for x in log)
+
+
+def test_review_cuts_losers_and_sideways_and_adds_to_best_winner(setup):
+    conn, model, today = setup
+    d = today["date"].iloc[0]
+    prices = dict(zip(today["symbol"], today["c30"]))
+    PI.run_picks(conn, today, model, prices, d, IntradayRules(n_long=3, n_short=3), 10_000)
+    trades = PI.open_trades(conn)
+    moved, want = dict(prices), {}
+    for i, t in enumerate(trades):
+        sign = 1 if t["side"] == "long" else -1
+        step = [0.02, -0.01, 0.001][i % 3]                 # winner, loser, sideways
+        moved[t["symbol"]] = t["entry_price"] * (1 + sign * step)
+        want[t["symbol"]] = step
+    log = PI.review(conn, moved, f"{d:%Y-%m-%d} 10:15", PI.HORIZON, 10_000)
+    left = PI.open_trades(conn)
+    assert all(want[t["symbol"]] == 0.02 for t in left)          # only winners kept
+    assert any("review: losing" in x for x in log) and any("review: sideways" in x for x in log)
+    adds = [t for t in left if t["reason"] == "added to winner"]
+    assert 1 <= len({t["symbol"] for t in adds}) <= PI.TOP_WINNERS
+    assert all(t["stop_loss"] == t["entry_price"] for t in adds)  # top-up cut if it slips back
+    power = 10_000 * PI.LEVERAGE
+    per_stock = {}
+    for t in left:
+        per_stock[t["symbol"]] = per_stock.get(t["symbol"], 0) + t["qty"] * t["entry_price"]
+    assert max(per_stock.values()) <= PI.MAX_IN_ONE * power + 1
+
+
+def test_review_times():
+    assert PI.review_times(PI.HORIZON) == ["10:15", "10:45", "11:15", "11:45"]
+    assert PI.review_times(PI.CLOSE_HORIZON)[-1] == "14:45"
