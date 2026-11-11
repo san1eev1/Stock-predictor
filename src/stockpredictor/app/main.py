@@ -261,6 +261,130 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
         "% of capital": st.column_config.NumberColumn(format="%+.2f%%")})
 
 
+# --- IPO analysis --------------------------------------------------------------------
+
+@st.cache_data(ttl=900, show_spinner="Getting IPOs from NSE…")
+def _ipos_now(day: str) -> tuple[pd.DataFrame, str]:
+    from stockpredictor.data import ipo as IPO
+
+    try:
+        s = IPO.session()
+        issues = IPO.open_issues(s)
+        subs = []
+        for sym in issues["symbol"]:
+            try:
+                subs.append(IPO.subscription(s, sym))
+            except Exception:
+                pass
+        sub = pd.DataFrame(subs, columns=IPO.SUB_COLS)
+        return issues.merge(sub, on="symbol", how="left"), ""
+    except Exception as exc:
+        return pd.DataFrame(), str(exc)
+
+
+def page_ipo():
+    from stockpredictor.config import SHARED_MODELS_DIR
+    from stockpredictor.models import ipo as MIPO
+
+    st.title("IPO analysis")
+    st.caption("Mainboard IPOs open on NSE now or coming up, with a learned view: the chance of "
+               "listing above the issue price, from how past NSE IPOs with similar demand "
+               "(QIB / HNI / retail subscription), size and market mood actually listed. "
+               "Grey-market premium is not used (no reliable source). Refreshes every 15 minutes.")
+    model = MIPO.IPOModel.load(SHARED_MODELS_DIR / "ipo")
+    today = pd.Timestamp(now_ist().date())
+    issues, err = _ipos_now(f"{today:%Y-%m-%d}")
+    if err:
+        st.warning(f"NSE did not answer ({err[:120]}). Try again in a few minutes.")
+    if issues.empty and not err:
+        st.info("No IPO is open or announced on NSE right now.")
+    m = ctx()
+    for r in issues.itertuples():
+        row = pd.Series(r._asdict())
+        with st.container(border=True):
+            a, b = st.columns([3, 2])
+            a.markdown(f"### {row['company'] or row['symbol']}")
+            a.caption(f"{row['symbol']} · {row['segment']} · price band ₹{row['price_low']:g}–"
+                      f"{row['price_high']:g} · bidding {row['start']:%d %b} – {row['end']:%d %b}"
+                      if pd.notna(row['start']) else f"{row['symbol']} · {row['segment']}")
+            k = b.columns(4)
+            for col, (name, key) in zip(k, (("QIB", "qib_x"), ("HNI", "nii_x"),
+                                            ("Retail", "rii_x"), ("Total", "total_x"))):
+                v = row.get(key)
+                col.metric(name, f"{v:.1f}×" if pd.notna(v) else "—")
+            if row["segment"] != "mainboard":
+                st.caption("SME issue: not scored (thin trading after listing, no usable history).")
+                continue
+            if model is None:
+                st.caption("The IPO model trains in tonight's GitHub run.")
+                continue
+            if pd.notna(row["start"]) and row["start"] > today:
+                st.info("Not open for bidding yet.")
+                continue
+            x = MIPO.add_inputs(pd.DataFrame([row]).assign(issue_price=None),
+                                m.indices if m is not None else pd.DataFrame(columns=["symbol", "date", "close"]))
+            x["recent_listings"] = model.info.get("recent_listings_now")
+            label, p, why = MIPO.verdict(model, x.iloc[0], closes_today=row["end"] == today,
+                                         still_open=row["end"] >= today)
+            show = {"Apply": st.success, "Avoid": st.error, "Neutral": st.warning,
+                    "Wait": st.info}[label]
+            show(f"**{label}** — chance of listing above the issue price: **{p:.0%}**")
+            for w in why:
+                st.markdown(f"- {w}")
+
+    if model is not None:
+        info = model.info
+        st.subheader("How reliable is this?")
+        wf = info.get("walk_forward") or {}
+        if wf:
+            c = st.columns(3)
+            c[0].metric("All IPOs (tested year by year)", f"{wf['all_listed_up']:.0%} listed up",
+                        f"median {wf['all_median_gain']:+.0%}", delta_color="off")
+            if wf.get("apply_n"):
+                c[1].metric(f"'Apply' calls ({wf['apply_n']})", f"{wf['apply_listed_up']:.0%} listed up",
+                            f"median {wf['apply_median_gain']:+.0%}", delta_color="off")
+            if wf.get("avoid_n"):
+                c[2].metric(f"'Avoid' calls ({wf['avoid_n']})", f"{wf['avoid_listed_up']:.0%} listed up",
+                            f"median {wf['avoid_median_gain']:+.0%}", delta_color="off")
+            st.caption(f"Each year's IPOs were judged by a model trained only on earlier years "
+                       f"({info['ipos']} mainboard IPOs since {info['since'][:4]}).")
+        qb = pd.DataFrame(info.get("qib_buckets", []))
+        if not qb.empty:
+            qb["QIB demand"] = [f"{lo:g}–{'∞' if hi > 1e9 else f'{hi:g}'}×" for lo, hi in zip(qb["lo"], qb["hi"])]
+            st.dataframe(qb[["QIB demand", "n", "listed_up", "median_gain"]].rename(columns={
+                "n": "IPOs", "listed_up": "Listed up", "median_gain": "Median listing-day gain"}),
+                hide_index=True, width="stretch", column_config={
+                    "Listed up": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+                    "Median listing-day gain": st.column_config.NumberColumn(format="percent")})
+        rec = pd.DataFrame(info.get("recent", []))
+        if not rec.empty:
+            st.subheader("Recent listings")
+            st.dataframe(rec.iloc[::-1], hide_index=True, width="stretch", column_config={
+                "gain_open": st.column_config.NumberColumn("Listing open", format="percent"),
+                "gain_close": st.column_config.NumberColumn("Listing-day close", format="percent")})
+
+    with st.expander("Before you apply — what to check"):
+        st.markdown("""
+- **Red herring prospectus (RHP)** on SEBI/NSE: business, risks, litigation, related-party deals.
+- **Fresh issue vs offer for sale**: money going into the company, or existing holders selling?
+- **Valuation vs listed peers**: P/E, price-to-book, margins and growth at the upper price band.
+- **Anchor investors**: who bought the day before opening, and their lock-in period.
+- **Promoter holding after the issue** and any pledged shares.
+- **Final-day QIB demand**: institutions bid last; it is the strongest single signal here.
+- **Allotment odds**: heavy retail oversubscription means a small chance of getting a lot.
+- **Market mood** on listing day: IPOs list worse in falling markets.
+""")
+    with st.expander("Learn more"):
+        st.markdown("""
+- SEBI — *Issue of Capital and Disclosure Requirements (ICDR) Regulations, 2018*: the IPO rulebook.
+- NSE — IPO pages (current issues, bid details by category, past issues).
+- Jay R. Ritter (University of Florida) — IPO data and research pages.
+- Ritter & Welch (2002), *A Review of IPO Activity, Pricing, and Allocations*, Journal of Finance.
+- Loughran & Ritter (2002), *Why Don't Issuers Get Upset About Leaving Money on the Table in IPOs?*,
+  Review of Financial Studies.
+""")
+
+
 # --- Pages -------------------------------------------------------------------------
 
 def page_picks():
@@ -1461,6 +1585,7 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
          st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
          st.Page(page_paper_fno, title="Paper trading — F&O", icon="🧪"),
+         st.Page(page_ipo, title="IPO analysis", icon="🆕"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),
          st.Page(page_model, title="Model", icon="🧠"),

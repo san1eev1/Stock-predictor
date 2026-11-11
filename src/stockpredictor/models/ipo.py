@@ -143,6 +143,11 @@ def train_and_report(d: pd.DataFrame) -> tuple["IPOModel", dict]:
     info = {"ipos": int(d["gain_close"].notna().sum()), "since": f"{d['listing_date'].min():%Y-%m-%d}",
             "base_rate": float((d["gain_close"].dropna() > WIN).mean()),
             "qib_buckets": buckets(d)}
+    done = d.dropna(subset=["gain_close"]).sort_values("listing_date")
+    info["recent_listings_now"] = float(done["gain_close"].tail(10).median())
+    keep = [c for c in ("symbol", "company", "listing_date", "issue_price", "qib_x", "total_x",
+                        "gain_open", "gain_close") if c in done]
+    info["recent"] = json.loads(done[keep].tail(15).to_json(orient="records", date_format="iso"))
     if not wf.empty:
         app, avoid = wf[wf["prob"] >= APPLY_AT], wf[wf["prob"] < AVOID_AT]
         info["walk_forward"] = {
