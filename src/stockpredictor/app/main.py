@@ -1579,17 +1579,25 @@ def page_settings():
     st.write(f"Angel One keys: {'✅ set' if SETTINGS.angel.is_complete else '— not set (Yahoo used for live prices)'}")
 
 
-pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
-         st.Page(page_intraday_1230, title="Intraday — until 12:30", icon="⚡"),
-         st.Page(page_intraday_close, title="Intraday — until close", icon="🔔"),
-         st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
-         st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
-         st.Page(page_paper_fno, title="Paper trading — F&O", icon="🧪"),
-         st.Page(page_ipo, title="IPO analysis", icon="🆕"),
-         st.Page(page_portfolio, title="My portfolio", icon="💼"),
-         st.Page(page_accuracy, title="Accuracy", icon="🎯"),
-         st.Page(page_model, title="Model", icon="🧠"),
-         st.Page(page_settings, title="Settings", icon="⚙️")]
+pages = {
+    "Today's picks": [
+        st.Page(page_picks, title="Long-term picks", icon="📈", default=True),
+        st.Page(page_intraday_1230, title="Intraday — until 12:30", icon="⚡"),
+        st.Page(page_intraday_close, title="Intraday — until close", icon="🔔")],
+    "Paper trading (₹10,000 books)": [
+        st.Page(page_paper_intraday, title="Intraday + candle experiment", icon="🕯️"),
+        st.Page(page_paper_fno, title="F&O", icon="📊"),
+        st.Page(page_paper_longterm, title="Long-term", icon="🌱")],
+    "Research": [
+        st.Page(page_ipo, title="IPO analysis", icon="🆕"),
+        st.Page(page_accuracy, title="Accuracy", icon="🎯"),
+        st.Page(page_model, title="Model", icon="🧠")],
+    "You": [
+        st.Page(page_portfolio, title="My portfolio", icon="💼"),
+        st.Page(page_settings, title="Settings", icon="⚙️")],
+}
+st.markdown("<style>.block-container{padding-top:2rem;padding-bottom:2rem}"
+            "[data-testid='stMetricValue']{font-size:1.6rem}</style>", unsafe_allow_html=True)
 sidebar()
 health_banner()
 def angel_status() -> None:
