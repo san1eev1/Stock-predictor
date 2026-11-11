@@ -71,6 +71,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
             pin=os.getenv("ANGEL_PIN", ""),
             totp_secret=os.getenv("ANGEL_TOTP_SECRET", ""),
         ),
-        paper_capital_intraday=float(os.getenv("PAPER_CAPITAL_INTRADAY", "10000")),
-        paper_capital_longterm=float(os.getenv("PAPER_CAPITAL_LONGTERM", "10000")),
+        paper_capital_intraday=float(os.getenv("PAPER_CAPITAL", "10000")),   # old PAPER_CAPITAL_* ignored
+        paper_capital_longterm=float(os.getenv("PAPER_CAPITAL", "10000")),
     )
