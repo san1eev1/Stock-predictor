@@ -26,17 +26,52 @@ base_sharpe = base_model.metrics.get("sharpe", 0)
 
 print(f"Baseline (current 5-min): {len(labeled_daily):,} weeks, Sharpe {base_sharpe:.2f}", flush=True)
 
-# Try to load 1-minute bars for aggregation tests
+# Try Angel One 1-min candles first (real live NSE data); fallback to local storage
+print("Attempting Angel One 1-min candles (prefer real live NSE data)...", flush=True)
+has_bars = False
+bars_1min = None
 try:
-    import sqlite3
-    conn = sqlite3.connect(d / "stockpredictor.db")
-    bars_1min = pd.read_sql(
-        "SELECT symbol, ts, open, high, low, close, volume FROM intraday_bars ORDER BY ts",
-        conn, parse_dates=["ts"])
-    conn.close()
-    has_bars = not bars_1min.empty
-except Exception:
-    has_bars = False
+    from stockpredictor.data import angelone, intraday as I
+    from datetime import date, timedelta
+
+    client = angelone.Client()
+    end = date.today()
+    start = end - timedelta(days=14)  # 2 weeks of 1-min data
+
+    symbols = list(daily["symbol"].unique())[:30]  # test on top 30
+    bars = []
+    for sym in symbols[:5]:  # test on 5 stocks first
+        try:
+            token = angelone.NIFTY_200.get(sym)
+            if token:
+                b = I.angel_bars(client, token, start, end, interval="ONE_MINUTE")
+                if not b.empty:
+                    b["symbol"] = sym
+                    bars.append(b)
+        except Exception:
+            pass
+
+    if bars:
+        bars_1min = pd.concat(bars)
+        has_bars = True
+        print(f"✓ Loaded {len(bars_1min):,} Angel One 1-min bars ({len(set(bars_1min['symbol']))} stocks)", flush=True)
+except Exception as e:
+    print(f"  Angel One unavailable: {type(e).__name__}", flush=True)
+
+# Fallback: use local intraday bars (if they exist)
+if not has_bars:
+    try:
+        import sqlite3
+        conn = sqlite3.connect(d / "stockpredictor.db")
+        bars_1min = pd.read_sql(
+            "SELECT symbol, ts, open, high, low, close, volume FROM intraday_bars ORDER BY ts",
+            conn, parse_dates=["ts"])
+        conn.close()
+        has_bars = not bars_1min.empty
+        if has_bars:
+            print(f"✓ Loaded {len(bars_1min):,} local 1-min bars ({len(set(bars_1min['symbol']))} stocks)", flush=True)
+    except Exception:
+        pass
 
 if has_bars:
     print(f"Loaded {len(bars_1min):,} 1-min bars; testing frequencies...", flush=True)
