@@ -404,6 +404,14 @@ def review(conn, prices: dict[str, float], stamp: str, horizon: str, capital: fl
     return log
 
 
+def review_books(conn) -> tuple[str, ...]:
+    """Books that get the mid-day review. E-008 (59 days, same picks): review -₹753/day vs
+    hold -₹200/day, worse on 98% of days (t = -11.3), so only the candle experiment keeps it
+    unless the 'review in all books' switch (app setting id_review_all) is on."""
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'id_review_all'").fetchone()
+    return BOOKS if row and row[0] == "1" else (CANDLE_HORIZON,)
+
+
 def review_times(horizon: str) -> list[str]:
     """HH:MM of the book's reviews: every REVIEW_EVERY minutes from 10:15 until 30 minutes
     before its square-off."""

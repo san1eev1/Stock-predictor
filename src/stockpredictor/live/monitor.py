@@ -395,7 +395,7 @@ class Monitor:
             alert(self.conn, "paper-intraday", kind, line.split()[1], f"{stamp} {line}")
         # Every 30 minutes: cut losing / sideways trades, move the money to the best 1-2 winners.
         day, hhmm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
-        for book in PI.BOOKS:
+        for book in PI.review_books(self.conn):
             due = [x for x in PI.review_times(book) if x <= hhmm]
             key = f"review_{book}"
             if due and _setting(self.conn, key) != f"{day} {due[-1]}":

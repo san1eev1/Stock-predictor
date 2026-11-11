@@ -95,7 +95,13 @@ books). Compare with the main 'until close' book after ≥ 20 trading days (pair
 t ≥ 2) before adopting anything. Expected risk: cutting at entry turns many trades into small
 cost-sized losses (0.37% round trip).
 
-## E-008 Mid-day review vs holding (2026-11-11) — running
+## E-008 Mid-day review vs holding (2026-11-11) — **SWITCHED OFF** in the main books (run 42976081256)
+59 days, same out-of-sample picks (10+10, ₹10k ×5 margin, real costs): hold −₹200/day (total
+−₹11,826), review −₹753/day (total −₹44,426); review worse on 98% of days, paired t = −11.31.
+Morning winners mostly reverse; every cut and top-up pays costs again. Kept only in the candle
+experiment book; a toggle on the intraday page turns it back on for all books.
+Also visible: holding 20 trades/day loses ~₹200/day, about the cost of 20 trades (0.37% of
+₹50k exposure ≈ ₹185): the intraday model's edge does not cover costs at this trade count.
 User rule (live in every intraday book from 2026-11-12): every 30 min from 10:15 cut trades that
 lost or moved < 0.3%, add freed buying power to the 1–2 winners up ≥ 0.5% (≤ 40% in one stock,
 top-ups stopped at their own entry). Test: `scripts/research_review.py` — same out-of-sample

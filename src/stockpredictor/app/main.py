@@ -530,11 +530,19 @@ def page_paper_intraday():
     st.caption("Every book starts each day with its own ₹10,000 (intraday margin: up to 5× in "
                "positions). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
                "stocks, all judged and learned from) and trades the best 10 of each, with the "
-               "learned stop-loss and target. Every 30 minutes from 10:15 trades that are losing or "
-               "going sideways (moved < 0.3%) are cut and the money goes to the 1-2 strongest "
-               "winners (up ≥ 0.5%, at most 40% of the book in one stock). Book 1 closes at "
-               "12:30, book 2 at 15:15; the candle experiment re-ranks the same shortlist by its "
-               "morning candles.")
+               "learned stop-loss and target. Book 1 closes at 12:30, book 2 at 15:15; the candle "
+               "experiment re-ranks the same shortlist by its morning candles.")
+    c = conn()
+    on = PI.review_books(c) == PI.BOOKS
+    flip = st.toggle("Mid-day review in all books (cut losing/sideways trades every 30 min, add "
+                     "to the 1-2 best winners)", on,
+                     help="Tested on 59 days with the same picks (E-008): holding lost ₹200/day, "
+                          "the review ₹753/day, worse on 98% of days. Off = only the candle "
+                          "experiment uses it.")
+    if flip != on:
+        c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('id_review_all', ?)",
+                  ("1" if flip else "0",))
+        c.commit()
     tab1, tab2, tab5, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)",
                                             "🕯️ Candle experiment", "🏆 Competition",
                                             "🔁 Historical replays"])
