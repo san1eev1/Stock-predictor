@@ -1637,20 +1637,20 @@ def page_settings():
 pages = {
     "Home": [st.Page(page_overview, title="Overview", icon="🏠", default=True)],
     "Today's picks": [
-        st.Page(page_picks, title="Long-term picks", icon="📈"),
-        st.Page(page_intraday_1230, title="Intraday — until 12:30", icon="⚡"),
-        st.Page(page_intraday_close, title="Intraday — until close", icon="🔔")],
+        st.Page(page_picks, url_path="longterm_picks", title="Long-term picks", icon="📈"),
+        st.Page(page_intraday_1230, url_path="intraday_1230", title="Intraday — until 12:30", icon="⚡"),
+        st.Page(page_intraday_close, url_path="intraday_close", title="Intraday — until close", icon="🔔")],
     "Paper trading (₹10,000 books)": [
-        st.Page(page_paper_intraday, title="Intraday + candle experiment", icon="🕯️"),
-        st.Page(page_paper_fno, title="F&O", icon="📊"),
-        st.Page(page_paper_longterm, title="Long-term", icon="🌱")],
+        st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday + candle experiment", icon="🕯️"),
+        st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon="📊"),
+        st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term", icon="🌱")],
     "Research": [
-        st.Page(page_ipo, title="IPO analysis", icon="🆕"),
-        st.Page(page_accuracy, title="Accuracy", icon="🎯"),
-        st.Page(page_model, title="Model", icon="🧠")],
+        st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon="🆕"),
+        st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon="🎯"),
+        st.Page(page_model, url_path="model", title="Model", icon="🧠")],
     "You": [
-        st.Page(page_portfolio, title="My portfolio", icon="💼"),
-        st.Page(page_settings, title="Settings", icon="⚙️")],
+        st.Page(page_portfolio, url_path="portfolio", title="My portfolio", icon="💼"),
+        st.Page(page_settings, url_path="settings", title="Settings", icon="⚙️")],
 }
 UI.setup()
 sidebar()

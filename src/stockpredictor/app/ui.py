@@ -70,7 +70,7 @@ h2, h3 {{ font-weight: 600; letter-spacing: -.01em; }}
 </style>""", unsafe_allow_html=True)
 
 
-def ring(fill: float, color: str, size: int = 64, text: str = "") -> str:
+def ring(fill: float, color: str, size: int = 76, text: str = "") -> str:
     """Circular gauge: `fill` 0..1 of the circle in `color`, `text` in the middle."""
     r, sw = size / 2 - 6, 7
     c = 2 * math.pi * r
@@ -82,7 +82,7 @@ def ring(fill: float, color: str, size: int = 64, text: str = "") -> str:
             f' stroke-linecap="round" stroke-dasharray="{c * f:.1f} {c:.1f}"'
             f' transform="rotate(-90 {size/2} {size/2})"/>'
             f'<text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle" '
-            f'font-size="{size/5:.0f}" font-weight="700" fill="{color}">{html.escape(text)}</text></svg>')
+            f'font-size="{size/6:.0f}" font-weight="700" fill="{color}">{html.escape(text)}</text></svg>')
 
 
 def card(label: str, value: str, sub: str = "", fill: float = 0.0, tone: str = "neutral",
