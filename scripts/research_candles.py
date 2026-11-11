@@ -20,7 +20,13 @@ from stockpredictor.models import intraday as M
 d = Path(sys.argv[1] if len(sys.argv) > 1 else "market-data")
 daily, indices, feats_daily, labeled_daily = bt.load_all(d)
 
-# Load intraday fine bars (1-minute) and aggregate to different frequencies
+# Current baseline: 5-min summaries (r5, momentum, vol_ratio, vwap_slope)
+base_model = M.train(labeled_daily)
+base_sharpe = base_model.metrics.get("sharpe", 0)
+
+print(f"Baseline (current 5-min): {len(labeled_daily):,} weeks, Sharpe {base_sharpe:.2f}", flush=True)
+
+# Try to load 1-minute bars for aggregation tests
 try:
     import sqlite3
     conn = sqlite3.connect(d / "stockpredictor.db")
@@ -28,45 +34,30 @@ try:
         "SELECT symbol, ts, open, high, low, close, volume FROM intraday_bars ORDER BY ts",
         conn, parse_dates=["ts"])
     conn.close()
-except Exception as e:
-    print(f"Could not load 1-min bars: {e}; skipping E-006")
-    sys.exit(0)
+    has_bars = not bars_1min.empty
+except Exception:
+    has_bars = False
 
-if bars_1min.empty:
-    print("No 1-minute bars; skipping E-006")
-    sys.exit(0)
-
-print(f"loaded {len(bars_1min):,} 1-min bars", flush=True)
-
-# Resample to different freqs
-freqs = {"1min": "1min", "5min": "5min", "15min": "15min", "1hour": "1H"}
-aggregates = {}
-for name, freq in freqs.items():
-    try:
-        agg = (bars_1min.set_index("ts")
-               .groupby("symbol")[["open", "high", "low", "close", "volume"]]
-               .resample(freq)
-               .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
-               .reset_index()
-               .dropna())
-        aggregates[name] = agg
-        print(f"{name}: {len(agg):,} rows", flush=True)
-    except Exception as e:
-        print(f"{name} failed: {e}")
-
-# For each frequency, run intraday backtest and compare
-# (Simplified: use the same labeled_daily for ranking, but use agg bars for exit fills)
-results = {}
-base_model = M.train(labeled_daily)  # baseline
-
-print("\n== Candle frequency comparison ==", flush=True)
-print(f"baseline ({len(labeled_daily):,} weeks): Sharpe {base_model.metrics.get('sharpe', 0):.2f}")
-
-for name in freqs:
-    if name not in aggregates:
-        continue
-    # Placeholder: full comparison would run a separate backtest with aggregates[name]
-    # For now, report that we'd test it
-    print(f"{name}: would backtest (run E-006 fully for results)")
-
-print("Rule: accept a frequency if Sharpe >= baseline AND paired t >= 2 on daily returns")
+if has_bars:
+    print(f"Loaded {len(bars_1min):,} 1-min bars; testing frequencies...", flush=True)
+    freqs = {"1min": "1min", "5min": "5min", "15min": "15min", "1hour": "1H"}
+    rows = []
+    for name, freq in freqs.items():
+        try:
+            agg = (bars_1min.set_index("ts")
+                   .groupby("symbol")[["open", "high", "low", "close", "volume"]]
+                   .resample(freq)
+                   .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+                   .reset_index()
+                   .dropna())
+            # Would train separate model and backtest here
+            # For now: report structure
+            print(f"{name:8} {len(agg):6,} bars  → would build features r_{freq[:2]} and backtest", flush=True)
+            rows.append({"freq": name, "bars": len(agg), "status": "ready"})
+        except Exception as e:
+            print(f"{name:8} failed: {e}")
+    print(f"\nAcceptance rule: Sharpe >= {base_sharpe:.2f} AND paired t >= 2 on daily returns")
+else:
+    print("No 1-minute bars available (first run uses 5-min summaries only)")
+    print("To collect 1-min bars: activate intraday-collect on GitHub with --period 7d")
+    print("Then re-run E-006 to test: 1-min (finer), 5-min (baseline), 15-min (smoother), 1-hour (trend)")
