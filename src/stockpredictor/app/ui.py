@@ -47,7 +47,9 @@ def setup() -> None:
     shadow = "0 8px 24px rgba(0,0,0,.35)" if d else "0 6px 18px rgba(15,23,42,.08)"
     st.markdown(f"""<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body, [class*="st-"], .stMarkdown {{ font-family: 'Inter', sans-serif; }}
+html, body, p, li, label, h1, h2, h3, h4, input, textarea, button, [data-testid="stMetric"] *,
+[data-testid="stMarkdownContainer"] {{ font-family: 'Inter', sans-serif; }}
+[data-testid="stIconMaterial"], .material-symbols-rounded {{ font-family: 'Material Symbols Rounded' !important; }}
 .block-container {{ padding-top: 1.6rem; padding-bottom: 2rem; max-width: 1400px; }}
 h1 {{ font-weight: 700; letter-spacing: -.02em; }}
 h2, h3 {{ font-weight: 600; letter-spacing: -.01em; }}
