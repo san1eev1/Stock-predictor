@@ -398,7 +398,7 @@ def review(conn, prices: dict[str, float], stamp: str, horizon: str, capital: fl
             (horizon, sym, t["side"], qty, stamp, p, c, "added to winner", p, t["target"]))
         conn.execute("UPDATE paper_accounts SET cash = cash - ? WHERE horizon = ?",
                      (qty * p + c, horizon))
-        log.append(f"added {t['side']} {sym} {qty} @ {p:.2f} (winner, up "
+        log.append(f"{t['side']} {sym} added {qty} @ {p:.2f} (winner, up "
                    f"{sign * (p / t['entry_price'] - 1):+.2%})")
     conn.commit()
     return log
