@@ -1464,4 +1464,25 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_settings, title="Settings", icon="⚙️")]
 sidebar()
 health_banner()
+def angel_status() -> None:
+    """Red banner when, during market hours, live prices are not coming from Angel One."""
+    from stockpredictor.live.prices import in_market_hours
+
+    try:
+        c = conn()
+        src, stamp = (c.execute("SELECT source, MAX(ts) FROM live_prices").fetchone()
+                      or (None, None))
+    except Exception:
+        return
+    now = now_ist()
+    if not in_market_hours(now):
+        return
+    stale = not stamp or (datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+                          < now.replace(tzinfo=None) - timedelta(minutes=5))
+    if stale or src != "angelone":
+        st.sidebar.error(f"Angel One not connected: live prices {'stopped' if stale else 'from ' + str(src)}"
+                         f" (last {stamp or 'never'}). Check the Mac's internet / DNS.")
+
+
+angel_status()
 st.navigation(pages).run()

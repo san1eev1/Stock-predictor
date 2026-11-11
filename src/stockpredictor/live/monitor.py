@@ -202,6 +202,11 @@ class Monitor:
                     and _setting(self.conn, "id_last_picks") != day:
                 self.intraday_picks_job(now)
                 done.append("intraday-picks")
+            if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
+                    and _setting(self.conn, "id_last_picks") == day \
+                    and _setting(self.conn, "candle_day") != day:
+                self.candle_picks(now)
+                done.append("candle-picks")
             self.minute_job(now)
             done.append("minute")
             if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
@@ -499,21 +504,40 @@ class Monitor:
             log.info("Intraday picks (until close): %s", "skip today (weak signal)"
                      if rc["skipped"] else "; ".join(rc["picks"]) or "none")
             self.fno_open(now, rc)
-            # Candle experiment (own Rs 10,000 book): the same model's 25 best buys and sells,
-            # re-ranked by their 9:15-9:45 one-minute candles, best 10 a side, cut below entry.
-            try:
-                krules, _ = PI.get_rules(self.conn, PI.CANDLE_HORIZON)
-                rk = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
-                                  krules, self.capital_intraday, negative, None,
-                                  horizon=PI.CANDLE_HORIZON, candles=True)
-                log.info("Candle experiment picks: %s", "; ".join(rk["picks"]) or "none")
-            except Exception:
-                log.exception("candle experiment picks failed")
+            self.candle_picks(now, feats, prices, negative)
         late = now.time() > time(10, 15)
         msg = "skip today (weak signal)" if r["skipped"] else "; ".join(r["picks"])
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
+
+    def candle_picks(self, now: datetime, feats: pd.DataFrame | None = None,
+                     prices: dict | None = None, negative: set | None = None) -> None:
+        """Candle experiment (its own book): the 'until close' model's 25 best buys and sells,
+        re-ranked by their 9:15-9:45 one-minute candles, best 10 a side, cut below entry.
+        Once a day; when it missed 9:46 it starts at the current prices (until 14:30)."""
+        day = f"{now:%Y-%m-%d}"
+        _set(self.conn, "candle_day", day)
+        close_model, model = self.close_model(), self.intraday_model()
+        if close_model is None or model is None:
+            return
+        try:
+            ctx = self.ctx()
+            if feats is None:
+                f30 = intraday_bars.first30(self.prices, store.tradable(ctx.universe), now.date())
+                feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
+                prices = self.prices.get(sorted(feats["symbol"]))
+                summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
+                negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
+            view = MI.Blended(close_model, model, MI.current_params(MI.CLOSE).get("peer_weight") or 0)
+            krules, _ = PI.get_rules(self.conn, PI.CANDLE_HORIZON)
+            r = PI.run_picks(self.conn, feats, view, prices, pd.Timestamp(now.date()), krules,
+                             self.capital_intraday, negative or set(), None,
+                             horizon=PI.CANDLE_HORIZON, candles=True)
+            late = " (late start at " + now.strftime("%H:%M") + " prices)" if now.time() > time(10, 15) else ""
+            log.info("Candle experiment picks%s: %s", late, "; ".join(r["picks"]) or "none")
+        except Exception:
+            log.exception("candle experiment picks failed")
 
     # --- F&O paper books (paper/fno.py) ------------------------------------------------
     def _nfo_client(self):
