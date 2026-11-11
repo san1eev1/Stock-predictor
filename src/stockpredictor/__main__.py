@@ -128,6 +128,33 @@ def cmd_earnings_update(settings, args) -> None:
     print(f"Results dates: {n} announcements stored")
 
 
+def cmd_ipo_update(settings, args) -> None:
+    """NSE IPO list and final subscription by category -> ipo/ in the git store."""
+    from stockpredictor.data import ipo
+
+    print(f"IPOs: {ipo.update(Path(args.dir), backfill=600)}")
+
+
+def cmd_train_ipo(settings, args) -> None:
+    """Learn from past mainboard IPOs' listings (needs the bhavcopy) -> trained-models/ipo."""
+    from stockpredictor import store
+    from stockpredictor.config import SHARED_MODELS_DIR
+    from stockpredictor.data import bhav
+    from stockpredictor.data import ipo as IPO
+    from stockpredictor.models import ipo as MIPO
+
+    d = Path(args.dir)
+    data = MIPO.dataset(IPO.load_issues(d), IPO.load_subscription(d), bhav.load(d),
+                        store.load_indices(d))
+    if data["gain_close"].notna().sum() < 40:
+        print(f"IPO model: only {data['gain_close'].notna().sum()} listed IPOs with data - not trained")
+        return
+    model, info = MIPO.train_and_report(data)
+    model.save(SHARED_MODELS_DIR / "ipo")
+    print(f"IPO model: {info['ipos']} IPOs since {info['since']}, "
+          f"{info['base_rate']:.0%} listed up; walk-forward: {info.get('walk_forward')}")
+
+
 def cmd_fiidii_update(settings, args) -> None:
     """Today's NSE FII/DII cash-market flows -> fiidii.csv in the git store."""
     from stockpredictor.data import fiidii
@@ -1093,6 +1120,8 @@ ARG_COMMANDS = {
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
+    "ipo-update": (cmd_ipo_update, "NSE IPO list and subscription (git store)", _dir_arg),
+    "train-ipo": (cmd_train_ipo, "Learn from past IPO listings", _dir_arg),
     "fiidii-update": (cmd_fiidii_update, "Today's NSE FII/DII flows (git store)", _dir_arg),
     "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
     "mac-train": (cmd_mac_train, "The Mac's daily training on all history (own process)",

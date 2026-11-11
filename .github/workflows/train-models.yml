@@ -90,6 +90,10 @@ jobs:
           python -m stockpredictor cloud-train --dir market-data --feedback feedback \
             --minutes "${{ inputs.minutes || '110' }}" ${{ inputs.backtest && '--backtest' || '' }}
 
+      - name: Learn from past IPO listings
+        if: always()
+        run: python -m stockpredictor train-ipo --dir market-data || echo "::warning::IPO model failed"
+
       - name: Save Angel One intraday history
         if: always() && hashFiles('data/intraday_backfill.csv') != ''
         uses: actions/cache/save@v4

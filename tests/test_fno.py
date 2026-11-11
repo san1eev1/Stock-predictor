@@ -78,3 +78,34 @@ def test_fiidii_parse_and_update(tmp_path, monkeypatch):
     monkeypatch.setattr(fiidii, "fetch", lambda: fiidii.parse(js))
     assert fiidii.update(tmp_path) == 2 and fiidii.update(tmp_path) == 0   # no duplicates
     assert set(fiidii.load(tmp_path)["category"]) == {"FII", "DII"}
+
+
+def test_ipo_subscription_parse_and_model():
+    import numpy as np
+    import pandas as pd
+
+    from stockpredictor.data import ipo as IPO
+    from stockpredictor.models import ipo as M
+
+    js = {"dataList": [{"category": "Qualified Institutional Buyers(QIBs)", "noOfTotalMeant": "35.5"},
+                       {"category": "Non Institutional Investors", "noOfTotalMeant": "158.3"},
+                       {"category": "Retail Individual Investors(RIIs)", "noOfTotalMeant": "33.7"},
+                       {"category": "Total", "noOfShareOffered": "1.65E7", "noOfTotalMeant": "60.8"}],
+          "updateTime": "Updated as on 02-Nov-2026 19:00:00"}
+    s = IPO.parse_subscription(js)
+    assert s["qib_x"] == 35.5 and s["rii_x"] == 33.7 and s["shares_offered"] == 1.65e7
+    rng = np.random.default_rng(0)
+    n = 200
+    qib = rng.lognormal(2, 1.5, n)
+    d = pd.DataFrame({"qib_x": qib, "nii_x": qib * 2, "rii_x": qib / 2, "log_size_cr": 6.0,
+                      "nifty_20d": 0.0, "recent_listings": 0.1,
+                      "listing_date": pd.date_range("2015-01-01", periods=n, freq="15D")})
+    for k in ("qib", "nii", "rii"):
+        d[f"log_{k}"] = np.log1p(d[f"{k}_x"])
+    d["gain_close"] = np.where(d["qib_x"] > 10, 0.2, -0.05) + rng.normal(0, 0.02, n)
+    m, info = M.train_and_report(d)
+    hot, cold = d.iloc[d["qib_x"].argmax()], d.iloc[d["qib_x"].argmin()]
+    assert m.prob(hot) > 0.8 > 0.2 > m.prob(cold)
+    label, p, why = M.verdict(m, hot, closes_today=True)
+    assert label == "Apply" and why
+    assert M.verdict(m, hot)[0] == "Wait"                 # still open, not the last day
