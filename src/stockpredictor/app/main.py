@@ -428,6 +428,7 @@ def overview_cards():
               UI.gain_card("All books · last 30 days", month, cap * len(books), scale=0.10)])
     st.subheader("Books today")
     UI.cards(items)
+    E.ensure_account(c, SETTINGS.paper_capital_longterm)
     lt = E.value(c, live)
     if lt.get("capital"):
         st.subheader("Long-term book")
