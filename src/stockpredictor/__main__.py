@@ -707,7 +707,7 @@ def _web_server(port: int = WEB_PORT):
     return subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(page),
                              "--server.headless", "true", "--server.port", str(port),
                              "--browser.gatherUsageStats", "false",
-                             "--client.toolbarMode", "minimal"])
+                             "--client.toolbarMode", "viewer"])
 
 
 def cmd_app(settings) -> None:

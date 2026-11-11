@@ -1621,4 +1621,5 @@ def angel_status() -> None:
 
 
 angel_status()
+st.sidebar.caption("🌓 Light / dark mode: menu ⋮ (top right) → Settings")
 st.navigation(pages).run()

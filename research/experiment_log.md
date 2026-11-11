@@ -73,8 +73,16 @@ does not overcome it.
 `data/fiidii.py`, `fiidii-update` in the evening data workflow → `market-data/fiidii.csv`.
 Test as a market-wide feature once ≥ 1 year has accumulated (≈ Nov 2027).
 
-## E-006 IPO listing-gain model (2026-11-11) — running
-Script: `scripts/research_ipo.py` (research.yml run 42972054312). NSE past-issue list + final
+## E-006 IPO listing-gain model (2026-11-11) — **ACCEPTED** (run 42972054312)
+297 mainboard IPOs with subscription, 238 with listing-day prices (2023-12 .. 2026-11; older
+listings did not match the bhavcopy join — to investigate). Base: 65% listed >1% up, median +9.6%.
+QIB demand buckets: <3×: 26% up (median −5%); 3–10×: 36% (−1%); 10–50×: 57% (+5%);
+50–100×: 86% (+19%); 100×+: 95% (+29%).
+Walk-forward (164 IPOs, each year judged by a model trained on earlier years only):
+'Apply' (p ≥ 0.65) 86 IPOs → 88% listed up, median +23%; 'Avoid' (p < 0.45) 64 → 31%, median −2.6%;
+all → 65%, +6.9%. +24 points over the base rate with 86 calls: passes the fixed rule.
+Coefficients (standardised): QIB 1.12, size 0.34, NII 0.33, retail 0.11, recent listings 0.11,
+Nifty 20d 0.07. Caveat: only ~3 years of listings, mostly a strong IPO market. NSE past-issue list + final
 subscription by QIB/NII/retail for every mainboard IPO, listing-day prices from the bhavcopy;
 logistic regression, walk-forward by year. Rule: 'Apply' calls (p >= 0.65) list up >= 10 points
 more often than all IPOs, over >= 30 out-of-sample calls.
