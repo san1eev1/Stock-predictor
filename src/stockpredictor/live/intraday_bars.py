@@ -10,14 +10,18 @@ from stockpredictor.data import intraday as I
 log = logging.getLogger(__name__)
 
 
-def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
-    """{symbol: {open, h30, l30, c30, v30, vwap30}} using the LivePrices source."""
+def first30(prices_client, symbols: list[str], today: date,
+            angel: bool = True) -> dict[str, dict]:
+    """{symbol: {open, h30, l30, c30, v30, vwap30, fine features}}: Angel One 1-minute bars,
+    Yahoo for what's missing. angel=False: Yahoo 1-minute bars only (keeps Angel One's
+    request limit for the main books)."""
     out: dict[str, dict] = {}
-    try:
-        client = prices_client._angel_client()
-    except Exception as exc:
-        log.warning("Angel One unavailable (%s); using Yahoo", exc)
-        client = None
+    client = None
+    if angel:
+        try:
+            client = prices_client._angel_client()
+        except Exception as exc:
+            log.warning("Angel One unavailable (%s); using Yahoo", exc)
     if client is not None:
         start = datetime(today.year, today.month, today.day, 9, 15)
         end = datetime(today.year, today.month, today.day, 9, 45)
@@ -35,11 +39,14 @@ def first30(prices_client, symbols: list[str], today: date) -> dict[str, dict]:
             _first30_pass(client, prices_client, todo, today, start, end, out)
     missing = [s for s in symbols if s not in out]
     if missing:
-        for s, bars in I.yahoo_bars(missing, period="1d").items():
+        from stockpredictor.data.fine import summarize_fine
+
+        for s, bars in I.yahoo_bars(missing, period="1d", interval="1m").items():
             bars = bars[bars["ts"].dt.date == today]
-            summ = I.summarize_first30(bars)
+            first = bars[bars["ts"].dt.time < I.ENTRY_TIME]
+            summ = I.summarize_first30(first)
             if summ:
-                out[s] = summ
+                out[s] = {**summ, **(summarize_fine(first) or {})}
     return out
 
 

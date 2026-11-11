@@ -407,8 +407,11 @@ def page_paper_intraday():
                "the stocks it expects to rise and short-sells the ones it expects to fall, with "
                "a stop-loss and target. Book 1 closes everything at 12:30, book 2 at 15:15 "
                "(the close). After the close they are compared and both learn.")
-    tab1, tab2, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)", "🏆 Competition",
-                                      "🔁 Historical replays"])
+    tab1, tab2, tab5, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)",
+                                            "🕯️ Candle experiment", "🏆 Competition",
+                                            "🔁 Historical replays"])
+    with tab5:
+        candle_section()
     with tab1:
         accuracy_now_panel(PI.HORIZON)
         paper_intraday(PI.HORIZON)
@@ -421,15 +424,16 @@ def page_paper_intraday():
         replay_history()
 
 
-def page_paper_candles():
-    st.title("Candle experiment (paper, ₹10,000)")
-    st.caption("Separate from the main books, which trade only what the models learned. At 9:46 "
+def candle_section():
+    st.caption("Its own ₹10,000 book, separate from the main books (which trade only what the "
+               "models learned). At 9:46 "
                "the 'until close' model's 25 best buys and 25 best sells (50 stocks) are checked "
-               "on their 9:15-9:45 one-minute candles from Angel One (closed up/down, where it "
+               "on their 9:15-9:45 one-minute candles (closed up/down, where it "
                "closed in its range, vs VWAP, 15-minute breakout, share of green candles). Model "
                "rank and candles count half each; the best 10 buys and 10 sells are traded. A "
                "trade that slips below its entry price is cut at once; winners run to 15:15. If "
-               "it beats the main 'until close' book over several weeks, it can be adopted.")
+               "it beats the main 'until close' book over several weeks, it can be adopted. "
+               "Candle data from Yahoo, so Angel One stays free for the main books.")
     paper_intraday(PI.CANDLE_HORIZON)
 
 
@@ -1457,7 +1461,6 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
          st.Page(page_paper_longterm, title="Paper trading — Long-term", icon="🧪"),
          st.Page(page_paper_intraday, title="Paper trading — Intraday", icon="🧪"),
          st.Page(page_paper_fno, title="Paper trading — F&O", icon="🧪"),
-         st.Page(page_paper_candles, title="Candle experiment", icon="🕯️"),
          st.Page(page_portfolio, title="My portfolio", icon="💼"),
          st.Page(page_accuracy, title="Accuracy", icon="🎯"),
          st.Page(page_model, title="Model", icon="🧠"),

@@ -118,15 +118,16 @@ def _to_ist_naive(ts: pd.Series) -> pd.Series:
 
 # --- Sources ---------------------------------------------------------------------
 
-def yahoo_bars(symbols: list[str], period: str = "60d") -> dict[str, pd.DataFrame]:
-    """5-minute bars from Yahoo Finance (free, ~60 days of history)."""
+def yahoo_bars(symbols: list[str], period: str = "60d",
+               interval: str = "5m") -> dict[str, pd.DataFrame]:
+    """Bars from Yahoo Finance (free; 5-minute ~60 days of history, 1-minute ~7 days)."""
     import yfinance as yf
 
     out = {}
     for i in range(0, len(symbols), 25):
         chunk = symbols[i:i + 25]
         tickers = [f"{s}.NS" for s in chunk]
-        df = yf.download(tickers, period=period, interval="5m", progress=False,
+        df = yf.download(tickers, period=period, interval=interval, progress=False,
                          group_by="ticker", auto_adjust=False, threads=True)
         for s, t in zip(chunk, tickers):
             try:

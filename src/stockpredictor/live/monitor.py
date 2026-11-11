@@ -524,7 +524,8 @@ class Monitor:
         try:
             ctx = self.ctx()
             if feats is None:
-                f30 = intraday_bars.first30(self.prices, store.tradable(ctx.universe), now.date())
+                f30 = intraday_bars.first30(self.prices, store.tradable(ctx.universe), now.date(),
+                                            angel=False)          # Yahoo: Angel One stays free
                 feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
                 prices = self.prices.get(sorted(feats["symbol"]))
                 summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
