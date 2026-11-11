@@ -32,6 +32,7 @@ N_CANDIDATES = 25        # every intraday book: the model's best 25 buys + 25 se
                          # are saved and judged each day (all of them feed the learning) ...
 TRADED_MIN, TRADED_MAX = 3, 5   # ... and only the 3-5 strongest of each side are traded (the
                                 # number the nightly rule tuning chose, kept within 3-5)
+MIN_EFFICIENT_TRADE = 5_000     # ₹: below this the ₹5 minimum brokerage dominates the costs
 SHORTLIST = N_CANDIDATES  # candle book: those 25 + 25 re-ranked by their 9:15-9:45 candles
 CANDLE_WEIGHT = 0.5      # final order = (1 - w) x model rank in the shortlist + w x candle score
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
@@ -47,7 +48,8 @@ def learned_rules(horizon: str = HORIZON) -> dict | None:
         return None
 
 
-def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.IntradayRules, bool]:
+def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON,
+              capital: float | None = None) -> tuple[B.IntradayRules, bool]:
     """Settings page values; the numbers of buys/sells there are the MAXIMUM. Rules learned
     by profit on GitHub (fewer trades, skipping weak days, stop/target) apply within them."""
     s = dict(conn.execute("SELECT key, value FROM app_settings").fetchall())
@@ -71,15 +73,20 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
             skip_friday=bool(learned.get("skip_friday", False)),
             avoid_results=bool(learned.get("avoid_results", False)),
             avoid_expiry=bool(learned.get("avoid_expiry", False)))
-    if s.get("id_every_day", "1") == "1":
+    if s.get("id_every_day", "0") == "1":
         # Trade every day (no day is skipped): each day's paper result feeds the learning.
         from dataclasses import replace
 
         rules = replace(rules, skip_quantile=0.0, unusual="off", skip_friday=False)
     from dataclasses import replace
 
-    rules = replace(rules, n_long=min(max(rules.n_long, TRADED_MIN), TRADED_MAX),
-                    n_short=min(max(rules.n_short, TRADED_MIN), TRADED_MAX))
+    # Brokerage has a ₹5 minimum per order: below ~₹5,000 a trade, every extra position adds
+    # cost (₹10,000 / 10 trades = 1.32% round trip each, / 6 trades = 0.84%). So as many trades
+    # as the capital carries at ≥ ₹5,000 each, kept within 3-5 a side and the tuning's number.
+    carry = int(capital // (2 * MIN_EFFICIENT_TRADE)) if capital else TRADED_MAX
+    rules = replace(rules,
+                    n_long=min(max(min(rules.n_long, carry), TRADED_MIN), TRADED_MAX),
+                    n_short=min(max(min(rules.n_short, carry), TRADED_MIN), TRADED_MAX))
     if horizon == CANDLE_HORIZON:
         # Candle experiment: each trade is cut as soon as it slips below its entry price;
         # winners run to 15:15 (or the target).
@@ -167,7 +174,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
               capital: float, negative_news: set[str] = frozenset(),
               strengths: pd.Series | None = None,
               costs: IntradayCosts = DEFAULT_INTRADAY_COSTS, horizon: str = HORIZON,
-              candles: bool = False) -> dict:
+              candles: bool = False, at: str = "09:45") -> dict:
     """Score, pick, save predictions and open paper trades at live prices (in `horizon`'s
     own Rs 1 lakh book)."""
     E.ensure_account(conn, capital, horizon)
@@ -243,7 +250,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         conn.execute(
             "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, costs, "
             "status, reason, stop_loss, target) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (horizon, p["symbol"], p["side"], qty, f"{stamp} 09:45", entry, c, "9:45 pick", stop, target))
+            (horizon, p["symbol"], p["side"], qty, f"{stamp} {at}", entry, c, f"{at} pick", stop, target))
         conn.execute("UPDATE paper_accounts SET cash = cash - ? WHERE horizon = ?",
                      (qty * entry + c, horizon))
         opened.append(f"{p['side'].upper():5} {p['symbol']} {qty} @ {entry:.2f}")

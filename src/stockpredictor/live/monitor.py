@@ -460,7 +460,7 @@ class Monitor:
             return                                   # retry at most every 5 minutes
         self._last_pick_try = now
         _set(self.conn, "id_last_picks", day)       # set now; cleared again if data is missing
-        rules, enabled = PI.get_rules(self.conn)
+        rules, enabled = PI.get_rules(self.conn, capital=self.capital_intraday)
         model = self.intraday_model()
         if not enabled:
             return
@@ -489,9 +489,9 @@ class Monitor:
         rules = self.kill_switch(now, ctx, rules, PI.HORIZON, trade_view.score(feats), prices,
                                  len(feats))
         r = PI.run_picks(self.conn, feats, trade_view, prices, pd.Timestamp(now.date()), rules,
-                         self.capital_intraday, negative, strengths)
+                         self.capital_intraday, negative, strengths, at=now.strftime("%H:%M"))
         if close_model is not None:              # second book: 9:45 -> 15:15, its own rules
-            crules, _ = PI.get_rules(self.conn, PI.CLOSE_HORIZON)
+            crules, _ = PI.get_rules(self.conn, PI.CLOSE_HORIZON, capital=self.capital_intraday)
             cstrengths = PI.recent_strengths(close_model, self.store_dir, ctx, crules) \
                 if crules.skip_quantile > 0 else None
             close_view = MI.Blended(close_model, model,
@@ -500,7 +500,7 @@ class Monitor:
                                       prices, len(feats))
             rc = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
                               crules, self.capital_intraday, negative, cstrengths,
-                              horizon=PI.CLOSE_HORIZON)
+                              horizon=PI.CLOSE_HORIZON, at=now.strftime("%H:%M"))
             log.info("Intraday picks (until close): %s", "skip today (weak signal)"
                      if rc["skipped"] else "; ".join(rc["picks"]) or "none")
             self.fno_open(now, rc)
@@ -531,10 +531,10 @@ class Monitor:
                 summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
                 negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
             view = MI.Blended(close_model, model, MI.current_params(MI.CLOSE).get("peer_weight") or 0)
-            krules, _ = PI.get_rules(self.conn, PI.CANDLE_HORIZON)
+            krules, _ = PI.get_rules(self.conn, PI.CANDLE_HORIZON, capital=self.capital_intraday)
             r = PI.run_picks(self.conn, feats, view, prices, pd.Timestamp(now.date()), krules,
                              self.capital_intraday, negative or set(), None,
-                             horizon=PI.CANDLE_HORIZON, candles=True)
+                             horizon=PI.CANDLE_HORIZON, candles=True, at=now.strftime("%H:%M"))
             late = " (late start at " + now.strftime("%H:%M") + " prices)" if now.time() > time(10, 15) else ""
             log.info("Candle experiment picks%s: %s", late, "; ".join(r["picks"]) or "none")
         except Exception:
