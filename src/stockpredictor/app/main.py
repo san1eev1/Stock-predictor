@@ -527,10 +527,11 @@ def page_paper_longterm():
 
 def page_paper_intraday():
     st.title("Paper trading — Intraday")
-    st.caption("Two books, each starting every day with its own ₹10,000 (intraday margin: up to 5× in positions). At 9:46 each model buys "
-               "the stocks it expects to rise and short-sells the ones it expects to fall, with "
-               "a stop-loss and target. Book 1 closes everything at 12:30, book 2 at 15:15 "
-               "(the close). After the close they are compared and both learn.")
+    st.caption("Every book starts each day with its own ₹10,000 (intraday margin: up to 5× in "
+               "positions). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
+               "stocks, all judged and learned from) and trades the best 10 of each, with the "
+               "learned stop-loss and target. Book 1 closes at 12:30, book 2 at 15:15; the candle "
+               "experiment re-ranks the same shortlist by its morning candles.")
     tab1, tab2, tab5, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)",
                                             "🕯️ Candle experiment", "🏆 Competition",
                                             "🔁 Historical replays"])

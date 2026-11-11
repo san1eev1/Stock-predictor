@@ -29,9 +29,10 @@ CLOSE_HORIZON = MI.CLOSE.horizon     # 9:45 -> 15:15 book ("until the close")
 CANDLE_HORIZON = "intraday_candle"   # experiment: model shortlist re-ranked by candles
 BOOKS = (HORIZON, CLOSE_HORIZON, CANDLE_HORIZON)
 LEVERAGE = 5             # intraday (MIS) margin ~20%: Rs 10,000 can hold ~Rs 50,000 of trades
-N_CANDIDATES = 10        # buy and sell picks traded, shown and judged each day
-SHORTLIST = 25           # the model's best 25 buys + 25 sells (50 stocks) are analysed on their
-                         # 9:15-9:45 one-minute candles; the best 10 of each side are traded
+N_CANDIDATES = 25        # every intraday book: the model's best 25 buys + 25 sells (50 stocks)
+                         # are saved and judged each day (all of them feed the learning) ...
+N_TRADED = 10            # ... and the best 10 of each side are traded
+SHORTLIST = N_CANDIDATES  # candle book: those 25 + 25 re-ranked by their 9:15-9:45 candles
 CANDLE_WEIGHT = 0.5      # final order = (1 - w) x model rank in the shortlist + w x candle score
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
@@ -75,12 +76,13 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
         from dataclasses import replace
 
         rules = replace(rules, skip_quantile=0.0, unusual="off", skip_friday=False)
-    if horizon == CANDLE_HORIZON:
-        # Candle experiment: the best 10 buys and 10 sells of the 50-stock shortlist, each cut
-        # as soon as it slips below its entry price; winners run to 15:15 (or the target).
-        from dataclasses import replace
+    from dataclasses import replace
 
-        rules = replace(rules, n_long=N_CANDIDATES, n_short=N_CANDIDATES, breakeven=True)
+    rules = replace(rules, n_long=N_TRADED, n_short=N_TRADED)    # best 10 of the 25 a side
+    if horizon == CANDLE_HORIZON:
+        # Candle experiment: each trade is cut as soon as it slips below its entry price;
+        # winners run to 15:15 (or the target).
+        rules = replace(rules, breakeven=True)
     return rules, s.get("id_enabled", "1") == "1"
 
 
@@ -181,11 +183,13 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     # 10 buy and 10 sell candidates are saved and judged; paper trades are opened for the
     # strongest n_long / n_short of them (fewer, larger positions keep costs down).
     ranked = day.sort_values("score", ascending=False)
-    n_buy, n_sell = max(N_CANDIDATES, rules.n_long), max(N_CANDIDATES, rules.n_short)
+    half = max(1, len(day) // 2)           # never more candidates a side than half the stocks
+    n_buy = min(max(N_CANDIDATES, rules.n_long), half)
+    n_sell = min(max(N_CANDIDATES, rules.n_short), half)
     clean = ranked[~ranked["symbol"].isin(negative_news)]
     if candles:     # 50-stock shortlist re-ranked by the 9:15-9:45 one-minute candles
-        longs = shortlist_by_candles(clean.head(SHORTLIST), "long").head(n_buy)
-        shorts = shortlist_by_candles(ranked.tail(SHORTLIST).iloc[::-1], "short")
+        longs = shortlist_by_candles(clean.head(min(SHORTLIST, half)), "long").head(n_buy)
+        shorts = shortlist_by_candles(ranked.tail(min(SHORTLIST, half)).iloc[::-1], "short")
     else:
         longs = clean.head(n_buy).assign(side="long")
         shorts = ranked.tail(n_sell).iloc[::-1].assign(side="short")
