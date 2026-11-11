@@ -48,6 +48,20 @@ jobs:
       - name: Install
         run: pip install -r requirements-train.txt && pip install -e . --no-deps
 
+      # Paper trading's evening work (the Mac may be off): long-term decisions on today's
+      # data, judging, and today's paper results into paper-feedback for this training.
+      - name: Paper trading after the close
+        env:
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          pip install -q yfinance
+          python -m stockpredictor cloud-evening --dir paper-market-data \
+            || echo "::warning::paper after-close work failed"
+
       - name: Get market data, current models and paper feedback
         run: |
           url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"

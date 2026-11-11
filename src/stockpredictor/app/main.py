@@ -43,6 +43,14 @@ REFRESH = "60s"   # always: a page opened before 9:15 must still go live
 # --- Shared data ------------------------------------------------------------------
 
 def conn():
+    """Paper state: the copy published by GitHub (config.CLOUD_PAPER), else this Mac's DB."""
+    path = config.VIEW_DB if config.CLOUD_PAPER and config.VIEW_DB.exists() else SETTINGS.db_path
+    db.init_db(path)
+    return db.connect(path)
+
+
+def local_conn():
+    """This Mac's own database: your real portfolio never leaves it."""
     db.init_db(SETTINGS.db_path)
     return db.connect(SETTINGS.db_path)
 
@@ -1195,7 +1203,7 @@ def page_portfolio():
 
 
 def portfolio_tab(h: str):
-    c = conn()
+    c = local_conn()
     with st.expander("➕ Add a trade", expanded=R.trades(c, h).empty):
         with st.form(f"add_{h}", clear_on_submit=True):
             cols = st.columns(6)
@@ -1231,7 +1239,7 @@ def portfolio_tab(h: str):
 @st.fragment(run_every=REFRESH)
 def portfolio_live(h: str):
     c = conn()
-    s = R.summary(c, h, current_prices(c))
+    s = R.summary(c, h, current_prices(conn()))
     k = st.columns(4)
     k[0].metric("Invested", rupees(s.invested))
     k[1].metric("Current value", rupees(s.value),

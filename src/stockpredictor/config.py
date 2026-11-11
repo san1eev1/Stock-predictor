@@ -25,6 +25,10 @@ MAC_DAILY_TRAINING = os.getenv("MAC_DAILY_TRAINING", "0") != "0"
 # GitHub starts its own runs on schedule (data 18:37 IST, training after it, 21:07 IST);
 # MAC_STARTS_GITHUB_RUNS=1 makes the Mac start them on time instead.
 MAC_STARTS_GITHUB_RUNS = os.getenv("MAC_STARTS_GITHUB_RUNS", "0") != "0"
+# Paper trading runs on GitHub (paper-trading.yml); the Mac only shows the published state
+# (CLOUD_PAPER=0: the Mac runs the live monitor itself, as before).
+CLOUD_PAPER = os.getenv("CLOUD_PAPER", "1") != "0"
+VIEW_DB = DATA_DIR / "cloud_state.db"
 # The live monitor and dashboard keep only this many recent years in memory (predictions
 # need recent data; training loads everything in its own short-lived process). 0 = all.
 LIVE_CONTEXT_YEARS = 0 if MAC_TRAINING else int(os.getenv("LIVE_CONTEXT_YEARS", "3"))

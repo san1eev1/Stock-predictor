@@ -191,6 +191,17 @@ def _is_partial(store_dir: Path) -> bool:
         return False
 
 
+def default_remote() -> str:
+    """This repository's URL; inside GitHub Actions with the job's token, so branches can be
+    pushed from any folder (actions/checkout only authorises the checkout folder)."""
+    import os
+
+    token, repo = os.getenv("GITHUB_TOKEN"), os.getenv("GITHUB_REPOSITORY")
+    if token and repo:
+        return f"https://x-access-token:{token}@github.com/{repo}.git"
+    return _git("remote", "get-url", "origin", cwd=PROJECT_ROOT)
+
+
 def sync(store_dir: Path = DEFAULT_STORE_DIR, remote: str | None = None,
          years: int | None = None) -> None:
     """Fetch the latest market-data branch as a shallow (history-free) checkout.
@@ -212,7 +223,7 @@ def _sync(store_dir: Path, remote: str | None, years: int) -> None:
     if git_dir.exists() and bool(years) != _is_partial(store_dir):
         shutil.rmtree(store_dir)              # switching full <-> recent-only: start clean
     if not git_dir.exists():
-        remote = remote or _git("remote", "get-url", "origin", cwd=PROJECT_ROOT)
+        remote = remote or default_remote()
         store_dir.mkdir(parents=True, exist_ok=True)
         _git("init", "-q", cwd=store_dir)
         _git("remote", "add", "origin", remote, cwd=store_dir)
@@ -239,7 +250,7 @@ FEEDBACK_BRANCH = "paper-feedback"    # written by the Mac, read by GitHub Actio
 
 def _branch_checkout(path: Path, branch: str, remote: str | None = None) -> bool:
     """Shallow checkout of `branch` into `path`. False if the branch doesn't exist yet."""
-    remote = remote or _git("remote", "get-url", "origin", cwd=PROJECT_ROOT)
+    remote = remote or default_remote()
     if not (path / ".git").exists():
         path.mkdir(parents=True, exist_ok=True)
         _git("init", "-q", cwd=path)
@@ -266,7 +277,7 @@ def sync_models() -> str | None:
 def publish_branch(src: Path, branch: str, message: str, remote: str | None = None) -> None:
     """Replace `branch` with one commit holding the files in `src` (force push, so the
     branch never grows a history)."""
-    remote = remote or _git("remote", "get-url", "origin", cwd=PROJECT_ROOT)
+    remote = remote or default_remote()
     git_dir = src / ".git"
     if not git_dir.exists():
         _git("init", "-q", "-b", branch, cwd=src)

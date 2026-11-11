@@ -952,13 +952,16 @@ class Monitor:
         return True
 
 
-def run_forever(monitor: Monitor, interval: int = 60, until: time | None = None) -> None:
+def run_forever(monitor: Monitor, interval: int = 60, until: time | None = None,
+                hard_stop: bool = False) -> None:
+    """hard_stop: stop at `until` even if the day's after-close work isn't done (GitHub runs,
+    where the evening job does it)."""
     import time as _time
 
     log.info("Live monitor started (Ctrl+C to stop)")
     while True:
-        if until is not None and monitor.clock().time() >= until \
-                and _setting(monitor.conn, "lt_after_close_day") == f"{monitor.clock():%Y-%m-%d}":
+        if until is not None and monitor.clock().time() >= until and (hard_stop or _setting(
+                monitor.conn, "lt_after_close_day") == f"{monitor.clock():%Y-%m-%d}"):
             log.info("Day's work done and it is past %s - stopping.", until.strftime("%H:%M"))
             return
         started = _time.monotonic()

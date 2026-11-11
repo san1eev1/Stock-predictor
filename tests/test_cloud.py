@@ -87,3 +87,30 @@ def test_linear_blend_mixes_a_ridge_model(tmp_path):
     assert np.corrcoef(p, df["a"])[0, 1] > 0.8
     m.save(tmp_path)
     assert np.allclose(engine.Ensemble.load(tmp_path).predict(df[["a", "b"]]), p)
+
+
+def _paper_state_imports():
+    import subprocess
+
+    from stockpredictor import cloud, db, store
+    return subprocess, cloud, db, store
+
+
+def test_state_round_trip_without_private_portfolio(tmp_path, monkeypatch):
+    subprocess, cloud, db, store = _paper_state_imports()
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(store, "default_remote", lambda: str(bare))
+    src = tmp_path / "live.db"
+    db.init_db(src)
+    c = db.connect(src)
+    c.execute("INSERT INTO paper_accounts (horizon, capital, cash) VALUES ('intraday', 10000, 10000)")
+    c.execute("INSERT INTO portfolio_trades (horizon, symbol, side, qty, price, trade_date) "
+              "VALUES ('longterm', 'TCS', 'buy', 1, 2400, '2026-11-11')")
+    c.commit()
+    cloud.publish_state(src)
+    out = tmp_path / "copy.db"
+    assert cloud.fetch_state(out)
+    d = db.connect(out)
+    assert d.execute("SELECT capital FROM paper_accounts").fetchone()[0] == 10000
+    assert d.execute("SELECT COUNT(*) FROM portfolio_trades").fetchone()[0] == 0   # never published

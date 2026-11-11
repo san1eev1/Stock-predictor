@@ -1,0 +1,72 @@
+# Live paper trading on GitHub, so the Mac can be off: the monitor runs through market hours
+# (9:46 picks, minute prices and exits, 12:30 / 15:15 square-offs, F&O, candle book) from the
+# state on the `paper-state` branch, and publishes the state back every 3 minutes.
+# Two jobs because a GitHub job may run at most 6 hours. After the close, the evening work
+# (long-term decisions, judging, paper feedback) runs at the start of train-models.yml.
+name: Paper trading (market hours)
+
+on:
+  schedule:
+    - cron: "40 2 * * 1-5"     # 08:10 IST (GitHub often starts scheduled runs late)
+    - cron: "25 3 * * 1-5"     # 08:55 IST backup; a second run waits and then exits quickly
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paper-trading
+  cancel-in-progress: false
+
+env:
+  ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+  ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+  ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+  ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+  GITHUB_TOKEN: ${{ github.token }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  morning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt && pip install -e . --no-deps
+      - name: Restore Angel One intraday history
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/intraday_backfill.csv
+            data/intraday_fine.csv
+          key: angel-intraday-paper-${{ github.run_id }}
+          restore-keys: angel-intraday-
+      - name: Market hours until 12:45
+        run: python -m stockpredictor cloud-session --dir market-data --until 12:45
+
+  afternoon:
+    needs: morning
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt && pip install -e . --no-deps
+      - name: Restore Angel One intraday history
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/intraday_backfill.csv
+            data/intraday_fine.csv
+          key: angel-intraday-paper-${{ github.run_id }}
+          restore-keys: angel-intraday-
+      - name: Market hours until 15:45
+        run: python -m stockpredictor cloud-session --dir market-data --until 15:45
