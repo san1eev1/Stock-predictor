@@ -53,9 +53,21 @@ are confirmed (Vibe-Trading), and impact/capacity models are irrelevant at ₹1 
 need new data (FII/DII flow history, shareholding) or heavy compute (Kronos), so they wait for
 approval rather than becoming a forced experiment.
 
-## E-005 Foundation models (Kronos, Chronos-Bolt, Moirai) vs our model (2026-10-25) — running
-Script: `scripts/research_foundation.py`, workflow `research-dl.yml` (torch only in that job).
-Protocol in the script header. PatchTST excluded: it needs training per dataset (not zero-shot).
+## E-005 Foundation models (Kronos, Chronos-Bolt, Moirai) vs our model (2026-10-25) — **REJECTED**
+Script: `scripts/research_foundation.py` (run 40167589634), workflow `research-dl.yml` (torch only in that job).
+44 month-end snapshots (2023-01 to 2026-10), 260 stocks, 256-day context, 20-day forecast window.
+Zero-shot ranking skill (cross-sectional Spearman IC per snapshot):
+| Model | Mean IC | Positive | vs ours (paired t) |
+|---|---|---|---|
+| Our walk-forward | +0.0421 | 68% | — |
+| Kronos (OHLCV, pre-trained) | +0.0119 | 34% | — |
+| Moirai (univariate, pre-trained) | +0.0037 | 32% | — |
+| Momentum (6-month) | +0.0072 | 52% | — |
+| Ours + Kronos (rank blend) | +0.0357 | 39% | t = 0.07 |
+| Ours + Moirai (rank blend) | +0.0316 | 45% | t = −0.18 |
+Chronos-Bolt failed to load (dependency issue); conclusion unchanged. No foundation model improves
+our score when blended. Our model's data-limited constraint (E-002, E-003) stands; outside pre-training
+does not overcome it.
 
 ## FII/DII flows collection started (2026-10-25)
 `data/fiidii.py`, `fiidii-update` in the evening data workflow → `market-data/fiidii.csv`.
