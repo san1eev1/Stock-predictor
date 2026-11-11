@@ -11,3 +11,5 @@
 - **Rejected ideas (worse out-of-sample)**: crash guard, low-vol tilt, Clenow momentum, volatility targeting, week+month+recent ensembles, intraday sell signal as a long-term filter, RL/LLM in the prediction path.
 - **Intraday**: ~0.05%/trade gross vs 0.32% costs: no net edge to date.
 - **Exit overlays on the momentum book** (crash guard, vol targeting, trailing stops 10–25%): all cut return more than they cut drawdown (E-004).
+- **Silent 2-week paper-trading outage (2026-10-27 → 11-10)**: the Mac could not resolve or keep TLS to apiconnect.angelone.in (613 DNS failures, SSL "record layer"/"bad record MAC" errors) and Yahoo also failed, so no picks were made. Now: a red dashboard banner when live prices aren't from Angel One during market hours. Root cause is the Mac's network (DNS/Wi-Fi), not the code.
+- **Deleting .venv under a running app** (2026-11-11): broke Angel One TLS (certifi path) until rebuilt. Never remove the environment of the running service.

@@ -72,3 +72,17 @@ does not overcome it.
 ## FII/DII flows collection started (2026-10-25)
 `data/fiidii.py`, `fiidii-update` in the evening data workflow → `market-data/fiidii.csv`.
 Test as a market-wide feature once ≥ 1 year has accumulated (≈ Nov 2027).
+
+## E-006 IPO listing-gain model (2026-11-11) — running
+Script: `scripts/research_ipo.py` (research.yml run 42972054312). NSE past-issue list + final
+subscription by QIB/NII/retail for every mainboard IPO, listing-day prices from the bhavcopy;
+logistic regression, walk-forward by year. Rule: 'Apply' calls (p >= 0.65) list up >= 10 points
+more often than all IPOs, over >= 30 out-of-sample calls.
+
+## E-007 Candle experiment (live paper, from 2026-11-11)
+Own ₹10,000 book (`intraday_candle`): the close model's 25 best buys + 25 best sells re-ranked
+50/50 by model rank and five 9:15–9:45 one-minute candle checks; best 10 a side; cut as soon as a
+trade slips below entry; rest to 15:15. Candle data from Yahoo (Angel One kept for the main
+books). Compare with the main 'until close' book after ≥ 20 trading days (paired daily P&L,
+t ≥ 2) before adopting anything. Expected risk: cutting at entry turns many trades into small
+cost-sized losses (0.37% round trip).

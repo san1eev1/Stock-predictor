@@ -59,3 +59,11 @@ project environment. "Use" = what we took or could take.
 - **FII/DII daily flows and shareholding patterns** (via Tapetide MCP / NSE): new information we don't use. NSE serves only the current day's FII/DII figures; a history must be collected daily before it can be tested.
 - **Kronos** (shiyu-coder/Kronos): OHLCV foundation model pre-trained on 45+ exchanges. Pre-training on outside data is one way around our data limit (E-002, E-003). Test cost: heavy CPU inference on GitHub.
 - **PatchTST / Moirai**: time-series transformers; same caution as Kronos.
+
+## IPO repos (2026-11-11, gh search "ipo listing gain", "nse ipo", "ipo underpricing")
+All small coursework-style projects (0–14 stars): gitanshgarg25/ipo-listing-gain-prediction (MIT,
+reports 67% accuracy, random split), git-anshudubey/IPO_Listing_Gains_Prediction (MIT),
+arsalan-19/ipo-time-to-return-nse (no licence, Excel), eggegg0419/Predict_IPO-UnderpricingRisk
+(China A-shares, prospectus sentiment). None uses time-ordered validation or NSE category-wise
+subscription; nothing adopted. Our model (models/ipo.py) uses NSE's own subscription data with
+walk-forward by year.
