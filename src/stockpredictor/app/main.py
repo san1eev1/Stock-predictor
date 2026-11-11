@@ -396,12 +396,29 @@ def page_paper_fno():
                 "pnl": "P&L (after costs)"}), hide_index=True, width="stretch",
                 column_config={k: st.column_config.NumberColumn(format="₹%.2f")
                                for k in ("Entry", "Price now", "Exit", "P&L (after costs)")})
-            daily = t[t["status"] == "closed"].groupby("date")["pnl"].sum().sort_index(
-                ascending=False).rename("P&L on ₹1 lakh").reset_index()
+            closed = t[t["status"] == "closed"]
+            daily = closed.groupby("date").agg({
+                "pnl": ["sum", "count"],
+                "side": "count"
+            }).rename(columns={"sum": "Total P&L", "count": "Trades"}).reset_index()
+            daily.columns = ["date", "P&L", "Wins", "Trades"]
+            daily["Wins"] = (closed.groupby("date")["pnl"].apply(lambda g: (g > 0).sum())).values
+            daily["Win %"] = (daily["Wins"] / daily["Trades"] * 100).round(0).astype(int)
+            daily["Return %"] = (daily["P&L"] / 100_000 * 100).round(2)
             if not daily.empty:
                 st.subheader("Each day on a fresh ₹1,00,000")
-                st.dataframe(daily, hide_index=True, width="stretch", column_config={
-                    "P&L on ₹1 lakh": st.column_config.NumberColumn(format="₹%+.0f")})
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total P&L (all days)", f"₹{daily['P&L'].sum():+,.0f}")
+                col2.metric("Win rate", f"{(daily['Wins'].sum() / daily['Trades'].sum() * 100):.0f}%")
+                col3.metric("Avg daily return", f"{daily['Return %'].mean():+.2f}%")
+                rets = daily["Return %"].dropna()
+                if len(rets) > 1:
+                    sharpe = rets.mean() / rets.std() * np.sqrt(252)
+                    col1.metric("Sharpe (annualized)", f"{sharpe:.2f}")
+                st.dataframe(daily[["date", "P&L", "Wins", "Trades", "Win %", "Return %"]],
+                            hide_index=True, width="stretch", column_config={
+                                "P&L": st.column_config.NumberColumn(format="₹%+.0f"),
+                                "Return %": st.column_config.NumberColumn(format="%.2f%")})
 
 
 def replay_history():
@@ -1418,3 +1435,69 @@ pages = [st.Page(page_picks, title="Long-term picks", icon="📈", default=True)
 sidebar()
 health_banner()
 st.navigation(pages).run()
+
+
+def page_ipo_analysis():
+    """IPO scoring and recommendation: buy, caution, or skip."""
+    from stockpredictor.analysis import ipo_analyzer as IA
+    from stockpredictor.data import ipo as IPO_data
+    
+    st.title("IPO Analysis")
+    st.caption("Score incoming IPOs and decide: buy, caution, or skip. "
+               "See research/ipo_resources.md for learning materials.")
+    
+    c = conn()
+    watchlist = IPO_data.load(d)
+    
+    # Show scoring for IPOs listing this week
+    today = pd.Timestamp.now().date()
+    week_end = today + pd.Timedelta(days=7)
+    upcoming = watchlist[(watchlist["listing_date"].isna()) | 
+                         ((watchlist["listing_date"] >= today) & 
+                          (watchlist["listing_date"] <= week_end))]
+    
+    if upcoming.empty:
+        st.info("No IPOs scheduled for the next 7 days. Add one with `ipo add` command.")
+        return
+    
+    for _, ipo in upcoming.iterrows():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.subheader(ipo["symbol"])
+        with col2:
+            st.caption(f"{ipo['listing_date']:%b %d}" if ipo["listing_date"] else "TBD")
+        
+        # Score it
+        score = IA.analyze_ipo(
+            symbol=ipo["symbol"],
+            listing_date=str(ipo["listing_date"]),
+            allocation_ratio=float(ipo["alloc_ratio"] or 0),
+            gmp_estimate=float(ipo["gmp_estimate"] or 0),
+            lot_size=int(ipo["lot_size"]),
+            sector=ipo.get("sector", "Unknown"),
+            sector_momentum="neutral",  # would fetch live
+            price_band=(float(ipo["price_band_low"]), float(ipo["price_band_high"]))
+        )
+        
+        # Display
+        color = {"BUY": "green", "CAUTION": "orange", "SKIP": "red"}.get(score.recommendation, "gray")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Recommendation", score.recommendation, f"Score {score.overall_score:.0f}/100",
+                     delta_color=color)
+        with col2:
+            st.metric("Lot size", f"₹{score.lot_size * score.price_band[1]:,.0f}",
+                     f"{score.lot_size} shares @ ₹{score.price_band[1]:.0f}")
+        with col3:
+            st.metric("GMP", f"{score.gmp_estimate:+.1f}%",
+                     f"Alloc {score.allocation_ratio:.1f}x")
+        
+        # Reasons
+        st.caption("**Factors:**")
+        for reason in score.reasons:
+            st.caption(f"• {reason}")
+        
+        if score.red_flags:
+            st.warning("**Red flags:**\n\n" + "\n\n".join([f"⚠️ {f}" for f in score.red_flags]))
+        
+        st.divider()
