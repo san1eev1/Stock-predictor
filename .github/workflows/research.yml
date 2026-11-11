@@ -25,7 +25,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -r requirements-train.txt && pip install -e . --no-deps
+        run: pip install -r requirements-train.txt yfinance && pip install -e . --no-deps
 
       - name: Get market data
         run: |
