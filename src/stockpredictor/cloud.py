@@ -38,6 +38,11 @@ def fetch_state(dest: Path) -> bool:
             log.warning("no paper state on GitHub yet (%s)", exc)
             return False
         src = Path(tmp) / "s" / STATE_FILE
+        parts = sorted((Path(tmp) / "s").glob(STATE_FILE + ".gz.part*"))
+        if not src.exists() and parts:            # seeded in small pieces (see seed_state)
+            import gzip
+
+            src.write_bytes(gzip.decompress(b"".join(p.read_bytes() for p in parts)))
         if not src.exists():
             return False
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -146,3 +151,36 @@ def download_view(dest: Path, repo: str) -> bool:
     except Exception as exc:
         log.warning("could not download the paper state: %s", exc)
         return False
+
+
+def seed_state(db: Path, piece_kb: int = 15) -> int:
+    """First upload from a Mac whose network drops larger uploads: the compressed state in
+    small pieces, one push each. GitHub's runs then publish it whole."""
+    import gzip
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        snapshot(db, work / "state.db")
+        data = gzip.compress((work / "state.db").read_bytes(), 9)
+        (work / "state.db").unlink()
+        repo = work / "repo"
+        repo.mkdir()
+        store._git("init", "-q", "-b", STATE_BRANCH, cwd=repo)
+        size, n = piece_kb * 1024, 0
+        for i in range(0, len(data), size):
+            (repo / f"{STATE_FILE}.gz.part{n:04d}").write_bytes(data[i:i + size])
+            store._git("add", "-A", cwd=repo)
+            store._git("-c", "user.name=stockpredictor", "-c", "user.email=s@localhost",
+                       "commit", "-q", "-m", f"state piece {n}", cwd=repo)
+            for _ in range(5):
+                try:
+                    store._git("push", "-q", "--force", store.default_remote(),
+                               f"{STATE_BRANCH}:refs/heads/{STATE_BRANCH}", cwd=repo)
+                    break
+                except Exception:
+                    import time as _t
+                    _t.sleep(3)
+            else:
+                raise RuntimeError(f"could not upload piece {n}")
+            n += 1
+        return n
