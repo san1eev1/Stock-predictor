@@ -72,3 +72,9 @@ does not overcome it.
 ## FII/DII flows collection started (2026-10-25)
 `data/fiidii.py`, `fiidii-update` in the evening data workflow → `market-data/fiidii.csv`.
 Test as a market-wide feature once ≥ 1 year has accumulated (≈ Nov 2027).
+
+## E-006 Candle aggregation frequencies (2026-11-11) — running
+Script: `scripts/research_candles.py`, workflow `research-candles.yml`.
+Test: 1-min, 5-min, 15-min, 1-hour candles on intraday model backtest (2024+, 5 holds, exit rank).
+Baseline: current 5-min aggregation. Metric: daily Sharpe, win rate, max drawdown.
+Accept a frequency if: Sharpe >= 5-min baseline AND paired t >= 2 on daily returns.
