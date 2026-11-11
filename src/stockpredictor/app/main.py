@@ -191,7 +191,7 @@ def sidebar():
         alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 8").fetchall()
         if not alerts:
             st.caption("No alerts yet.")
-        icons = {"stop-loss": "🛑", "negative-news": "📰", "decision": "🧭", "fill": "✅", "review": "🔄",
+        icons = {"stop-loss": "🛑", "negative-news": "📰", "decision": "🧭", "fill": "✅",
                  "info": "ℹ️"}
         for a in alerts:
             st.caption(f"{icons.get(a['kind'], '•')} {a['message']}")
@@ -246,8 +246,7 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
     g = float(d["gain"].sum()) if not d.empty else 0.0
     k = st.columns(3)
     k[0].metric(f"Money in {what} today", rupees(float(d["invested"].sum()) if not d.empty else 0),
-                help=f"Capital ₹{capital:,.0f}" + (" (intraday margin: up to 5× in positions)"
-                                                   if what == "shares" else ""))
+                help=f"Capital ₹{capital:,.0f}")
     k[1].metric("Gain / loss today", C.money(g), f"{g / capital:+.2%} of ₹{capital:,.0f}")
     k[2].metric("Open now", int((d["status"] == "open").sum()) if not d.empty else 0)
     if t.empty:
@@ -527,22 +526,13 @@ def page_paper_longterm():
 
 def page_paper_intraday():
     st.title("Paper trading — Intraday")
-    st.caption("Every book starts each day with its own ₹10,000 (intraday margin: up to 5× in "
-               "positions). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
-               "stocks, all judged and learned from) and trades the best 10 of each, with the "
-               "learned stop-loss and target. Book 1 closes at 12:30, book 2 at 15:15; the candle "
+    st.caption("Every book starts each day with its own ₹10,000 (no margin: ₹10,000 is all that "
+               "is invested). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
+               "stocks, all judged and learned from) and trades only the 3-5 strongest of each "
+               "(the number the nightly tuning chose), held all day with the learned stop-loss "
+               "and target. Book 1 closes at 12:30, book 2 at 15:15; the candle "
                "experiment re-ranks the same shortlist by its morning candles.")
-    c = conn()
-    on = PI.review_books(c) == PI.BOOKS
-    flip = st.toggle("Mid-day review in all books (cut losing/sideways trades every 30 min, add "
-                     "to the 1-2 best winners)", on,
-                     help="Tested on 59 days with the same picks (E-008): holding lost ₹200/day, "
-                          "the review ₹753/day, worse on 98% of days. Off = only the candle "
-                          "experiment uses it.")
-    if flip != on:
-        c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('id_review_all', ?)",
-                  ("1" if flip else "0",))
-        c.commit()
+
     tab1, tab2, tab5, tab3, tab4 = st.tabs(["Until 12:30", "Until close (15:15)",
                                             "🕯️ Candle experiment", "🏆 Competition",
                                             "🔁 Historical replays"])
@@ -566,7 +556,7 @@ def candle_section():
                "the 'until close' model's 25 best buys and 25 best sells (50 stocks) are checked "
                "on their 9:15-9:45 one-minute candles (closed up/down, where it "
                "closed in its range, vs VWAP, 15-minute breakout, share of green candles). Model "
-               "rank and candles count half each; the best 10 buys and 10 sells are traded. A "
+               "rank and candles count half each; the best 3-5 buys and sells are traded. A "
                "trade that slips below its entry price is cut at once; winners run to 15:15. If "
                "it beats the main 'until close' book over several weeks, it can be adopted. "
                "Candle data from Yahoo, so Angel One stays free for the main books.")

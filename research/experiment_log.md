@@ -107,3 +107,9 @@ lost or moved < 0.3%, add freed buying power to the 1–2 winners up ≥ 0.5% (�
 top-ups stopped at their own entry). Test: `scripts/research_review.py` — same out-of-sample
 picks, Yahoo 5-minute candles (~60 days), hold vs review, paired daily P&L. Keep if t ≥ 2 over
 ≥ 30 days; switch off if t ≤ −2; otherwise keep collecting live.
+
+## Decision (2026-11-11, user): fewer, stronger intraday trades
+After E-008 showed 20 trades/day lose about their costs: every intraday book keeps the 25+25
+shortlist (all judged and learned from) but trades only the 3–5 strongest a side (the nightly
+tuning's number, clamped to 3–5), ₹10,000 total with no margin, held all day (learned stop/target,
+square-off). Mid-day review removed from the code. Candle book: same counts, keeps cut-at-entry.

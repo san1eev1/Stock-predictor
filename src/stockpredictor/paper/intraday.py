@@ -28,10 +28,10 @@ HORIZON = "intraday"                 # 9:45 -> 12:30 book
 CLOSE_HORIZON = MI.CLOSE.horizon     # 9:45 -> 15:15 book ("until the close")
 CANDLE_HORIZON = "intraday_candle"   # experiment: model shortlist re-ranked by candles
 BOOKS = (HORIZON, CLOSE_HORIZON, CANDLE_HORIZON)
-LEVERAGE = 5             # intraday (MIS) margin ~20%: Rs 10,000 can hold ~Rs 50,000 of trades
 N_CANDIDATES = 25        # every intraday book: the model's best 25 buys + 25 sells (50 stocks)
                          # are saved and judged each day (all of them feed the learning) ...
-N_TRADED = 10            # ... and the best 10 of each side are traded
+TRADED_MIN, TRADED_MAX = 3, 5   # ... and only the 3-5 strongest of each side are traded (the
+                                # number the nightly rule tuning chose, kept within 3-5)
 SHORTLIST = N_CANDIDATES  # candle book: those 25 + 25 re-ranked by their 9:15-9:45 candles
 CANDLE_WEIGHT = 0.5      # final order = (1 - w) x model rank in the shortlist + w x candle score
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
@@ -78,7 +78,8 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON) -> tuple[B.Intra
         rules = replace(rules, skip_quantile=0.0, unusual="off", skip_friday=False)
     from dataclasses import replace
 
-    rules = replace(rules, n_long=N_TRADED, n_short=N_TRADED)    # best 10 of the 25 a side
+    rules = replace(rules, n_long=min(max(rules.n_long, TRADED_MIN), TRADED_MAX),
+                    n_short=min(max(rules.n_short, TRADED_MIN), TRADED_MAX))
     if horizon == CANDLE_HORIZON:
         # Candle experiment: each trade is cut as soon as it slips below its entry price;
         # winners run to 15:15 (or the target).
@@ -207,7 +208,8 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         reasons = [w + [f"model #{int(m)} of {SHORTLIST}, candles {int(c)}/{len(CANDLE_CHECKS)}"]
                    for w, m, c in zip(reasons, picks["model_rank"], picks["candle"])]
     take = take_probs(day, feats_today, horizon) if rules.min_prob > 0 else {}
-    slot = capital * LEVERAGE / max(1, rules.n_long + rules.n_short)
+    slot = capital / max(1, rules.n_long + rules.n_short)     # no margin: capital is the limit
+    budget = capital
     sl, tp = B.snap(rules.stop_loss), B.snap(rules.target)
     opened = []
     for (_, p), why in zip(picks.iterrows(), reasons):
@@ -227,12 +229,16 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         taken = rules.min_prob <= 0 or (prob is not None and prob >= rules.min_prob)
         trap = B.is_trap(p, rules)          # results day / F&O expiry day: judged, not traded
         odd = B.odd_day(p, rules)           # unusual morning (rules.unusual)
-        qty = B.position_qty(slot, entry, rules, capital, p.get("v30")) \
-            if rank <= limit and taken and not trap and not (odd and rules.unusual == "skip") else 0
+        eligible = rank <= limit and taken and not trap and not (odd and rules.unusual == "skip")
+        qty = B.position_qty(slot, entry, rules, capital, p.get("v30")) if eligible else 0
+        if eligible and qty == 0 and entry <= 2 * slot:
+            qty = 1                 # a pricey stock: one share, if it costs at most two slots
         if odd and rules.unusual == "half":
             qty //= 2
+        qty = min(qty, int(budget // entry)) if entry > 0 else 0    # never above the capital
         if qty <= 0:
             continue
+        budget -= qty * entry
         c = costs.cost("buy" if sign > 0 else "sell", qty * entry)
         conn.execute(
             "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, costs, "
@@ -345,82 +351,6 @@ def close_trade(conn, t, price: float, reason: str, stamp: str,
     conn.execute("UPDATE paper_accounts SET cash = cash + ? WHERE horizon = ?",
                  (t["qty"] * t["entry_price"] + gross - c, t["horizon"]))
     return f"{t['side']} {t['symbol']} closed @ {price:.2f} ({reason}), P&L {gross - t['costs'] - c:+.0f}"
-
-
-# Mid-day review (every intraday book): keep only what is paying, put the money in the best.
-REVIEW_EVERY = 30          # minutes; first review 30 minutes after the 9:45 entry
-SIDEWAYS = 0.003           # a trade that has moved less than this since entry (or lost) is cut:
-                           # it isn't covering its ~0.37% round-trip costs
-STRONG = 0.005             # freed money goes only to winners up at least this much
-TOP_WINNERS = 2            # ... at most the 2 strongest
-MAX_IN_ONE = 0.40          # no stock above 40% of the book's buying power
-
-
-def review(conn, prices: dict[str, float], stamp: str, horizon: str, capital: float,
-           costs: IntradayCosts = DEFAULT_INTRADAY_COSTS) -> list[str]:
-    """Cut the book's losing and sideways trades (open at least REVIEW_EVERY minutes) and add
-    the freed buying power to its 1-2 strongest winners. Each top-up is its own trade whose
-    stop is its entry price (cut at once if it slips back)."""
-    now = pd.Timestamp(stamp)
-    log, keep = [], []
-    for t in open_trades(conn, horizon):
-        p = prices.get(t["symbol"])
-        if p is None:
-            continue
-        move = (1 if t["side"] == "long" else -1) * (p / t["entry_price"] - 1)
-        age = (now - pd.Timestamp(t["entry_time"])).total_seconds() / 60
-        if age >= REVIEW_EVERY - 1 and move < SIDEWAYS:
-            log.append(close_trade(conn, t, p, "review: losing" if move < 0 else "review: sideways",
-                                   stamp, costs))
-        else:
-            keep.append((move, t, p))
-    power = capital * LEVERAGE
-    held: dict[str, float] = {}
-    for _, t, _ in keep:
-        held[t["symbol"]] = held.get(t["symbol"], 0.0) + t["qty"] * t["entry_price"]
-    free = power - sum(held.values())
-    best = {}
-    for move, t, p in sorted(keep, key=lambda x: -x[0]):
-        if move >= STRONG and t["symbol"] not in best:
-            best[t["symbol"]] = (t, p)
-        if len(best) == TOP_WINNERS:
-            break
-    for sym, (t, p) in best.items():
-        room = min(free / len(best), MAX_IN_ONE * power - held[sym])
-        qty = int(room / p)
-        if qty <= 0:
-            continue
-        sign = 1 if t["side"] == "long" else -1
-        c = costs.cost("buy" if sign > 0 else "sell", qty * p)
-        conn.execute(
-            "INSERT INTO paper_trades (horizon, symbol, side, qty, entry_time, entry_price, costs, "
-            "status, reason, stop_loss, target) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (horizon, sym, t["side"], qty, stamp, p, c, "added to winner", p, t["target"]))
-        conn.execute("UPDATE paper_accounts SET cash = cash - ? WHERE horizon = ?",
-                     (qty * p + c, horizon))
-        log.append(f"{t['side']} {sym} added {qty} @ {p:.2f} (winner, up "
-                   f"{sign * (p / t['entry_price'] - 1):+.2%})")
-    conn.commit()
-    return log
-
-
-def review_books(conn) -> tuple[str, ...]:
-    """Books that get the mid-day review. E-008 (59 days, same picks): review -₹753/day vs
-    hold -₹200/day, worse on 98% of days (t = -11.3), so only the candle experiment keeps it
-    unless the 'review in all books' switch (app setting id_review_all) is on."""
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'id_review_all'").fetchone()
-    return BOOKS if row and row[0] == "1" else (CANDLE_HORIZON,)
-
-
-def review_times(horizon: str) -> list[str]:
-    """HH:MM of the book's reviews: every REVIEW_EVERY minutes from 10:15 until 30 minutes
-    before its square-off."""
-    end = I.TRADE_EXIT if horizon == HORIZON else I.CLOSE_EXIT
-    t, out = pd.Timestamp("2000-01-01 09:45"), []
-    last = pd.Timestamp(f"2000-01-01 {end:%H:%M}") - pd.Timedelta(minutes=REVIEW_EVERY)
-    while (t := t + pd.Timedelta(minutes=REVIEW_EVERY)) <= last:
-        out.append(f"{t:%H:%M}")
-    return out
 
 
 DAILY_LOSS_LIMIT = 0.015   # a book that is down 1.5% of its capital today stops for the day
