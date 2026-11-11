@@ -1128,3 +1128,37 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def cmd_ipo_add(settings, args) -> None:
+    """Add an IPO to the watchlist before it lists."""
+    from stockpredictor.data import ipo
+    ipo.add_ipo(
+        Path(args.dir),
+        args.symbol,
+        args.ipo_date,
+        int(args.lot_size),
+        float(args.price_band_low),
+        float(args.price_band_high),
+        gmp_estimate=float(args.gmp or 0),
+        notes=args.notes or ""
+    )
+    print(f"Added {args.symbol} to IPO watchlist")
+
+
+def cmd_ipo_show(settings, args) -> None:
+    """Show IPO watchlist and learning checklist."""
+    from stockpredictor.data import ipo
+    df = ipo.load(Path(args.dir))
+    if df.empty:
+        print("No IPOs in watchlist")
+        return
+    for _, row in df.iterrows():
+        chk = ipo.learning_checklist(row.to_dict())
+        print(f"\n{row['symbol']} — {row['ipo_date']:%Y-%m-%d}")
+        print(f"  Lot size: {row['lot_size']}, Price band: ₹{row['price_band_low']}-{row['price_band_high']}")
+        if row['gmp_estimate'] > 0:
+            print(f"  GMP estimate: ₹{row['gmp_estimate']:.0f}")
+        print("  Learning checklist:")
+        for check, details in chk["checks"].items():
+            print(f"    • {details['what']}: {details['ideal']}")
