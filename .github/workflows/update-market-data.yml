@@ -19,6 +19,9 @@ on:
       intraday_period:
         description: "Yahoo 5-minute lookback for intraday summaries (max 60d)"
         default: "7d"
+      fobhav_minutes:
+        description: "Minutes for the F&O bhavcopy download (history backfill)"
+        default: "20"
 
 permissions:
   contents: write
@@ -30,7 +33,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -75,6 +78,9 @@ jobs:
           # NSE delivery share: newest days first, then history back to 2005 in chunks.
           python -m stockpredictor delivery-update --dir market-data --minutes 25 \
             || echo "::warning::delivery data failed"
+          # Stock futures / options open interest since 2012 (research E-011).
+          python -m stockpredictor fobhav-update --dir market-data --minutes "${{ inputs.fobhav_minutes || '20' }}" \
+            || echo "::warning::F&O bhavcopy failed"
           # Every NSE stock since 2005, incl. later delisted (survivorship-free research).
           python -m stockpredictor bhav-update --dir market-data --minutes 40 \
             || echo "::warning::bhavcopy failed"

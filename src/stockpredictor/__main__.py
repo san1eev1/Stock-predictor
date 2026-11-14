@@ -90,6 +90,15 @@ def cmd_bhav_update(settings, args) -> None:
     print(f"Bhavcopy: {n} new days")
 
 
+def cmd_fobhav_update(settings, args) -> None:
+    """NSE F&O bhavcopy (stock futures / options open interest) -> fobhav/<year>.parquet."""
+    from stockpredictor.data import fobhav
+
+    n = fobhav.update(Path(args.dir), date.fromisoformat(max(args.start, "2012-01-01")),
+                      minutes=args.minutes)
+    print(f"F&O bhavcopy: {n} new days")
+
+
 def cmd_mac_train(settings, args) -> None:
     """The Mac's daily training on all history (started by the live monitor at 16:00 as its
     own process, so the memory is returned when it ends)."""
@@ -1140,6 +1149,8 @@ ARG_COMMANDS = {
     "preopen-update": (cmd_preopen_update, "Today's NSE pre-open auction (git store)", _dir_arg),
     "mac-train": (cmd_mac_train, "The Mac's daily training on all history (own process)",
                   _dir_arg),
+    "fobhav-update": (cmd_fobhav_update, "NSE F&O bhavcopy: stock futures/options open interest",
+                      _delivery_args),
     "bhav-update": (cmd_bhav_update, "NSE daily bhavcopy since 2005 (survivorship-free history)",
                     _delivery_args),
 }

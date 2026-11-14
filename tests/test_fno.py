@@ -109,3 +109,47 @@ def test_ipo_subscription_parse_and_model():
     label, p, why = M.verdict(m, hot, closes_today=True)
     assert label == "Apply" and why
     assert M.verdict(m, hot)[0] == "Wait"                 # still open, not the last day
+
+
+def _zip(text: str) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("fo.csv", text)
+    return buf.getvalue()
+
+
+def test_fobhav_both_formats_and_features():
+    from datetime import date
+
+    import pandas as pd
+
+    from stockpredictor.data import fobhav as FB
+
+    old = ("INSTRUMENT,SYMBOL,EXPIRY_DT,STRIKE_PR,OPTION_TYP,OPEN,HIGH,LOW,CLOSE,SETTLE_PR,"
+           "CONTRACTS,VAL_INLAKH,OPEN_INT,CHG_IN_OI,TIMESTAMP,\n"
+           "FUTIDX,NIFTY,30-Nov-2023,0,XX,1,1,1,1,1,5,1,999,0,10-NOV-2023,\n"
+           "FUTSTK,ABC,30-Nov-2023,0,XX,1,1,1,101,1,7,1,1000,0,10-NOV-2023,\n"
+           "FUTSTK,ABC,28-Dec-2023,0,XX,1,1,1,102,1,2,1,200,0,10-NOV-2023,\n"
+           "OPTSTK,ABC,30-Nov-2023,100,CE,1,1,1,3,1,9,1,300,0,10-NOV-2023,\n"
+           "OPTSTK,ABC,30-Nov-2023,100,PE,1,1,1,2,1,4,1,150,0,10-NOV-2023,\n")
+    a = FB.parse(_zip(old), date(2023, 11, 10)).set_index("symbol")
+    assert list(a.index) == ["ABC"]                         # index contracts dropped
+    r = a.loc["ABC"]
+    assert (r.fut_close, r.fut_oi, r.fut_oi_all, r.call_oi, r.put_oi) == (101, 1000, 1200, 300, 150)
+    new = ("TradDt,FinInstrmTp,TckrSymb,XpryDt,OptnTp,ClsPric,OpnIntrst,TtlTradgVol\n"
+           "2026-11-13,STF,ABC,2026-11-23,,105,1100,8\n"
+           "2026-11-13,STO,ABC,2026-11-23,PE,2,330,4\n"
+           "2026-11-13,STO,ABC,2026-11-23,CE,3,300,6\n"
+           "2026-11-13,IDF,NIFTY,2026-11-23,,1,1,1\n")
+    b = FB.parse(_zip(new), date(2026, 11, 13)).set_index("symbol").loc["ABC"]
+    assert (b.fut_oi_all, b.put_oi, b.call_vol) == (1100, 330, 6)
+    fo = pd.concat([FB.parse(_zip(old), date(2023, 11, 10)),
+                    FB.parse(_zip(old.replace("1000,0", "1500,0")), date(2023, 11, 13))])
+    close = pd.DataFrame({"ABC": [100.0, 100.0]}, index=pd.to_datetime(["2023-11-10", "2023-11-13"]))
+    f = FB.features(fo, close).set_index("date")
+    assert abs(f.loc["2023-11-13", "fo_oi_chg_1"] - (1700 / 1200 - 1)) < 1e-9
+    assert abs(f.loc["2023-11-13", "fo_pcr"] - 0.5) < 1e-9
+    assert abs(f.loc["2023-11-10", "fo_basis"] - 0.01) < 1e-9

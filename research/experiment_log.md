@@ -129,3 +129,13 @@ absent in India in this period.
 Residual momentum: paired IC −0.0009, t −0.41 → **REJECTED**. Overnight/intraday: paired IC +0.0034,
 t = 1.64 → below the bar (REJECT by the rule) but the most promising result so far; re-tested
 through the CPCV harness (E-010b). Backtests are on today's universe (survivorship-biased).
+
+## E-010b Overnight/intraday momentum through CPCV (2026-11-14) — **REJECTED** (run 43555837904)
+15 paths: baseline IC 0.0749 vs 0.0763 with the features; better on 67% of paths, paired t = 1.03
+(rule: ≥ 80% and t ≥ 2). The walk-forward gain in E-010 was not robust. Every price-derived idea
+(E-001…E-010) has now failed: next is new information — F&O open interest (E-011).
+
+## E-011 F&O positioning (open interest) features (2026-11-14) — data downloading
+`data/fobhav.py` (NSE F&O bhavcopy 2012→, stock futures/options OI per stock and day),
+`scripts/research_fo_oi.py` (long-term: walk-forward + CPCV) and
+`scripts/research_fo_oi_intraday.py` (intraday close model, yesterday's positioning).
