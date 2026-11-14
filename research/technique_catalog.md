@@ -16,3 +16,17 @@ Status: discovered → prototyped → validated → integrated (or rejected).
 | Point-in-time universe from bhavcopy | general | Survivorship bias | **Validated as a test**, see E-000 |
 | Train on point-in-time history | own (E-000 data) | Model is data-limited and trained on survivors | **Rejected** (E-003: t = 0.66, lower CAGR) |
 | Trailing stop | LEAN `TrailingStopRiskManagementModel` | −51% worst fall | **Rejected** (E-004: −3.8 pts/yr); option kept in `simulate(trail_stop=)`, off |
+
+## Research round 2026-11-14 (papers, GitHub, books) — ranked by expected value for us
+Measured weaknesses: intraday rank skill is real (IC 0.04–0.06, 59% direction) but below costs
+(₹10k books: 0.84% per round trip); the long-term model is data-limited (E-001…E-005).
+
+| # | Technique | Source | Fixes | Effort | Status |
+|---|---|---|---|---|---|
+| 1 | Market intraday momentum (prev close→9:45 predicts 15:00→close), one cheap instrument (Nifty futures / NIFTYBEES) | Gao, Han, Li, Zhou (2018) JFE; "Intraday time series momentum: global evidence" (Reading) | intraday costs (1 trade/day, index costs ≪ stock costs) | low | **E-009 running** |
+| 2 | Options/futures positioning as features: open-interest change × price change (long/short build-up), put-call OI ratio | Pan & Poteshman (2006) RFS; "Why does option open interest predict stock returns?"; NSE F&O bhavcopy (archives, OI daily since 2000s) | data-limited model: genuinely new information | medium (downloader + features) | proposed (next) |
+| 3 | Residual (idiosyncratic) momentum | Blitz, Huij, Martens (2011) JEF; null result on US large caps 2016–26 (github blaquebaux/bespoke) | long-term risk-adjusted return | low | **E-010 running** |
+| 4 | Overnight vs intraday momentum split | Lou, Polk, Skouras (2019) JFE | long-term features; entry timing | low | **E-010 running** |
+| 5 | Cost-aware execution filter / no-trade zone: trade only when the predicted move exceeds the round-trip cost | Jensen, Kelly, Malamud, Pedersen, "Machine Learning and the Implementable Efficient Frontier" (RFS) | intraday costs | low-medium | proposed (we have min_prob; tuner keeps it off) |
+| 6 | Trees and shallow (≤3-layer) nets are the best ML return predictors; deeper nets worse | Gu, Kelly, Xiu (2020) RFS | confirms our LightGBM choice; DL already rejected (E-005) | — | no change |
+| 7 | Learning-to-rank objective, purged CV | qlib / QRT 2026 challenge repos | already have rank objective + CPCV harness | — | done |
