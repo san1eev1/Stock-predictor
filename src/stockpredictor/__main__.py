@@ -495,7 +495,8 @@ def cmd_cloud_train(settings, args) -> None:
             r = T.tune_longterm(ctx, None, n_candidates=args.candidates, log_all=False,
                                 cache=scores)
             print(f"Tuning round {rounds} (long-term): IC {r['ic']:.4f} (current "
-                  f"{r['previous_ic']:.4f}), paper check: the 5 stocks bought beat Nifty "
+                  f"{r['previous_ic']:.4f}; best of {r.get('tested', 0)} tried "
+                  f"{r.get('best_ic', float('nan')):.4f}), paper check: the 5 stocks bought beat Nifty "
                   f"{r['top5_hit']:.1%} of weeks, avg {r['top5_excess']:+.2%}/week "
                   f"(top 10: {r['top10_hit']:.1%})"
                   + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
@@ -507,7 +508,8 @@ def cmd_cloud_train(settings, args) -> None:
                 continue
             p = r.get("paper") or {}
             print(f"Tuning round {rounds} (intraday {target.label}): IC {r['ic']:.4f} (current "
-                  f"{r['previous_ic']:.4f}), paper check: Rs {p.get('avg_day_pnl', 0):+.0f}/day, "
+                  f"{r['previous_ic']:.4f}; best of {r.get('tested', 0)} tried "
+                  f"{r.get('best_ic', float('nan')):.4f}), paper check: Rs {p.get('avg_day_pnl', 0):+.0f}/day, "
                   f"{(p.get('accuracy') or 0):.0%} picks right"
                   + (" -> new settings adopted" if r["adopted"] else ""), flush=True)
         adopted += int(bool(r["adopted"]))

@@ -300,7 +300,8 @@ def tune_longterm(ctx, conn=None, n_candidates: int = 5, years: int = 3,
         _save_params(M.MODEL_DIR, best["params"])
         reset_trials("longterm")
     chosen = best if adopted else base
-    report = {"adopted": adopted, "ic": chosen["ic"], "top10_hit": chosen["top10_hit"],
+    report = {"adopted": adopted, "ic": chosen["ic"], "best_ic": best["ic"],
+              "top10_hit": chosen["top10_hit"],
               "top10_excess": chosen["top10_excess"], "top5_hit": chosen.get("top5_hit"),
               "top5_excess": chosen.get("top5_excess"), "previous_ic": base["ic"],
               "tested": len(results), "params": chosen["params"], "all": _loggable(results),
@@ -851,7 +852,7 @@ def tune_intraday(ctx, store_dir, conn=None, n_candidates: int = 5,
         _save_params(target.model_dir, best["params"])
         reset_trials(target.horizon)
     chosen = best if adopted else base
-    report = {"adopted": adopted, "ic": chosen["ic"],
+    report = {"adopted": adopted, "ic": chosen["ic"], "best_ic": best["ic"],
               "direction_accuracy": chosen.get("direction_accuracy"),
               "previous_ic": base["ic"], "tested": len(results), "params": chosen["params"],
               "all": _loggable(results), "long_check": check,
