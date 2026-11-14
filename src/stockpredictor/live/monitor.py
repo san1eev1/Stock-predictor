@@ -565,6 +565,9 @@ class Monitor:
         """Trade the 'until close' book's top 5 buy / 5 sell picks as futures and options."""
         from stockpredictor.paper import fno as FO
 
+        if rc is not None and rc.get("skipped"):
+            log.info("F&O paper picks: none today (weak signal, like the cash books)")
+            return []
         client = self._nfo_client()
         if client is None:
             return []

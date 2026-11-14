@@ -191,6 +191,20 @@ def _is_partial(store_dir: Path) -> bool:
         return False
 
 
+def _fetch(*args: str, cwd: Path, tries: int = 4) -> None:
+    """git fetch with retries: the Mac's network drops connections now and then."""
+    import time
+
+    for i in range(tries):
+        try:
+            _git("fetch", *args, cwd=cwd)
+            return
+        except subprocess.CalledProcessError:
+            if i == tries - 1:
+                raise
+            time.sleep(5 * (i + 1))
+
+
 def default_remote() -> str:
     """This repository's URL; inside GitHub Actions with the job's token, so branches can be
     pushed from any folder (actions/checkout only authorises the checkout folder)."""
@@ -232,10 +246,10 @@ def _sync(store_dir: Path, remote: str | None, years: int) -> None:
             _git("config", "remote.origin.partialclonefilter", "blob:none", cwd=store_dir)
     if years:
         _git("sparse-checkout", "set", "--no-cone", *_sparse_patterns(years), cwd=store_dir)
-        _git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", DATA_BRANCH,
+        _fetch("-q", "--depth", "1", "--filter=blob:none", "origin", DATA_BRANCH,
              cwd=store_dir)
     else:
-        _git("fetch", "-q", "--depth", "1", "origin", DATA_BRANCH, cwd=store_dir)
+        _fetch("-q", "--depth", "1", "origin", DATA_BRANCH, cwd=store_dir)
     _git("reset", "-q", "--hard", "FETCH_HEAD", cwd=store_dir)
     # Drop objects from previous syncs so only the latest snapshot is kept.
     _git("reflog", "expire", "--expire=now", "--all", cwd=store_dir)
@@ -256,7 +270,7 @@ def _branch_checkout(path: Path, branch: str, remote: str | None = None) -> bool
         _git("init", "-q", cwd=path)
         _git("remote", "add", "origin", remote, cwd=path)
     try:
-        _git("fetch", "-q", "--depth", "1", "origin", branch, cwd=path)
+        _fetch("-q", "--depth", "1", "origin", branch, cwd=path)
     except subprocess.CalledProcessError:
         return False
     _git("reset", "-q", "--hard", "FETCH_HEAD", cwd=path)
