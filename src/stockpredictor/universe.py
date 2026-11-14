@@ -52,8 +52,37 @@ def fetch_list(name: str, expected: int) -> list[dict]:
     raise RuntimeError(f"Could not download {name}:\n" + "\n".join(errors))
 
 
+SP500_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+
+
+def parse_sp500(csv_text: str) -> list[dict]:
+    """datasets/s-and-p-500-companies: Symbol, Security, GICS Sector, ..., CIK."""
+    rows = []
+    for row in csv.DictReader(io.StringIO(csv_text)):
+        sym = (row.get("Symbol") or "").strip()
+        if sym:
+            rows.append({"symbol": sym, "name": (row.get("Security") or "").strip(),
+                         "industry": (row.get("GICS Sector") or "").strip(),
+                         "isin": (row.get("CIK") or "").strip()})
+    return rows
+
+
+def fetch_sp500() -> list[dict]:
+    resp = requests.get(SP500_URL, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+    stocks = parse_sp500(resp.text)
+    if len(stocks) < 450:
+        raise RuntimeError(f"S&P 500 list has only {len(stocks)} rows")
+    return [{**s, "tradable": 1} for s in sorted(stocks, key=lambda s: s["symbol"])]
+
+
 def fetch_universe() -> list[dict]:
-    """Nifty LargeMidcap 250: every stock is used for training and is tradable."""
+    """Nifty LargeMidcap 250 (India) or the S&P 500 (MARKET=us): every stock is used for
+    training and is tradable."""
+    from stockpredictor.config import MARKET
+
+    if MARKET.name == "us":
+        return fetch_sp500()
     errors = []
     for name, expected in UNIVERSE_LISTS:
         try:

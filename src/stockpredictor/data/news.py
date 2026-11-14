@@ -19,7 +19,9 @@ from urllib.parse import quote_plus
 import pandas as pd
 import requests
 
-RSS_URL = "https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+from stockpredictor.config import MARKET as _MARKET
+
+RSS_URL = "https://news.google.com/rss/search?q={q}&" + _MARKET.rss_locale   # India / US
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36"}
 NEWS_COLS = ["symbol", "published", "source", "title", "url", "sentiment"]
 STRONG_NEGATIVE = -0.6      # a headline this negative counts as "bad news"
@@ -91,10 +93,10 @@ FOREIGN = re.compile(r"\((?:NYSE|NASDAQ|OTC|LSE|TSX)\s*:", re.I)
 
 
 def company_query(name: str) -> str:
-    """'Reliance Industries Ltd.' -> '"Reliance Industries" share'."""
+    """'Reliance Industries Ltd.' -> '"Reliance Industries" share' (US: '... stock')."""
     clean = _SUFFIXES.sub("", name).replace("&", "and").strip(" .,")
     clean = re.sub(r"\s+", " ", clean)
-    return f'"{clean}" share'
+    return f'"{clean}" {_MARKET.query_word}'
 
 
 def parse_rss(xml_text: str, symbol: str) -> list[dict]:
@@ -105,7 +107,8 @@ def parse_rss(xml_text: str, symbol: str) -> list[dict]:
         if source and title.endswith(f" - {source}"):
             title = title[: -len(source) - 3].strip()
         pub = item.findtext("pubDate")
-        if not title or not pub or FOREIGN.search(title) or is_noise(title):
+        if not title or not pub or (_MARKET.drop_foreign and FOREIGN.search(title)) \
+                or is_noise(title):
             continue
         items.append({
             "symbol": symbol,

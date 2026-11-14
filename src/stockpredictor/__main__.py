@@ -831,6 +831,21 @@ def _angel_startup(settings, store_dir: Path) -> None:
     threading.Thread(target=job, daemon=True, name="angel-backfill").start()
 
 
+def cmd_state_fetch(settings, args) -> None:
+    """GitHub: this market's paper state from its branch into the local database."""
+    from stockpredictor import cloud
+
+    print("paper state:", "downloaded" if cloud.fetch_state(Path(settings.db_path)) else "none yet")
+
+
+def cmd_state_publish(settings, args) -> None:
+    """GitHub: this market's paper state to its branch (private tables left out)."""
+    from stockpredictor import cloud
+
+    cloud.publish_state(Path(settings.db_path))
+    print(f"paper state published to {cloud.STATE_BRANCH}")
+
+
 def cmd_cloud_evening(settings, args) -> None:
     """GitHub, after the evening data update: long-term decisions, judging, paper feedback."""
     import logging
@@ -1142,6 +1157,8 @@ ARG_COMMANDS = {
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
+    "state-fetch": (cmd_state_fetch, "GitHub: download this market's paper state", lambda p: None),
+    "state-publish": (cmd_state_publish, "GitHub: publish this market's paper state", lambda p: None),
     "cloud-evening": (cmd_cloud_evening, "GitHub: after-close paper work", _dir_arg),
     "ipo-update": (cmd_ipo_update, "NSE IPO list and subscription (git store)", _dir_arg),
     "train-ipo": (cmd_train_ipo, "Learn from past IPO listings", _dir_arg),

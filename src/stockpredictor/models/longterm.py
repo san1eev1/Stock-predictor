@@ -21,10 +21,10 @@ from stockpredictor.features import technical
 from stockpredictor.models import engine
 from stockpredictor.models.engine import Ensemble
 
-from stockpredictor.config import LOCAL_MODELS_DIR, SHARED_MODELS_DIR
+from stockpredictor.config import LOCAL_MODELS_DIR, MARKET, SHARED_MODELS_DIR
 
-MODEL_DIR = SHARED_MODELS_DIR / "longterm"   # trained on GitHub (see config.py)
-MAC_MODEL_DIR = LOCAL_MODELS_DIR / "longterm"   # the Mac's daily after-close retrain
+MODEL_DIR = SHARED_MODELS_DIR / f"longterm{MARKET.model_suffix}"   # trained on GitHub (see config.py)
+MAC_MODEL_DIR = LOCAL_MODELS_DIR / f"longterm{MARKET.model_suffix}"   # the Mac's daily after-close retrain
 
 
 def model_path() -> Path:

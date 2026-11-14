@@ -23,7 +23,9 @@ from pathlib import Path
 from stockpredictor import store
 
 log = logging.getLogger(__name__)
-STATE_BRANCH = "paper-state"
+from stockpredictor.config import MARKET as _MARKET  # noqa: E402
+
+STATE_BRANCH = _MARKET.state_branch       # India "paper-state", US "paper-state-us"
 STATE_FILE = "state.db"
 PRIVATE_TABLES = ("portfolio_trades",)
 SAVED_KEY = "state_saved_at"
@@ -68,6 +70,13 @@ def snapshot(db: Path, out: Path) -> None:
     for t in PRIVATE_TABLES:
         try:
             dst.execute(f"DELETE FROM {t}")
+        except sqlite3.OperationalError:
+            pass
+    # Price history lives on the data branch; the state keeps the last 15 days (latest prices
+    # for the dashboard) - on GitHub the database holds 20 years of every stock.
+    for t in ("daily_prices", "index_prices"):
+        try:
+            dst.execute(f"DELETE FROM {t} WHERE date < date((SELECT MAX(date) FROM {t}), '-15 days')")
         except sqlite3.OperationalError:
             pass
     dst.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",

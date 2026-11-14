@@ -20,7 +20,9 @@ import numpy as np
 import pandas as pd
 
 from stockpredictor.models.engine import model_inputs
+from stockpredictor.backtest import portfolio as P
 from stockpredictor.backtest.portfolio import Position, Rules, decide
+from stockpredictor.config import MARKET
 from stockpredictor.store import tradable as store_tradable
 from stockpredictor.costs import DEFAULT_COSTS, DeliveryCosts
 from stockpredictor.data import news as N
@@ -226,7 +228,7 @@ def fill_pending(conn, prices: dict[str, float], when: str, rules: Rules = Rules
             size = equity / rules.n_hold
             if rules.regime == "half" and _get_setting(conn, "lt_risk_off") == "1":
                 size *= 0.5                   # falling market: half-size new positions
-            qty = int(min(size, cash(conn, horizon)) / (price * 1.003))
+            qty = P.shares(min(size, cash(conn, horizon)) / (price * 1.003))
             if qty <= 0:
                 _set_order(conn, o["id"], "cancelled", when, None)
                 continue
@@ -285,7 +287,7 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
 
     # 1. Orders from the previous decision are filled at today's close if the
     #    live monitor did not fill them earlier in the day.
-    fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} 15:30", rules)
+    fills = fill_pending(conn, prices, f"{date:%Y-%m-%d} {MARKET.close:%H:%M}", rules)
 
     # 2. Score today's tradable stocks (current Nifty 250 members).
     active = set(store_tradable(ctx.universe))
@@ -299,7 +301,11 @@ def run_decision(conn: sqlite3.Connection, ctx: MarketContext, model: M.LongTerm
     save_trading_scores(conn, date, scores)
 
     # 3. News overlay: strongly negative headlines up to this evening.
-    summary = N.news_summary(ctx.news, date + pd.Timedelta(hours=18))
+    # news up to 2.5 h after the close, local market time (IST 18:00; New York 18:30)
+    cutoff = (pd.Timestamp(date) + pd.Timedelta(hours=MARKET.close.hour + 2.5,
+                                                 minutes=MARKET.close.minute))
+    summary = N.news_summary(ctx.news, cutoff.tz_localize(MARKET.tz).tz_convert("UTC")
+                             if MARKET.name != "in" else pd.Timestamp(date) + pd.Timedelta(hours=18))
     negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
     severe = set(summary.loc[summary["severe_negative"].astype(bool), "symbol"])
 

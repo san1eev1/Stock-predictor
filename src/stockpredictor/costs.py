@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from stockpredictor.config import MARKET as _MARKET
+
 
 @dataclass(frozen=True)
 class DeliveryCosts:
@@ -38,7 +40,12 @@ class DeliveryCosts:
         return round(total, 2)
 
 
-DEFAULT_COSTS = DeliveryCosts()
+# US (MARKET=us): no commission, no minimum; SEC + FINRA fees ~0.003% (charged on both sides
+# here, a little conservative); 0.05% slippage.
+US_COSTS = DeliveryCosts(brokerage_pct=0.0, brokerage_min=0.0, brokerage_max=0.0, stt_pct=0.0,
+                         exchange_pct=0.00003, sebi_pct=0.0, stamp_buy_pct=0.0, gst_pct=0.0,
+                         dp_per_sell=0.0, slippage_pct=0.0005)
+DEFAULT_COSTS = US_COSTS if _MARKET.name == "us" else DeliveryCosts()
 
 
 @dataclass(frozen=True)

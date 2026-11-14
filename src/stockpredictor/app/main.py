@@ -449,6 +449,102 @@ def overview_cards():
                                 rupees(lt["equity"] - lt["cash"]), f"{lt.get('positions', 0)} holdings")])
 
 
+# --- US stocks (S&P 500): runs on GitHub (us-daily.yml); shown from its published state ---
+
+@st.cache_data(ttl=900, show_spinner="Getting the US book from GitHub…")
+def _us_state(slot: int) -> str | None:
+    """Download paper-state-us/state.db (public branch) to data/us_state.db."""
+    import shutil
+    import urllib.request
+
+    repo = store.default_remote().rstrip("/").removesuffix(".git").split("github.com/")[-1]
+    url = f"https://raw.githubusercontent.com/{repo}/paper-state-us/state.db"
+    dest = config.DATA_DIR / "us_state.db"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(dest.with_suffix(".part"), "wb") as f:
+            shutil.copyfileobj(r, f)
+        dest.with_suffix(".part").replace(dest)
+    except Exception:
+        if not dest.exists():
+            return None
+    return str(dest)
+
+
+def page_us():
+    import sqlite3
+
+    st.title("🇺🇸 US stocks (S&P 500)")
+    st.caption("Long-term picks and a $1,000 paper book for the S&P 500, run on GitHub after "
+               "each US close (prices, news with FinBERT, the same long-term model). Strongly "
+               "negative fresh news blocks a buy or sells a holding. Fractional shares, no "
+               "commission. Updated every US trading night; this page refreshes every 15 min.")
+    path = _us_state(int(datetime.now().timestamp() // 900))
+    if path is None:
+        st.info("The US book appears after its first GitHub run (us-daily.yml).")
+        return
+    c = sqlite3.connect(path)
+    c.row_factory = sqlite3.Row
+    q = lambda sql, *a: pd.read_sql(sql, c, params=a)   # noqa: E731
+    last = pd.read_sql("SELECT symbol, close, MAX(date) AS date FROM daily_prices GROUP BY symbol", c)
+    px = dict(zip(last["symbol"], last["close"]))
+    acct = c.execute("SELECT capital, cash FROM paper_accounts WHERE horizon = 'longterm'").fetchone()
+    held = q("SELECT symbol, qty, entry_price, entry_time FROM paper_trades "
+             "WHERE horizon = 'longterm' AND status = 'open'")
+    tabs = st.tabs(["Paper book ($1,000)", "Latest picks", "Activity"])
+    with tabs[0]:
+        if acct is None:
+            st.info("No paper account yet.")
+        else:
+            held["price"] = held["symbol"].map(px)
+            held["value"] = held["qty"] * held["price"].fillna(held["entry_price"])
+            held["gain"] = held["value"] - held["qty"] * held["entry_price"]
+            inv = float(held["value"].sum())
+            equity = float(acct["cash"]) + inv
+            cap = float(acct["capital"])
+            UI.cards([UI.card("Book value", f"${equity:,.2f}", f"started with ${cap:,.0f}",
+                              min(1.0, equity / cap / 2), "up" if equity >= cap else "down",
+                              f"{equity / cap - 1:+.1%}"),
+                      UI.share_card("Invested", inv, equity, f"${inv:,.2f}", f"{len(held)} holdings"),
+                      UI.card("Cash", f"${float(acct['cash']):,.2f}", "waiting for picks",
+                              float(acct["cash"]) / equity if equity else 0, "neutral",
+                              f"{float(acct['cash']) / equity:.0%}" if equity else "")])
+            if not held.empty:
+                st.dataframe(UI.pnl_colors(held[["symbol", "qty", "entry_price", "price", "value",
+                                                 "gain"]].rename(columns={
+                    "symbol": "Stock", "qty": "Shares", "entry_price": "Bought at",
+                    "price": "Last close", "value": "Value", "gain": "Gain / loss"}),
+                    ["Gain / loss"]), hide_index=True, width="stretch", column_config={
+                    k: st.column_config.NumberColumn(format="$%.2f")
+                    for k in ("Bought at", "Last close", "Value", "Gain / loss")}
+                    | {"Shares": st.column_config.NumberColumn(format="%.4f")})
+            eq = q("SELECT date, equity FROM paper_equity WHERE horizon = 'longterm' ORDER BY date")
+            if len(eq) > 1:
+                st.altair_chart(alt.Chart(eq).mark_area(
+                    line={"color": UI.NEUTRAL}, color=UI.NEUTRAL, opacity=0.15).encode(
+                    x=alt.X("date:T", title=None), y=alt.Y("equity:Q", title="Book value ($)",
+                                                            scale=alt.Scale(zero=False))),
+                    width="stretch")
+    with tabs[1]:
+        picks = q("SELECT date, rank, symbol, confidence, reasons FROM predictions "
+                  "WHERE horizon = 'longterm' AND direction = 'up' AND date = "
+                  "(SELECT MAX(date) FROM predictions WHERE horizon = 'longterm') ORDER BY rank LIMIT 15")
+        if picks.empty:
+            st.info("No picks yet.")
+        else:
+            st.caption(f"Made after the US close of {picks['date'].iloc[0]}; judged after one week "
+                       "against the S&P 500.")
+            picks["Last close"] = picks["symbol"].map(px)
+            st.dataframe(picks[["rank", "symbol", "confidence", "Last close"]].rename(columns={
+                "rank": "#", "symbol": "Stock", "confidence": "Confidence"}), hide_index=True,
+                width="stretch", column_config={"Confidence": st.column_config.ProgressColumn(
+                    format="percent", min_value=0, max_value=1),
+                    "Last close": st.column_config.NumberColumn(format="$%.2f")})
+    with tabs[2]:
+        a = q("SELECT ts, kind, symbol, message FROM alerts WHERE source LIKE 'paper-longterm%' "
+              "ORDER BY id DESC LIMIT 40")
+        st.dataframe(a, hide_index=True, width="stretch") if not a.empty else st.caption("Nothing yet.")
+
+
 # --- Pages -------------------------------------------------------------------------
 
 def page_picks():
@@ -1661,6 +1757,7 @@ pages = {
         st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday + candle experiment", icon="🕯️"),
         st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon="📊"),
         st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term", icon="🌱")],
+    "US stocks": [st.Page(page_us, url_path="us", title="S&P 500 picks + $1,000 book", icon="🇺🇸")],
     "Research": [
         st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon="🆕"),
         st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon="🎯"),

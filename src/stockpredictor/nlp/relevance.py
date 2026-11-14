@@ -22,14 +22,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from stockpredictor.config import SHARED_MODELS_DIR
+from stockpredictor.config import MARKET, SHARED_MODELS_DIR
 from stockpredictor.data import news as N
 
-MODEL_DIR = SHARED_MODELS_DIR / "news"
+MODEL_DIR = SHARED_MODELS_DIR / f"news{MARKET.model_suffix}"
 MIN_HEADLINES = 1000          # fewer labelled headlines than this: no model (relevance = 1)
 VOCAB_SIZE = 400
 MIN_WORD_COUNT = 15
-CLOSE_IST = pd.Timedelta(hours=15, minutes=30)
+CLOSE_IST = pd.Timedelta(hours=MARKET.close.hour, minutes=MARKET.close.minute)  # local close
 PARAMS = {"objective": "huber", "alpha": 1.5, "learning_rate": 0.05, "num_leaves": 15,
           "min_data_in_leaf": 40, "feature_fraction": 0.8, "bagging_fraction": 0.8,
           "bagging_freq": 1, "lambda_l2": 5.0, "verbose": -1, "seed": 7}
@@ -103,14 +103,14 @@ def reaction(news: pd.DataFrame, daily: pd.DataFrame, indices: pd.DataFrame) -> 
     divided by the stock's typical daily |stock - Nifty| move over the previous 3 months."""
     px = daily.assign(px=daily["adj_close"].fillna(daily["close"])).sort_values(["symbol", "date"])
     px["ret"] = px.groupby("symbol")["px"].pct_change()
-    nifty = indices[indices["symbol"] == "NIFTY50"].sort_values("date")
+    nifty = indices[indices["symbol"] == MARKET.index].sort_values("date")
     nret = nifty.set_index("date")["close"].pct_change()
     px["abn"] = px["ret"] - px["date"].map(nret)
     px["scale"] = px.groupby("symbol")["abn"].transform(
         lambda x: x.abs().rolling(63, min_periods=20).mean().shift())
     px["z"] = (px["abn"].abs() / px["scale"]).clip(upper=6)
 
-    ist = news["published"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    ist = news["published"].dt.tz_convert(MARKET.tz).dt.tz_localize(None)
     # Before 15:30 IST the same day's close reacts; later headlines react the next day.
     first = ist.dt.normalize() + np.where(ist - ist.dt.normalize() < CLOSE_IST,
                                           pd.Timedelta(0), pd.Timedelta(days=1))

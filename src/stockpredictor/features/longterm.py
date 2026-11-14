@@ -11,11 +11,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from stockpredictor.config import MARKET as _MARKET
 from stockpredictor.features import technical
 
 MIN_HISTORY_DAYS = 200
 
-MARKET_INDEX = "NIFTY50"
+MARKET_INDEX = _MARKET.index          # NIFTY50 / SP500 (markets.py)
 
 RANKED = ["ret_5", "ret_10", "ret_21", "ret_63", "ret_126", "mom_12_1", "dist_52w_high", "vol_63",
           "rs_nifty_63", "rs_sector_63", "vol_ratio_20_120", "rsi_14", "dist_ma20", "pos_5",
@@ -153,8 +154,9 @@ def _index_returns(indices: pd.DataFrame) -> pd.DataFrame:
     return idx[["symbol", "date", "ret_1", "ret_5", "ret_63", "ret_126"]]
 
 
-GLOBAL_CUES = {"SP500": 1, "NASDAQ": 1, "USVIX": 1, "NIKKEI": 1, "HANGSENG": 1,
-               "USDINR": 5, "CRUDE": 5}           # series -> return period (days)
+GLOBAL_CUES = ({"SP500": 1, "NASDAQ": 1, "USVIX": 1, "NIKKEI": 1, "HANGSENG": 1,
+                "USDINR": 5, "CRUDE": 5} if _MARKET.name == "in"  # series -> return period
+               else {"USVIX": 1, "CRUDE": 5, "DXY": 5})            # US: its own cues
 
 
 def global_cues(indices: pd.DataFrame, dates: pd.Index) -> pd.DataFrame:

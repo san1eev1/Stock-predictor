@@ -12,7 +12,15 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from stockpredictor.config import MARKET as _MARKET
 from stockpredictor.costs import DEFAULT_COSTS, DeliveryCosts
+
+
+def shares(x: float) -> float:
+    """Whole shares in India; fractional (4 decimals, rounded down) in the US."""
+    if _MARKET.fractional:
+        return float(np.floor(max(x, 0.0) * 1e4) / 1e4)
+    return int(x)
 
 
 @dataclass(frozen=True)
@@ -96,7 +104,7 @@ class SimResult:
     metrics: dict = field(default_factory=dict)
 
 
-CIRCUIT_BANDS = (0.05, 0.10, 0.20)   # NSE price bands (non-F&O stocks)
+CIRCUIT_BANDS = _MARKET.circuit_bands   # NSE price bands; none in the US
 
 
 def _at_circuit(ret, sign: int) -> bool:
@@ -184,7 +192,7 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
             size = slot * vol_scale(vol, d, sym) if vol is not None else slot
             if mode == "half":
                 size *= 0.5
-            qty = int(min(size, cash) / (price * 1.003))
+            qty = shares(min(size, cash) / (price * 1.003))
             if qty <= 0:
                 continue
             c = costs.cost("buy", qty * price)
@@ -199,7 +207,8 @@ def simulate(scores: pd.DataFrame, close: pd.DataFrame, rules: Rules = Rules(),
     return SimResult(pd.Series(equity, name="equity"), pd.DataFrame(trades), total_costs)
 
 
-def risk_off_days(indices: pd.DataFrame, index: str = "NIFTY50", window: int = 200) -> set:
+def risk_off_days(indices: pd.DataFrame, index: str | None = None, window: int = 200) -> set:
+    index = index or _MARKET.index
     """Days on which the PREVIOUS close of `index` was below its `window`-day average
     (known before that day's trading: no look-ahead)."""
     n = indices[indices["symbol"] == index].set_index("date")["close"].sort_index()
@@ -211,8 +220,8 @@ def crash_days(indices: pd.DataFrame, vix_jump: float = 1.4, week_fall: float = 
                hold: int = 5) -> set:
     """Crash guard days: India VIX above `vix_jump` x its 20-day average, or Nifty 50 down
     more than `week_fall` over 5 days - judged on the PREVIOUS close; stays on `hold` days."""
-    n = indices[indices["symbol"] == "NIFTY50"].set_index("date")["close"].sort_index()
-    v = indices[indices["symbol"] == "INDIAVIX"].set_index("date")["close"].sort_index()
+    n = indices[indices["symbol"] == _MARKET.index].set_index("date")["close"].sort_index()
+    v = indices[indices["symbol"] == _MARKET.vix].set_index("date")["close"].sort_index()
     v = v.reindex(n.index).ffill()
     trig = (v > vix_jump * v.rolling(20).mean()) | (n / n.shift(5) - 1 < week_fall)
     on = trig.shift(1).fillna(False).astype(float).rolling(hold, min_periods=1).max() > 0

@@ -15,6 +15,8 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from stockpredictor.config import MARKET  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 DEFAULT_START = date(2005, 1, 1)
@@ -22,25 +24,13 @@ OVERLAP_DAYS = 5
 
 # Market context indices: our name -> Yahoo ticker. (Yahoo has no usable history
 # for most other NSE sector indices; sector strength is computed from peers instead.)
-INDICES = {
-    "NIFTY50": "^NSEI",
-    "BANKNIFTY": "^NSEBANK",
-    "INDIAVIX": "^INDIAVIX",
-    "NIFTYIT": "^CNXIT",
-    "NIFTYPHARMA": "^CNXPHARMA",
-    # Overnight cues from outside India (features/longterm.global_cues)
-    "SP500": "^GSPC",
-    "NASDAQ": "^IXIC",
-    "USVIX": "^VIX",
-    "NIKKEI": "^N225",
-    "HANGSENG": "^HSI",
-    "USDINR": "INR=X",
-    "CRUDE": "CL=F",
-}
+INDICES = MARKET.indices      # our name -> Yahoo ticker (markets.py)
 
 
 def yahoo_ticker(symbol: str) -> str:
-    return f"{symbol}.NS"
+    """NSE: RELIANCE -> RELIANCE.NS; US: BRK.B -> BRK-B (Yahoo's spelling)."""
+    return symbol.replace(".", "-") + MARKET.ticker_suffix if MARKET.name == "us" \
+        else f"{symbol}{MARKET.ticker_suffix}"
 
 
 def download_history(ticker: str, start: date, end: date | None = None,

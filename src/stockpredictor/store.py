@@ -23,13 +23,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from stockpredictor.config import PROJECT_ROOT
+from stockpredictor.config import MARKET, PROJECT_ROOT
 
-DATA_BRANCH = "market-data"
+DATA_BRANCH = MARKET.data_branch              # India "market-data", US "market-data-us"
 # Held while the data folder is being refreshed, so the background training thread never
 # reads files that git is replacing.
 DATA_LOCK = threading.RLock()
-DEFAULT_STORE_DIR = PROJECT_ROOT / "market-data"
+DEFAULT_STORE_DIR = PROJECT_ROOT / MARKET.store_dir
 
 PRICE_COLS = ["symbol", "date", "open", "high", "low", "close", "adj_close", "volume", "source"]
 UNIVERSE_COLS = ["symbol", "name", "industry", "isin", "active", "tradable"]
