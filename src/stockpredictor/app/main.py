@@ -512,12 +512,12 @@ def page_us_paper():
     closed = pd.read_sql("SELECT symbol, qty, entry_time, entry_price, exit_time, exit_price, pnl, "
                          "exit_reason FROM paper_trades WHERE horizon = 'longterm' AND status = 'closed' "
                          "ORDER BY exit_time DESC", c)
-    UI.cards([UI.gain_card("Book gain since start", equity - cap, cap, scale=0.2),
+    UI.cards([UI.gain_card("Book gain since start", equity - cap, cap, scale=0.2, cur="$"),
               UI.share_card("Invested", inv, equity, f"${inv:,.2f}", f"{len(held)} holdings"),
               UI.card("Cash", f"${cash:,.2f}", "for the next buys", cash / equity if equity else 0,
                       "neutral", f"{cash / equity:.0%}" if equity else ""),
               UI.gain_card("Closed trades", float(closed["pnl"].sum()) if not closed.empty else 0.0,
-                           cap, scale=0.1)])
+                           cap, scale=0.1, cur="$")])
     pend = pd.read_sql("SELECT created, side, symbol, reason FROM paper_orders "
                        "WHERE horizon = 'longterm' AND status = 'pending' ORDER BY side DESC, symbol", c)
     if not pend.empty:
