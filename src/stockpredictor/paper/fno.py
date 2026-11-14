@@ -180,11 +180,13 @@ def _insert(conn, book, c: Contract, side, lots, price, stamp, reason) -> str:
 
 def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
                spot: dict[str, float], today: date, stamp: str,
-               capital: float = 100_000) -> list[str]:
-    """`picks`: [(symbol, 'long'|'short')] best first. Opens the futures and options books."""
+               capital: float | dict[str, float] = 100_000) -> list[str]:
+    """`picks`: [(symbol, 'long'|'short')] best first. Opens the futures and options books;
+    `capital`: one amount for both, or {book: amount}."""
     items = instruments(today)
+    caps = capital if isinstance(capital, dict) else {b: capital for b in BOOKS}
     for b in BOOKS:
-        _start_day(conn, capital, b)
+        _start_day(conn, caps[b], b)
     plans = []
     for sym, side in picks:
         if sym not in spot:
@@ -202,7 +204,7 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
     # One lot's futures margin is Rs 90k-160k and an option lot's premium Rs 5k-20k, so a
     # fixed share per pick fits almost nothing: the best picks take one lot each while the
     # book's Rs 1 lakh lasts (futures: ~1 position, options: ~6-8).
-    free = {FUT_BOOK: capital, OPT_BOOK: capital}
+    free = dict(caps)
     for book, c, side in plans:
         p = prices.get(c.symbol)
         if not p:

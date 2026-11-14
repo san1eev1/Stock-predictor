@@ -581,12 +581,14 @@ class Monitor:
         spot = self.prices.get(sorted({s for s, _ in picks}))
         try:
             opened = FO.open_books(self.conn, client, picks, spot, now.date(),
-                                   now.strftime("%Y-%m-%d %H:%M"), self.capital_intraday)
+                                   now.strftime("%Y-%m-%d %H:%M"),
+                                   {FO.FUT_BOOK: config.FUT_CAPITAL, FO.OPT_BOOK: config.OPT_CAPITAL})
         except Exception as exc:
             log.warning("F&O paper: could not open the books (%s) - retrying next minute", exc)
             _set(self.conn, "fno_retry_day", day)
             return []
-        log.info("F&O paper picks: %s", "; ".join(opened) or "none (no lot fits the Rs 1 lakh)")
+        log.info("F&O paper picks: %s", "; ".join(opened) or
+                 "none (no lot fits the books' capital)")
         return opened
 
     def fno_prices(self, stamp: str) -> dict[str, float]:

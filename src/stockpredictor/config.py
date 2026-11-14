@@ -29,6 +29,10 @@ MAC_STARTS_GITHUB_RUNS = os.getenv("MAC_STARTS_GITHUB_RUNS", "0") != "0"
 # long-term decisions and sends the paper feedback, so the Mac skips that work
 # (CLOUD_EVENING=0: the Mac does it itself after 17:15).
 CLOUD_EVENING = os.getenv("CLOUD_EVENING", "1") != "0"
+# F&O paper books, their own capital each (cash books: PAPER_CAPITAL). A stock futures lot
+# needs ~₹90k-160k of margin, so the futures book holds about one.
+FUT_CAPITAL = float(os.getenv("FUT_CAPITAL", "100000"))
+OPT_CAPITAL = float(os.getenv("OPT_CAPITAL", "50000"))
 # The live monitor and dashboard keep only this many recent years in memory (predictions
 # need recent data; training loads everything in its own short-lived process). 0 = all.
 LIVE_CONTEXT_YEARS = 0 if MAC_TRAINING else int(os.getenv("LIVE_CONTEXT_YEARS", "3"))

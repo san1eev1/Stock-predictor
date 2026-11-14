@@ -406,8 +406,9 @@ def page_overview():
     now = now_ist()
     st.markdown(f'<div class="sp-hero"><div class="sp-label">{now:%A, %d %B %Y · %H:%M} IST</div>'
                 f'<div style="font-size:1.9rem;font-weight:700;margin-top:4px">Today at a glance</div>'
-                f'<div class="sp-sub">Every paper book starts each day with its own '
-                f'₹{SETTINGS.paper_capital_intraday:,.0f}. Live prices from Angel One.</div></div>',
+                f'<div class="sp-sub">Each cash book starts the day with ₹{SETTINGS.paper_capital_intraday:,.0f}, '
+                f'futures ₹{config.FUT_CAPITAL:,.0f}, options ₹{config.OPT_CAPITAL:,.0f}. Live prices from Angel One, '
+                f'every minute.</div></div>',
                 unsafe_allow_html=True)
     overview_cards()
 
@@ -423,6 +424,8 @@ def overview_cards():
              ("F&O options", FO.OPT_BOOK, True)]
     items, total, month, total_inv, month_inv = [], 0.0, 0.0, 0.0, 0.0
     for name, book, fno in books:
+        cap = {FO.FUT_BOOK: config.FUT_CAPITAL, FO.OPT_BOOK: config.OPT_CAPITAL}.get(
+            book, SETTINGS.paper_capital_intraday)
         t = book_trades(c, book, live, fno=fno)
         d = t[t["Day"] == today] if not t.empty else t
         g = float(d["gain"].sum()) if not d.empty else 0.0
@@ -432,8 +435,8 @@ def overview_cards():
         month += float(t["gain"].sum()) if not t.empty else 0.0
         month_inv += float(t["invested"].sum()) if not t.empty else 0.0
         items.append(UI.gain_card(name, g, inv or cap, label_base="invested"))
-    UI.cards([UI.gain_card("All intraday books today", total, total_inv or cap, label_base="invested"),
-              UI.gain_card("All books · last 30 days", month, month_inv or cap, scale=0.05,
+    UI.cards([UI.gain_card("All intraday books today", total, total_inv or 1, label_base="invested"),
+              UI.gain_card("All books · last 30 days", month, month_inv or 1, scale=0.05,
                            label_base="invested")])
     st.subheader("Books today")
     UI.cards(items)
@@ -627,22 +630,24 @@ def candle_section():
 
 def page_paper_fno():
     st.title("Paper trading — F&O")
-    cap = SETTINGS.paper_capital_intraday
+    cap = {FO.FUT_BOOK: config.FUT_CAPITAL, FO.OPT_BOOK: config.OPT_CAPITAL}
     st.caption(f"The 'until close' model's best buy and sell picks, traded at about 9:46 as "
                f"near-month stock futures (long / short, ~20% margin) and as bought at-the-money "
                f"options (call for buys, put for sells). Each book starts every day with "
-               f"₹{cap:,.0f}; whole lots only, best pick first while the money lasts. A contract "
+               f"its own capital (futures ₹{cap[FO.FUT_BOOK]:,.0f}, options ₹{cap[FO.OPT_BOOK]:,.0f}); "
+               f"whole lots only, best pick first while the money lasts. A contract "
                f"that slips below its entry price is cut at once; the rest close at 15:15. "
                f"Prices from Angel One. Paper only.")
     paper_fno_books(cap)
 
 
 @st.fragment(run_every=REFRESH)
-def paper_fno_books(cap: float):
+def paper_fno_books(caps: dict):
     c = conn()
     live = live_prices(c)
     for tab, book in zip(st.tabs(["Futures", "Options"]), FO.BOOKS):
         with tab:
+            cap = caps[book]
             t = book_trades(c, book, live, fno=True)
             money_panel(t, cap, "margin" if book == FO.FUT_BOOK else "premium")
             if t.empty:
