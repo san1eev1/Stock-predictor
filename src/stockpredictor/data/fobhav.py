@@ -54,6 +54,12 @@ def reduce(rows: pd.DataFrame, day: date) -> pd.DataFrame:
     return out.reindex(columns=COLS)
 
 
+def _expiry(col: pd.Series) -> pd.Series:
+    """'30-Nov-2023' or, in some 2012 files, '31-May-12'."""
+    full = pd.to_datetime(col, format="%d-%b-%Y", errors="coerce")
+    return full.fillna(pd.to_datetime(col, format="%d-%b-%y", errors="coerce"))
+
+
 def parse(raw: bytes, day: date) -> pd.DataFrame:
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
         df = pd.read_csv(z.open(z.namelist()[0]), low_memory=False)
@@ -69,7 +75,7 @@ def parse(raw: bytes, day: date) -> pd.DataFrame:
         df = df[df["INSTRUMENT"].isin(["FUTSTK", "OPTSTK"])]
         rows = pd.DataFrame({"kind": df["INSTRUMENT"].map({"FUTSTK": "fut", "OPTSTK": "opt"}),
                              "symbol": df["SYMBOL"],
-                             "expiry": pd.to_datetime(df["EXPIRY_DT"], format="%d-%b-%Y"),
+                             "expiry": _expiry(df["EXPIRY_DT"]),
                              "opt": df["OPTION_TYP"].astype(str).str.strip(),
                              "close": df["CLOSE"], "oi": df["OPEN_INT"], "vol": df["CONTRACTS"]})
     return reduce(rows, day)

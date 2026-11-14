@@ -132,7 +132,7 @@ def test_fobhav_both_formats_and_features():
            "CONTRACTS,VAL_INLAKH,OPEN_INT,CHG_IN_OI,TIMESTAMP,\n"
            "FUTIDX,NIFTY,30-Nov-2023,0,XX,1,1,1,1,1,5,1,999,0,10-NOV-2023,\n"
            "FUTSTK,ABC,30-Nov-2023,0,XX,1,1,1,101,1,7,1,1000,0,10-NOV-2023,\n"
-           "FUTSTK,ABC,28-Dec-2023,0,XX,1,1,1,102,1,2,1,200,0,10-NOV-2023,\n"
+           "FUTSTK,ABC,28-Dec-23,0,XX,1,1,1,102,1,2,1,200,0,10-NOV-2023,\n"
            "OPTSTK,ABC,30-Nov-2023,100,CE,1,1,1,3,1,9,1,300,0,10-NOV-2023,\n"
            "OPTSTK,ABC,30-Nov-2023,100,PE,1,1,1,2,1,4,1,150,0,10-NOV-2023,\n")
     a = FB.parse(_zip(old), date(2023, 11, 10)).set_index("symbol")
