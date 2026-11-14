@@ -29,3 +29,10 @@ def isolated_models(tmp_path, monkeypatch):
     monkeypatch.setattr(MI, "MODEL_DIR", targets[0].model_dir)
     monkeypatch.setattr(MI, "ROOT", root)
     monkeypatch.setattr(MI, "LOCAL_MODELS_DIR", tmp_path / "mac-models")
+
+
+@pytest.fixture(autouse=True)
+def no_github_state(monkeypatch):
+    """Tests never download or upload the paper state (cloud.py); the Mac does its own
+    after-close work in tests, as before."""
+    monkeypatch.setattr(config, "CLOUD_EVENING", False)

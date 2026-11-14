@@ -40,6 +40,7 @@ INTRADAY_LATEST = time(14, 30)     # late start: still pick (at live prices) unt
 INTRADAY_SQUARE_OFF = time(12, 30)   # first intraday book closes here (data.intraday.TRADE_EXIT)
 CLOSE_SQUARE_OFF = time(15, 15)      # second book ("until the close") closes here
 LIVE_LEARN = time(15, 32)         # market closed: learn from today's full live session
+STATE_UPLOAD = time(15, 40)       # after both square-offs: paper state to GitHub (cloud.py)
 MAC_TRAIN_AT = time(16, 0)        # the Mac's one daily training (GitHub trains at 18:30 IST)
 # GitHub's own schedules start the evening runs (config.MAC_STARTS_GITHUB_RUNS=1: the Mac
 # starts them on time instead): 18:30 data update -> training follows; 21:00 second training.
@@ -190,6 +191,12 @@ class Monitor:
         if self.background is not None and self.background.model_changed.is_set():
             self.background.model_changed.clear()
             self._imodel = self._cmodel = None   # background training improved them: reload
+        if config.CLOUD_EVENING and not config.IN_GITHUB_ACTIONS and now.weekday() < 5 \
+                and now.time() < INTRADAY_LATEST \
+                and _setting(self.conn, "state_pulled_day") != f"{now:%Y-%m-%d}":
+            _set(self.conn, "state_pulled_day", f"{now:%Y-%m-%d}")
+            if self.pull_state(now):                 # GitHub's evening work, before trading
+                done.append("state-from-github")
         if not self._started:
             self._started = True
             self.startup_job(now)
@@ -224,7 +231,13 @@ class Monitor:
                 self.quarter_job(now)
                 self._last_quarter = now
                 done.append("quarter")
-        elif now.weekday() < 5 and now.time() >= AFTER_CLOSE \
+        elif now.weekday() < 5 and now.time() >= STATE_UPLOAD and config.CLOUD_EVENING \
+                and not config.IN_GITHUB_ACTIONS \
+                and _setting(self.conn, "state_uploaded_day") != f"{now:%Y-%m-%d}":
+            _set(self.conn, "state_uploaded_day", f"{now:%Y-%m-%d}")
+            self.upload_state()                      # GitHub's evening run takes over
+            done.append("state-to-github")
+        elif now.weekday() < 5 and now.time() >= AFTER_CLOSE and not config.CLOUD_EVENING \
                 and _setting(self.conn, "lt_after_close_day") != f"{now:%Y-%m-%d}":
             if self._last_quarter is None or (now - self._last_quarter).total_seconds() >= 900:
                 self._last_quarter = now
@@ -706,6 +719,37 @@ class Monitor:
             [(s, stamp, float(sc), int(rk), official.get(s), live.get(s))
              for s, sc, rk in zip(now_rows["symbol"], scores, ranks)])
         self.conn.commit()
+
+    def pull_state(self, now: datetime) -> bool:
+        from stockpredictor import cloud
+
+        try:
+            return cloud.pull_state(self.conn, f"{now:%Y-%m-%d}")
+        except Exception as exc:
+            log.warning("could not take over GitHub's paper state: %s", exc)
+            return False
+
+    def upload_state(self) -> None:
+        """After the close: the day's paper state to GitHub (in the background; small
+        pieces, this Mac's network drops larger uploads)."""
+        import threading
+
+        from stockpredictor import cloud
+        from stockpredictor.config import load_settings
+
+        def run():
+            try:
+                n = cloud.upload_pieces(load_settings().db_path)
+                log.info("Paper state sent to GitHub (%d pieces) for the evening work", n)
+            except Exception as exc:
+                log.warning("could not send the paper state to GitHub: %s", exc)
+                from stockpredictor import db
+
+                c = db.connect(load_settings().db_path)      # (own connection: other thread)
+                _set(c, "state_uploaded_day", "")             # retry at the next tick
+                c.close()
+
+        threading.Thread(target=run, daemon=True).start()
 
     def after_close_job(self, now: datetime) -> bool:
         try:

@@ -43,16 +43,9 @@ REFRESH = "60s"   # always: a page opened before 9:15 must still go live
 # --- Shared data ------------------------------------------------------------------
 
 def conn():
-    """Paper state: the copy published by GitHub (config.CLOUD_PAPER), else this Mac's DB."""
-    path = config.VIEW_DB if config.CLOUD_PAPER and config.VIEW_DB.exists() else SETTINGS.db_path
-    db.init_db(path)
-    return db.connect(path)
-
-
-def local_conn():
-    """This Mac's own database: your real portfolio never leaves it."""
     db.init_db(SETTINGS.db_path)
     return db.connect(SETTINGS.db_path)
+
 
 
 def _store_version() -> float:
@@ -1207,7 +1200,7 @@ def page_portfolio():
 
 
 def portfolio_tab(h: str):
-    c = local_conn()
+    c = conn()
     with st.expander("➕ Add a trade", expanded=R.trades(c, h).empty):
         with st.form(f"add_{h}", clear_on_submit=True):
             cols = st.columns(6)
@@ -1243,7 +1236,7 @@ def portfolio_tab(h: str):
 @st.fragment(run_every=REFRESH)
 def portfolio_live(h: str):
     c = conn()
-    s = R.summary(c, h, current_prices(conn()))
+    s = R.summary(c, h, current_prices(c))
     k = st.columns(4)
     k[0].metric("Invested", rupees(s.invested))
     k[1].metric("Current value", rupees(s.value),
@@ -1576,10 +1569,6 @@ def model_intraday():
 
 def page_settings():
     st.title("Settings")
-    if config.CLOUD_PAPER:
-        st.info("Paper trading runs on GitHub, so changes here only affect this Mac's copy and "
-                "are replaced by GitHub's state within a minute. Ask for rule changes to be made "
-                "in the code.")
     c = conn()
     rules, mode = D.get_rules(c)
     st.subheader("Long-term paper trading rules")

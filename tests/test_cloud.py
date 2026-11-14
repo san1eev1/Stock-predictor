@@ -114,3 +114,31 @@ def test_state_round_trip_without_private_portfolio(tmp_path, monkeypatch):
     d = db.connect(out)
     assert d.execute("SELECT capital FROM paper_accounts").fetchone()[0] == 10000
     assert d.execute("SELECT COUNT(*) FROM portfolio_trades").fetchone()[0] == 0   # never published
+
+
+def test_mac_takes_over_newer_state_but_keeps_portfolio_and_todays_trading(tmp_path, monkeypatch):
+    subprocess, cloud, db, store = _paper_state_imports()
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(store, "default_remote", lambda: str(bare))
+    gh = tmp_path / "github.db"                       # GitHub's evening state
+    db.init_db(gh)
+    g = db.connect(gh)
+    g.execute("INSERT INTO paper_accounts (horizon, capital, cash) VALUES ('longterm', 10000, 7000)")
+    g.commit()
+    cloud.publish_state(gh)
+    mac = tmp_path / "mac.db"
+    db.init_db(mac)
+    m = db.connect(mac)
+    m.execute("INSERT INTO portfolio_trades (horizon, symbol, side, qty, price, trade_date) "
+              "VALUES ('longterm', 'TCS', 'buy', 1, 2400, '2026-11-11')")
+    m.commit()
+    assert cloud.pull_state(m, "2026-11-16")
+    assert m.execute("SELECT cash FROM paper_accounts WHERE horizon='longterm'").fetchone()[0] == 7000
+    assert m.execute("SELECT COUNT(*) FROM portfolio_trades").fetchone()[0] == 1     # kept
+    assert not cloud.pull_state(m, "2026-11-16")      # nothing newer
+    m.execute("INSERT INTO predictions (horizon, date, symbol, direction, confidence, rank) "
+              "VALUES ('intraday', '2026-11-17', 'TCS', 'up', 0.9, 1)")
+    m.commit()
+    cloud.publish_state(gh)
+    assert not cloud.pull_state(m, "2026-11-17")      # today's trading started: never replace

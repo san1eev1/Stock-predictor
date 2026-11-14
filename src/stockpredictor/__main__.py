@@ -820,52 +820,6 @@ def _angel_startup(settings, store_dir: Path) -> None:
     threading.Thread(target=job, daemon=True, name="angel-backfill").start()
 
 
-def _viewer(settings, args) -> None:
-    """The Mac as a viewer: paper trading runs on GitHub; keep the dashboard and download the
-    published paper state every minute (market data and models when they change)."""
-    import logging
-    import os
-    import time
-    import webbrowser
-
-    from stockpredictor import cloud, store
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    proc = _web_server()
-    if not args.no_browser:
-        webbrowser.open(f"http://localhost:{WEB_PORT}")
-    repo = os.getenv("GITHUB_REPOSITORY") or store.default_remote().rstrip("/").removesuffix(
-        ".git").split("github.com/")[-1]
-    logging.info("Viewer: paper trading runs on GitHub (%s); showing its state", repo)
-    last_sync = 0.0
-    try:
-        while True:
-            cloud.download_view(config.VIEW_DB, repo)
-            if time.monotonic() - last_sync > 1800:            # data and models: every 30 min
-                for f in (store.sync, store.sync_models):
-                    try:
-                        f()
-                    except Exception as exc:
-                        logging.warning("sync failed: %s", exc)
-                last_sync = time.monotonic()
-            time.sleep(60)
-    except KeyboardInterrupt:
-        print("Stopped.")
-    finally:
-        proc.terminate()
-
-
-def cmd_cloud_session(settings, args) -> None:
-    """GitHub: run the live paper-trading monitor until --until (IST), state on GitHub."""
-    import logging
-    from datetime import time as _t
-
-    from stockpredictor import cloud
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    cloud.session(settings, Path(args.dir), _t(*map(int, (args.until or "15:45").split(":"))))
-
-
 def cmd_cloud_evening(settings, args) -> None:
     """GitHub, after the evening data update: long-term decisions, judging, paper feedback."""
     import logging
@@ -884,8 +838,6 @@ def cmd_start(settings, args) -> None:
 
     from stockpredictor.live import background, monitor, prices
 
-    if config.CLOUD_PAPER and not config.IN_GITHUB_ACTIONS:
-        return _viewer(settings, args)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     db.init_db(settings.db_path)
     proc = _web_server()
@@ -1117,10 +1069,9 @@ def cmd_autostart(settings, args) -> None:
     label = "com.stockpredictor.app"
     spec = {
         "Label": label,
-        # Paper trading runs on GitHub (config.CLOUD_PAPER): the Mac is only a viewer and may
-        # sleep or be off; when it trades itself it must stay awake (caffeinate).
-        "ProgramArguments": ([] if config.CLOUD_PAPER else ["/usr/bin/caffeinate", "-ims"])
-        + [str(python), "-m", "stockpredictor", "start", "--no-browser"],
+        # The Mac paper-trades while it is on: keep it awake (on power) while the app runs.
+        "ProgramArguments": ["/usr/bin/caffeinate", "-ims", str(python), "-m", "stockpredictor",
+                             "start", "--no-browser"],
         "WorkingDirectory": str(PROJECT_ROOT),
         "RunAtLoad": True,
         "KeepAlive": True,              # restarted automatically if it stops or crashes
@@ -1132,8 +1083,8 @@ def cmd_autostart(settings, args) -> None:
     with open(agents / f"{label}.plist", "wb") as f:
         plistlib.dump(spec, f)
     subprocess.run(["launchctl", "load", str(agents / f"{label}.plist")], check=True)
-    print("Background service on: the dashboard runs whenever the Mac is on. Paper trading "
-          "and training run on GitHub, Mac on or off.")
+    print("Background service on: paper trading runs while the Mac is on (a day with it off "
+          "has no trades); data, training and the evening work run on GitHub.")
     print(f"Log: {logs / 'app.log'}  ·  Dashboard: http://localhost:8501")
     print("Turn off with: python -m stockpredictor autostart --off")
 
@@ -1180,7 +1131,6 @@ ARG_COMMANDS = {
     "delivery-update": (cmd_delivery_update, "NSE delivery share per stock (git store)",
                         _delivery_args),
     "earnings-update": (cmd_earnings_update, "Quarterly results dates (git store)", _dir_arg),
-    "cloud-session": (cmd_cloud_session, "GitHub: live paper trading until --until", _start_args),
     "cloud-evening": (cmd_cloud_evening, "GitHub: after-close paper work", _dir_arg),
     "ipo-update": (cmd_ipo_update, "NSE IPO list and subscription (git store)", _dir_arg),
     "train-ipo": (cmd_train_ipo, "Learn from past IPO listings", _dir_arg),
