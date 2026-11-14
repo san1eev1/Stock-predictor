@@ -36,3 +36,15 @@ def no_github_state(monkeypatch):
     """Tests never download or upload the paper state (cloud.py); the Mac does its own
     after-close work in tests, as before."""
     monkeypatch.setattr(config, "CLOUD_EVENING", False)
+
+
+@pytest.fixture(autouse=True)
+def no_network_git(monkeypatch, tmp_path):
+    """Tests never fetch from or push to GitHub (the Mac's network can hang a fetch): the
+    default remote is a missing local path, so git fails at once. Tests that need a remote
+    set their own (a bare repo in tmp_path)."""
+    from stockpredictor import store
+
+    monkeypatch.setattr(store, "default_remote", lambda: str(tmp_path / "no-remote.git"))
+    original = store._fetch
+    monkeypatch.setattr(store, "_fetch", lambda *a, cwd, tries=4: original(*a, cwd=cwd, tries=1))

@@ -181,7 +181,8 @@ def _sparse_patterns(years: int, today: date | None = None) -> list[str]:
     recent = range(y - years + 1, y + 1)
     return ["/universe.csv", "/corporate_actions.csv", "/fundamentals/", "/intraday/", "/news/",
             "/earnings.csv", "/preopen/",
-            *[f"/{folder}/{yr}.csv" for folder in ("daily", "indices", "delivery") for yr in recent]]
+            *[f"/{folder}/{yr}.csv" for folder in ("daily", "indices", "delivery") for yr in recent],
+            *[f"/fobhav/{yr}.parquet" for yr in recent[-2:]]]          # F&O positioning (E-011)
 
 
 def _is_partial(store_dir: Path) -> bool:

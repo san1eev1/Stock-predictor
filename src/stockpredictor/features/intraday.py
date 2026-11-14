@@ -201,10 +201,28 @@ def build_for(summ: pd.DataFrame, ctx, store_dir, exit_col: str = I.EXIT_COL,
     from stockpredictor.data import fine, preopen
 
     summ = preopen.attach(fine.attach(summ), store_dir, live_preopen)
-    return build(summ, ctx.daily if daily is None else daily, ctx.feats,
-                 store.load_actions(store_dir), exit_col=exit_col,
-                 sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])),
-                 earnings=ER.load(store_dir))
+    d = ctx.daily if daily is None else daily
+    out = build(summ, d, ctx.feats, store.load_actions(store_dir), exit_col=exit_col,
+                sectors=dict(zip(ctx.universe["symbol"], ctx.universe["industry"])),
+                earnings=ER.load(store_dir))
+    return attach_fo(out, store_dir, d)
+
+
+def attach_fo(feats: pd.DataFrame, store_dir, daily: pd.DataFrame) -> pd.DataFrame:
+    """Yesterday's F&O positioning (open interest, put-call ratio, basis; data/fobhav.py) on
+    each day's row - known before the open. E-011b: daily IC +0.0072, t = 9.0 over 2,433 days."""
+    from stockpredictor.data import fobhav as FB
+
+    fo = FB.load(store_dir)
+    if fo.empty or feats.empty:
+        return feats
+    close = daily.pivot_table(index="date", columns="symbol", values="close")
+    extra = FB.features(fo, close)
+    days = sorted(set(pd.to_datetime(daily["date"])) | set(pd.to_datetime(feats["date"])))
+    nxt = dict(zip(days[:-1], days[1:]))
+    extra["date"] = extra["date"].map(nxt)
+    extra = extra.dropna(subset=["date"]).drop_duplicates(["symbol", "date"], keep="last")
+    return feats.merge(extra, on=["symbol", "date"], how="left")
 
 
 def feature_columns(feats: pd.DataFrame) -> list[str]:

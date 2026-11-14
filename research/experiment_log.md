@@ -135,7 +135,16 @@ through the CPCV harness (E-010b). Backtests are on today's universe (survivorsh
 (rule: ≥ 80% and t ≥ 2). The walk-forward gain in E-010 was not robust. Every price-derived idea
 (E-001…E-010) has now failed: next is new information — F&O open interest (E-011).
 
-## E-011 F&O positioning (open interest) features (2026-11-14) — data downloading
+## E-011 F&O positioning (open interest) features (2026-11-14) — **intraday ACCEPTED, long-term rejected by rule**
+Data: NSE F&O bhavcopy 2012-01 → 2026-11, 454 stocks, 3,664 days (runs 43562018842, 43562022162).
+E-011b intraday 'until close' model (yesterday's positioning): daily IC 0.0946 → 0.1018
+(+0.0072, t = 9.01, better on 57% of 2,433 days) → **ACCEPTED, integrated** (features/intraday.attach_fo,
+used by training and live picks; Mac downloads the last 2 years of fobhav/).
+E-011a long-term: walk-forward IC 0.0499 → 0.0565 (t = 2.87); CPCV better on 15/15 paths (t = 10.55);
+but the 5-stock backtest did not improve (CAGR 22.9% → 23.0%, Sharpe 0.89 → 0.89, worst −40.5% →
+−45.1%) → rejected by the fixed rule. The ranking gain barely reaches the portfolio because the
+live score is 90% momentum; next hypothesis: a larger model weight with the F&O features.
+First new information source to beat price-only features (E-001…E-010 all failed).
 `data/fobhav.py` (NSE F&O bhavcopy 2012→, stock futures/options OI per stock and day),
 `scripts/research_fo_oi.py` (long-term: walk-forward + CPCV) and
 `scripts/research_fo_oi_intraday.py` (intraday close model, yesterday's positioning).
