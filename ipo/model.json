@@ -1,0 +1,241 @@
+{
+ "features": [
+  "log_qib",
+  "log_nii",
+  "log_rii",
+  "log_size_cr",
+  "nifty_20d",
+  "recent_listings"
+ ],
+ "mean": [
+  3.3464912658312076,
+  3.0034361025601113,
+  2.061744768352461,
+  6.472185691066905,
+  0.003357381882915134,
+  0.1446350369808977
+ ],
+ "std": [
+  1.6046788787332804,
+  1.8702569586984243,
+  1.2078289789672418,
+  0.8713941035726418,
+  0.03705615678886579,
+  0.14403049088497596
+ ],
+ "w": [
+  1.0956265736818074,
+  1.0946395225717014,
+  0.4947380072880354,
+  0.042982558442080064,
+  0.33391924108060134,
+  0.10361738438163097,
+  -0.038706461519892675
+ ],
+ "info": {
+  "ipos": 433,
+  "since": "2003-01-02",
+  "base_rate": 0.674364896073903,
+  "qib_buckets": [
+   {
+    "lo": 0.0,
+    "hi": 3.0,
+    "n": 75,
+    "listed_up": 0.26666666666666666,
+    "median_gain": -0.04447368421052622
+   },
+   {
+    "lo": 3.0,
+    "hi": 10.0,
+    "n": 74,
+    "listed_up": 0.40540540540540543,
+    "median_gain": -0.0044406549734418155
+   },
+   {
+    "lo": 10.0,
+    "hi": 50.0,
+    "n": 85,
+    "listed_up": 0.6235294117647059,
+    "median_gain": 0.05083014048531287
+   },
+   {
+    "lo": 50.0,
+    "hi": 100.0,
+    "n": 63,
+    "listed_up": 0.9206349206349206,
+    "median_gain": 0.29095744680851054
+   },
+   {
+    "lo": 100.0,
+    "hi": Infinity,
+    "n": 136,
+    "listed_up": 0.9632352941176471,
+    "median_gain": 0.35864219753038373
+   }
+  ],
+  "recent_listings_now": 0.07964581445686092,
+  "recent": [
+   {
+    "symbol": "GERMAN",
+    "company": "German Green Steel and Power Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 139.0,
+    "qib_x": 20.9273145873,
+    "total_x": 28.9794993164,
+    "gain_open": 0.0215827338,
+    "gain_close": -0.0767625899
+   },
+   {
+    "symbol": "ORIENTCABL",
+    "company": "Orient Cables (India) Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 272.0,
+    "qib_x": 182.7624385117,
+    "total_x": 92.2696413366,
+    "gain_open": 0.6544117647,
+    "gain_close": 0.4889705882
+   },
+   {
+    "symbol": "ACEVECTOR",
+    "company": "AceVector Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 32.0,
+    "qib_x": 3.3779290332,
+    "total_x": 4.9326039309,
+    "gain_open": -0.115,
+    "gain_close": -0.185
+   },
+   {
+    "symbol": "RUNWALENTR",
+    "company": "Runwal Enterprises Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 305.0,
+    "qib_x": 3.8936841604,
+    "total_x": 2.5034220951,
+    "gain_open": 0.0,
+    "gain_close": -0.0116393443
+   },
+   {
+    "symbol": "HDFIRE",
+    "company": "HD Fire Protect Limited",
+    "listing_date": "2026-10-21T00:00:00.000",
+    "issue_price": 271.0,
+    "qib_x": 256.6520669231,
+    "total_x": 131.7012200326,
+    "gain_open": 0.2361623616,
+    "gain_close": 0.1319188192
+   },
+   {
+    "symbol": "FUSIONCX",
+    "company": "Fusion CX Limited",
+    "listing_date": "2026-10-22T00:00:00.000",
+    "issue_price": 289.0,
+    "qib_x": 4.0072202505,
+    "total_x": 4.4490307692,
+    "gain_open": 0.0553633218,
+    "gain_close": 0.0022491349
+   },
+   {
+    "symbol": "BONFIG",
+    "company": "Bonfiglioli Transmissions Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 586.0,
+    "qib_x": 120.7839622043,
+    "total_x": 46.0551359489,
+    "gain_open": 0.0,
+    "gain_close": -0.0196245734
+   },
+   {
+    "symbol": "ZETWERK",
+    "company": "Zetwerk Manufacturing Businesses Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 151.0,
+    "qib_x": 4.7332388072,
+    "total_x": 3.0597630548,
+    "gain_open": 0.0546357616,
+    "gain_close": -0.0844370861
+   },
+   {
+    "symbol": "TONBO",
+    "company": "Tonbo Imaging India Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 700.0,
+    "qib_x": 293.5569379061,
+    "total_x": 135.9036784164,
+    "gain_open": 0.6571428571,
+    "gain_close": 0.6197142857
+   },
+   {
+    "symbol": "SMT",
+    "company": "Sahajanand Medical Technologies Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 344.0,
+    "qib_x": 34.6960676357,
+    "total_x": 14.2016334167,
+    "gain_open": 0.0789244186,
+    "gain_close": 0.0978197674
+   },
+   {
+    "symbol": "JPL",
+    "company": "Jio Platforms Limited",
+    "listing_date": "2026-10-28T00:00:00.000",
+    "issue_price": 1119.0,
+    "qib_x": 70.5511275985,
+    "total_x": 22.1875450947,
+    "gain_open": 0.2135835567,
+    "gain_close": 0.2667560322
+   },
+   {
+    "symbol": "PARASHLTH",
+    "company": "Paras Healthcare Limited",
+    "listing_date": "2026-10-28T00:00:00.000",
+    "issue_price": 693.0,
+    "qib_x": 3.0923799877,
+    "total_x": 2.2298250375,
+    "gain_open": 0.038961039,
+    "gain_close": 0.0614718615
+   },
+   {
+    "symbol": "EDELALTS",
+    "company": "EAAA India Alternatives Limited",
+    "listing_date": "2026-11-02T00:00:00.000",
+    "issue_price": 1665.0,
+    "qib_x": 13.1347593936,
+    "total_x": 5.2492827874,
+    "gain_open": 0.0063063063,
+    "gain_close": 0.0377177177
+   },
+   {
+    "symbol": "BLSPOLY",
+    "company": "BLS Polymers Limited",
+    "listing_date": "2026-11-03T00:00:00.000",
+    "issue_price": 150.0,
+    "qib_x": 200.2522647059,
+    "total_x": 241.2234117647,
+    "gain_open": 0.6533333333,
+    "gain_close": 0.792
+   },
+   {
+    "symbol": "SFCTECH",
+    "company": "SFC Environmental Technologies Limited",
+    "listing_date": "2026-11-03T00:00:00.000",
+    "issue_price": 330.0,
+    "qib_x": 18.8121585677,
+    "total_x": 9.4728587607,
+    "gain_open": 0.0760606061,
+    "gain_close": 0.2912121212
+   }
+  ],
+  "walk_forward": {
+   "ipos": 369,
+   "all_listed_up": 0.6829268292682927,
+   "all_median_gain": 0.11595744680851072,
+   "apply_n": 235,
+   "apply_listed_up": 0.8680851063829788,
+   "apply_median_gain": 0.27854889589905363,
+   "avoid_n": 100,
+   "avoid_listed_up": 0.32,
+   "avoid_median_gain": -0.02743055555555557
+  }
+ }
+}
