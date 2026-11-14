@@ -470,80 +470,151 @@ def _us_state(slot: int) -> str | None:
     return str(dest)
 
 
-def page_us():
+def _us_conn():
     import sqlite3
 
-    st.title("🇺🇸 US stocks (S&P 500)")
-    st.caption("Long-term picks and a $1,000 paper book for the S&P 500, run on GitHub after "
-               "each US close (prices, news with FinBERT, the same long-term model). Strongly "
-               "negative fresh news blocks a buy or sells a holding. Fractional shares, no "
-               "commission. Updated every US trading night; this page refreshes every 15 min.")
     path = _us_state(int(datetime.now().timestamp() // 900))
     if path is None:
-        st.info("The US book appears after its first GitHub run (us-daily.yml).")
-        return
+        st.info("The US book appears after its first GitHub run (us-daily.yml, after each US close).")
+        return None
     c = sqlite3.connect(path)
     c.row_factory = sqlite3.Row
-    q = lambda sql, *a: pd.read_sql(sql, c, params=a)   # noqa: E731
-    last = pd.read_sql("SELECT symbol, close, MAX(date) AS date FROM daily_prices GROUP BY symbol", c)
-    px = dict(zip(last["symbol"], last["close"]))
-    acct = c.execute("SELECT capital, cash FROM paper_accounts WHERE horizon = 'longterm'").fetchone()
-    held = q("SELECT symbol, qty, entry_price, entry_time FROM paper_trades "
-             "WHERE horizon = 'longterm' AND status = 'open'")
-    tabs = st.tabs(["Paper book ($1,000)", "Latest picks", "Activity"])
-    with tabs[0]:
-        if acct is None:
-            st.info("No paper account yet.")
-        else:
-            held["price"] = held["symbol"].map(px)
-            held["value"] = held["qty"] * held["price"].fillna(held["entry_price"])
-            held["gain"] = held["value"] - held["qty"] * held["entry_price"]
-            inv = float(held["value"].sum())
-            equity = float(acct["cash"]) + inv
-            cap = float(acct["capital"])
-            UI.cards([UI.card("Book value", f"${equity:,.2f}", f"started with ${cap:,.0f}",
-                              min(1.0, equity / cap / 2), "up" if equity >= cap else "down",
-                              f"{equity / cap - 1:+.1%}"),
-                      UI.share_card("Invested", inv, equity, f"${inv:,.2f}", f"{len(held)} holdings"),
-                      UI.card("Cash", f"${float(acct['cash']):,.2f}", "waiting for picks",
-                              float(acct["cash"]) / equity if equity else 0, "neutral",
-                              f"{float(acct['cash']) / equity:.0%}" if equity else "")])
-            if not held.empty:
-                st.dataframe(UI.pnl_colors(held[["symbol", "qty", "entry_price", "price", "value",
-                                                 "gain"]].rename(columns={
-                    "symbol": "Stock", "qty": "Shares", "entry_price": "Bought at",
-                    "price": "Last close", "value": "Value", "gain": "Gain / loss"}),
-                    ["Gain / loss"]), hide_index=True, width="stretch", column_config={
-                    k: st.column_config.NumberColumn(format="$%.2f")
-                    for k in ("Bought at", "Last close", "Value", "Gain / loss")}
-                    | {"Shares": st.column_config.NumberColumn(format="%.4f")})
-            eq = q("SELECT date, equity FROM paper_equity WHERE horizon = 'longterm' ORDER BY date")
-            if len(eq) > 1:
-                st.altair_chart(alt.Chart(eq).mark_area(
-                    line={"color": UI.NEUTRAL}, color=UI.NEUTRAL, opacity=0.15).encode(
-                    x=alt.X("date:T", title=None), y=alt.Y("equity:Q", title="Book value ($)",
-                                                            scale=alt.Scale(zero=False))),
-                    width="stretch")
-    with tabs[1]:
-        picks = q("SELECT date, rank, symbol, confidence, reasons FROM predictions "
-                  "WHERE horizon = 'longterm' AND direction = 'up' AND date = "
-                  "(SELECT MAX(date) FROM predictions WHERE horizon = 'longterm') ORDER BY rank LIMIT 15")
-        if picks.empty:
-            st.info("No picks yet.")
-        else:
-            st.caption(f"Made after the US close of {picks['date'].iloc[0]}; judged after one week "
-                       "against the S&P 500.")
-            picks["Last close"] = picks["symbol"].map(px)
-            st.dataframe(picks[["rank", "symbol", "confidence", "Last close"]].rename(columns={
-                "rank": "#", "symbol": "Stock", "confidence": "Confidence"}), hide_index=True,
-                width="stretch", column_config={"Confidence": st.column_config.ProgressColumn(
-                    format="percent", min_value=0, max_value=1),
-                    "Last close": st.column_config.NumberColumn(format="$%.2f")})
-    with tabs[2]:
-        a = q("SELECT ts, kind, symbol, message FROM alerts WHERE source LIKE 'paper-longterm%' "
-              "ORDER BY id DESC LIMIT 40")
-        st.dataframe(a, hide_index=True, width="stretch") if not a.empty else st.caption("Nothing yet.")
+    return c
 
+
+def _us_prices(c) -> dict[str, float]:
+    last = pd.read_sql("SELECT symbol, close, MAX(date) AS date FROM daily_prices GROUP BY symbol", c)
+    return dict(zip(last["symbol"], last["close"]))
+
+
+def page_us_paper():
+    st.title("Paper trading — 🇺🇸 US stocks ($1,000)")
+    st.caption("The S&P 500 long-term book, run on GitHub after each US close: it buys the "
+               "top-ranked stocks (fractional shares, no commission) and sells a holding when it "
+               "drops out of the top ranks, hits its stop-loss or gets strongly negative news. "
+               "Orders decided after a close are filled at the next close.")
+    c = _us_conn()
+    if c is None:
+        return
+    px = _us_prices(c)
+    acct = c.execute("SELECT capital, cash FROM paper_accounts WHERE horizon = 'longterm'").fetchone()
+    held = pd.read_sql("SELECT symbol, qty, entry_price, entry_time FROM paper_trades "
+                       "WHERE horizon = 'longterm' AND status = 'open'", c)
+    if acct is None:
+        st.info("No paper account yet.")
+        return
+    held["price"] = held["symbol"].map(px)
+    held["value"] = held["qty"] * held["price"].fillna(held["entry_price"])
+    held["gain"] = held["value"] - held["qty"] * held["entry_price"]
+    inv = float(held["value"].sum())
+    cash, cap = float(acct["cash"]), float(acct["capital"])
+    equity = cash + inv
+    closed = pd.read_sql("SELECT symbol, qty, entry_time, entry_price, exit_time, exit_price, pnl, "
+                         "exit_reason FROM paper_trades WHERE horizon = 'longterm' AND status = 'closed' "
+                         "ORDER BY exit_time DESC", c)
+    UI.cards([UI.gain_card("Book gain since start", equity - cap, cap, scale=0.2),
+              UI.share_card("Invested", inv, equity, f"${inv:,.2f}", f"{len(held)} holdings"),
+              UI.card("Cash", f"${cash:,.2f}", "for the next buys", cash / equity if equity else 0,
+                      "neutral", f"{cash / equity:.0%}" if equity else ""),
+              UI.gain_card("Closed trades", float(closed["pnl"].sum()) if not closed.empty else 0.0,
+                           cap, scale=0.1)])
+    pend = pd.read_sql("SELECT created, side, symbol, reason FROM paper_orders "
+                       "WHERE horizon = 'longterm' AND status = 'pending' ORDER BY side DESC, symbol", c)
+    if not pend.empty:
+        buys = ", ".join(pend.loc[pend["side"] == "buy", "symbol"]) or "none"
+        sells = ", ".join(pend.loc[pend["side"] == "sell", "symbol"]) or "none"
+        st.info(f"**Next US close** — buy: {buys} · sell: {sells}")
+    st.subheader("Holdings")
+    if held.empty:
+        st.caption("Nothing held yet.")
+    else:
+        st.dataframe(UI.pnl_colors(held[["symbol", "qty", "entry_price", "price", "value", "gain"]]
+                                   .rename(columns={"symbol": "Stock", "qty": "Shares",
+                                                    "entry_price": "Bought at", "price": "Last close",
+                                                    "value": "Value", "gain": "Gain / loss"}),
+                                   ["Gain / loss"]), hide_index=True, width="stretch", column_config={
+            k: st.column_config.NumberColumn(format="$%.2f")
+            for k in ("Bought at", "Last close", "Value", "Gain / loss")}
+            | {"Shares": st.column_config.NumberColumn(format="%.4f")})
+    st.subheader("Sold")
+    if closed.empty:
+        st.caption("No sells yet.")
+    else:
+        closed["Return"] = closed["exit_price"] / closed["entry_price"] - 1
+        st.dataframe(UI.pnl_colors(closed.rename(columns={
+            "symbol": "Stock", "qty": "Shares", "entry_time": "Bought", "entry_price": "Bought at",
+            "exit_time": "Sold", "exit_price": "Sold at", "pnl": "Gain / loss",
+            "exit_reason": "Why sold"}), ["Gain / loss", "Return"]), hide_index=True,
+            width="stretch", column_config={k: st.column_config.NumberColumn(format="$%.2f")
+                                            for k in ("Bought at", "Sold at", "Gain / loss")}
+            | {"Return": st.column_config.NumberColumn(format="percent"),
+               "Shares": st.column_config.NumberColumn(format="%.4f")})
+    eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'longterm' ORDER BY date", c)
+    if len(eq) > 1:
+        st.subheader("Book value")
+        st.altair_chart(alt.Chart(eq).mark_area(line={"color": UI.NEUTRAL}, color=UI.NEUTRAL,
+                                                opacity=0.15).encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("equity:Q", title="Book value ($)", scale=alt.Scale(zero=False))), width="stretch")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _us_backtest(slot: int) -> dict | None:
+    import urllib.request
+
+    repo = store.default_remote().rstrip("/").removesuffix(".git").split("github.com/")[-1]
+    try:
+        with urllib.request.urlopen(
+                f"https://raw.githubusercontent.com/{repo}/models-us/longterm_us/backtest.json",
+                timeout=30) as r:
+            return json.load(r)
+    except Exception:
+        return None
+
+
+def page_us_research():
+    st.title("Research — 🇺🇸 US stocks (S&P 500)")
+    st.caption("The same long-term model as India, trained on GitHub on S&P 500 prices since "
+               "2005 (and US news for the bad-news filter). Picks are judged after one week "
+               "against the S&P 500.")
+    c = _us_conn()
+    if c is None:
+        return
+    px = _us_prices(c)
+    picks = pd.read_sql("SELECT date, rank, symbol, confidence FROM predictions WHERE horizon = "
+                        "'longterm' AND direction = 'up' AND date = (SELECT MAX(date) FROM "
+                        "predictions WHERE horizon = 'longterm') ORDER BY rank LIMIT 15", c)
+    judged = pd.read_sql("SELECT correct FROM predictions WHERE horizon = 'longterm' "
+                         "AND correct IS NOT NULL", c)
+    bt_ = _us_backtest(int(datetime.now().timestamp() // 3600)) or {}
+    s = (bt_.get("strategies") or {}).get("daily") or {}
+    items = []
+    if bt_.get("ic_mean") is not None:
+        items.append(UI.card("Ranking skill (IC)", f"{bt_['ic_mean']:.3f}", "weekly, out of sample",
+                             min(1.0, bt_["ic_mean"] / 0.08), "up", f"{bt_['ic_mean']:.3f}"))
+    if s:
+        items.append(UI.card("Backtest return", f"{s['cagr']:.1%} a year", f"Sharpe {s['sharpe']:.2f}",
+                             min(1.0, s["cagr"] / 0.4), "up" if s["cagr"] > 0 else "down", f"{s['cagr']:.0%}"))
+        items.append(UI.card("Worst fall", f"{s['max_drawdown']:.0%}", "backtest", abs(s["max_drawdown"]),
+                             "down", f"{s['max_drawdown']:.0%}"))
+    if len(judged):
+        acc = float(judged["correct"].mean())
+        items.append(UI.card("Live picks right", f"{acc:.0%}", f"{len(judged)} judged", acc, "up" if acc > 0.5 else "down",
+                             f"{acc:.0%}"))
+    if items:
+        UI.cards(items)
+        st.caption("Backtest uses today's S&P 500 list, so it is flattered by survivorship bias.")
+    st.subheader("Latest picks")
+    if picks.empty:
+        st.caption("No picks yet.")
+    else:
+        st.caption(f"After the US close of {picks['date'].iloc[0]}.")
+        picks["Last close"] = picks["symbol"].map(px)
+        st.dataframe(picks[["rank", "symbol", "confidence", "Last close"]].rename(columns={
+            "rank": "#", "symbol": "Stock", "confidence": "Confidence"}), hide_index=True,
+            width="stretch", column_config={"Confidence": st.column_config.ProgressColumn(
+                format="percent", min_value=0, max_value=1),
+                "Last close": st.column_config.NumberColumn(format="$%.2f")})
 
 # --- Pages -------------------------------------------------------------------------
 
@@ -1753,12 +1824,13 @@ pages = {
         st.Page(page_picks, url_path="longterm_picks", title="Long-term picks", icon="📈"),
         st.Page(page_intraday_1230, url_path="intraday_1230", title="Intraday — until 12:30", icon="⚡"),
         st.Page(page_intraday_close, url_path="intraday_close", title="Intraday — until close", icon="🔔")],
-    "Paper trading (₹10,000 books)": [
+    "Paper trading": [
         st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday + candle experiment", icon="🕯️"),
         st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon="📊"),
-        st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term", icon="🌱")],
-    "US stocks": [st.Page(page_us, url_path="us", title="S&P 500 picks + $1,000 book", icon="🇺🇸")],
+        st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term", icon="🌱"),
+        st.Page(page_us_paper, url_path="paper_us", title="US stocks ($1,000)", icon="🇺🇸")],
     "Research": [
+        st.Page(page_us_research, url_path="us", title="US stocks (S&P 500)", icon="🇺🇸"),
         st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon="🆕"),
         st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon="🎯"),
         st.Page(page_model, url_path="model", title="Model", icon="🧠")],
