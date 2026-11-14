@@ -123,11 +123,15 @@ def _membership(feats, close, size) -> pd.DataFrame:
 
 def format_report(r: dict) -> str:
     pct = lambda x: f"{x * 100:6.1f}%"  # noqa: E731
-    lines = [f"Long-term backtest {r['period']}  (capital Rs {r['capital']:,.0f}, costs included)",
+    from stockpredictor.config import MARKET
+
+    cur = "$" if MARKET.name == "us" else "Rs "
+    idx, uni = ("S&P 500", "S&P 500 stocks") if MARKET.name == "us" else ("Nifty 50", "Nifty 250")
+    lines = [f"Long-term backtest {r['period']}  (capital {cur}{r['capital']:,.0f}, costs included)",
              "",
              f"Prediction quality: IC {r['ic_mean']:.3f} (t={r['ic_t_stat']:.1f}), "
              f"positive in {r['ic_positive_share']:.0%} of weeks",
-             f"Top-10 picks beat Nifty over the next week: {r['hit_rate_top10']:.0%} "
+             f"Top-10 picks beat {idx} over the next week: {r['hit_rate_top10']:.0%} "
              f"(all stocks: {r['base_rate_all']:.0%})",
              f"Avg 1-week excess return: top-10 {pct(r['top10_fwd_excess'])}, "
              f"bottom-10 {pct(r['bottom10_fwd_excess'])}",
@@ -135,15 +139,15 @@ def format_report(r: dict) -> str:
              f"{'':26}{'CAGR':>8}{'Vol':>8}{'Sharpe':>8}{'MaxDD':>8}"]
     rows = {**{(k if k.startswith("momentum") else f"Model ({k})"): v
                for k, v in r["strategies"].items()},
-            "Nifty 50": r["benchmarks"]["nifty50"],
-            "Equal-weight Nifty 250": r["benchmarks"]["equal_weight_nifty100"]}
+            idx: r["benchmarks"]["nifty50"],
+            f"Equal-weight {uni}": r["benchmarks"]["equal_weight_nifty100"]}
     for name, s in rows.items():
         lines.append(f"{name:26}{pct(s['cagr']):>8}{pct(s['volatility']):>8}"
                      f"{s['sharpe']:8.2f}{pct(s['max_drawdown']):>8}")
     lines.append("")
     for k, s in r["strategies"].items():
         lines.append(f"{k}: {s['trades_per_year']:.0f} trades/yr, win rate {s['win_rate']:.0%}, "
-                     f"avg hold {s['avg_hold_days']:.0f} days, costs Rs {s['total_costs']:,.0f}, "
+                     f"avg hold {s['avg_hold_days']:.0f} days, costs {cur}{s['total_costs']:,.0f}, "
                      f"exits {s['exit_reasons']}")
     lines.append("")
     names = list(r["yearly"])

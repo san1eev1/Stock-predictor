@@ -139,3 +139,17 @@ through the CPCV harness (E-010b). Backtests are on today's universe (survivorsh
 `data/fobhav.py` (NSE F&O bhavcopy 2012→, stock futures/options OI per stock and day),
 `scripts/research_fo_oi.py` (long-term: walk-forward + CPCV) and
 `scripts/research_fo_oi_intraday.py` (intraday close model, yesterday's positioning).
+
+## E-012 First US (S&P 500) long-term model (2026-11-14, us-daily run 43558962579)
+Same model and rules as India, MARKET=us, 503 stocks, Yahoo prices since 2005, $1,000 book.
+Weekly IC 0.027 (t = 3.1), positive in 56% of weeks (India 0.050).
+| Strategy (2015–2026, today's S&P 500 list) | CAGR | Vol | Sharpe | Max DD |
+|---|---|---|---|---|
+| Model, daily decisions | 20.6% | 36.0% | 0.57 | −49.9% |
+| Model, weekly | 17.6% | 35.3% | 0.50 | −46.4% |
+| Model, weekly, max 2 per sector | 21.2% | 35.3% | 0.60 | −51.8% |
+| S&P 500 | 11.8% | 17.6% | 0.67 | −33.9% |
+| Equal-weight S&P 500 stocks | 14.3% | 19.6% | 0.73 | −34.1% |
+Higher return than the index but lower Sharpe and much deeper falls; survivorship-biased (today's
+list), so the real edge is smaller still. Top features: market 63-day return, crude, VIX, dollar,
+market volatility, sector return, beta. The US book starts trading on Monday's close.
