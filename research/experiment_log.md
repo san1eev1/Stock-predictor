@@ -114,9 +114,18 @@ shortlist (all judged and learned from) but trades only the 3–5 strongest a si
 tuning's number, clamped to 3–5), ₹10,000 total with no margin, held all day (learned stop/target,
 square-off). Mid-day review removed from the code. Candle book: same counts, keeps cut-at-entry.
 
-## E-009 Market intraday momentum on Nifty (2026-11-14) — running
-Gao, Han, Li & Zhou (2018, JFE): previous close → first 30 min predicts the last 30 min.
-`scripts/research_market_intraday_momentum.py`, Angel One 5-min Nifty 2017→. Rule in the header.
+## E-009 Market intraday momentum on Nifty (2026-11-14) — **REJECTED** (run 43555362311)
+Gao, Han, Li & Zhou (2018, JFE) on Nifty 50, Angel One 5-min bars 2017-01 → 2026-11 (2,446 days).
+corr(prev close→9:45, 15:00→close) = +0.010; strategy gross +0.11 bp/trade (t 0.27, hit 51%);
+net of 0.03% (index futures) −2.89 bp (t −7.3); volatile months no better. The US effect is
+absent in India in this period.
 
-## E-010 Residual momentum and overnight/intraday momentum (2026-11-14) — running
-Blitz, Huij & Martens (2011); Lou, Polk & Skouras (2019). `scripts/research_residual_momentum.py`.
+## E-010 Residual momentum and overnight/intraday momentum (2026-11-14) (run 43555365598)
+| | Weekly IC (t) | CAGR | Sharpe | Worst |
+|---|---|---|---|---|
+| Baseline | 0.0504 (7.6) | 22.5% | 0.88 | −40.5% |
+| + residual momentum (Blitz et al. 2011) | 0.0495 (7.5) | 23.7% | 0.92 | −40.7% |
+| + overnight/intraday momentum (Lou et al. 2019) | 0.0537 (8.2) | 25.6% | 0.99 | −41.4% |
+Residual momentum: paired IC −0.0009, t −0.41 → **REJECTED**. Overnight/intraday: paired IC +0.0034,
+t = 1.64 → below the bar (REJECT by the rule) but the most promising result so far; re-tested
+through the CPCV harness (E-010b). Backtests are on today's universe (survivorship-biased).
