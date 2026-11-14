@@ -52,4 +52,10 @@ jobs:
       - name: Run
         env:
           FEATURE_CACHE: "0"
+          # Angel One for experiments that need its history (they refuse to run in market
+          # hours: Angel One belongs to the live books then).
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: python "scripts/${{ inputs.script }}" market-data

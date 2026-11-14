@@ -113,3 +113,10 @@ After E-008 showed 20 trades/day lose about their costs: every intraday book kee
 shortlist (all judged and learned from) but trades only the 3–5 strongest a side (the nightly
 tuning's number, clamped to 3–5), ₹10,000 total with no margin, held all day (learned stop/target,
 square-off). Mid-day review removed from the code. Candle book: same counts, keeps cut-at-entry.
+
+## E-009 Market intraday momentum on Nifty (2026-11-14) — running
+Gao, Han, Li & Zhou (2018, JFE): previous close → first 30 min predicts the last 30 min.
+`scripts/research_market_intraday_momentum.py`, Angel One 5-min Nifty 2017→. Rule in the header.
+
+## E-010 Residual momentum and overnight/intraday momentum (2026-11-14) — running
+Blitz, Huij & Martens (2011); Lou, Polk & Skouras (2019). `scripts/research_residual_momentum.py`.
