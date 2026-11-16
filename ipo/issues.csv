@@ -1,32 +1,33 @@
 symbol,company,segment,start,end,listing_date,price_low,price_high,issue_price
+8565TACA30,Tata Capital Limited,debt,2025-10-06,2025-10-08,2026-11-16,310.0,326.0,
 ESFL,Essen Speciality Films Limited,sme,2023-06-23,2023-06-27,2026-11-13,101.0,107.0,115.0
 13DCCL29A,Dar Credit & Capital Limited,sme,2025-05-21,2025-05-23,2026-11-09,57.0,60.0,10000.0
 VPFL,Vedant Poly Fabs Limited,sme,2026-11-02,2026-11-04,2026-11-09,88.0,94.0,94.0
-MAXENGS,Maxwell Engineering Solutions Limited,sme,2026-10-30,2026-11-03,2026-11-06,150.0,158.0,158.0
-HGSINDIALT,HGS (India) Limited,sme,2026-10-30,2026-11-03,2026-11-06,114.0,120.0,120.0
-OLAPP,Ola Electric Mobility Limited,mainboard,2024-08-02,2024-08-06,2026-11-06,72.0,76.0,11.0
 870TCHFL36,Tata Capital Housing Finance Limited,debt,2020-01-07,2020-01-08,2026-11-06,1000.0,1000.0,
+OLAPP,Ola Electric Mobility Limited,mainboard,2024-08-02,2024-08-06,2026-11-06,72.0,76.0,11.0
 BAHETI,Baheti Recycling Industries Limited,sme,2022-11-28,2022-11-30,2026-11-06,45.0,45.0,774.0
+HGSINDIALT,HGS (India) Limited,sme,2026-10-30,2026-11-03,2026-11-06,114.0,120.0,120.0
+MAXENGS,Maxwell Engineering Solutions Limited,sme,2026-10-30,2026-11-03,2026-11-06,150.0,158.0,158.0
 BCSSL,Bombay Coated and Special Steels Limited,mainboard,2026-10-29,2026-11-02,2026-11-05,78.0,82.0,82.0
 MKJEWELS,M. K. Sons Fine Jewels Limited,mainboard,2026-10-28,2026-10-30,2026-11-04,153.0,162.0,162.0
-SFCTECH,SFC Environmental Technologies Limited,mainboard,2026-10-27,2026-10-29,2026-11-03,313.0,330.0,330.0
 BLSPOLY,BLS Polymers Limited,mainboard,2026-10-27,2026-10-29,2026-11-03,142.0,150.0,150.0
+SFCTECH,SFC Environmental Technologies Limited,mainboard,2026-10-27,2026-10-29,2026-11-03,313.0,330.0,330.0
 EDELALTS,EAAA India Alternatives Limited,mainboard,2026-10-26,2026-10-28,2026-11-02,1585.0,1665.0,1665.0
 ARHAM,Arham Technologies Limited,sme,2022-12-05,2022-12-07,2026-10-30,42.0,42.0,193.0
-PARASHLTH,Paras Healthcare Limited,mainboard,2026-10-21,2026-10-23,2026-10-28,660.0,693.0,693.0
 JPL,Jio Platforms Limited,mainboard,2026-10-21,2026-10-23,2026-10-28,1065.0,1119.0,1119.0
+PARASHLTH,Paras Healthcare Limited,mainboard,2026-10-21,2026-10-23,2026-10-28,660.0,693.0,693.0
 SUDARSHAN,Sudarshan Pharma Industries Limited,sme,2019-06-12,2019-06-21,2026-10-27,72.0,72.0,32.57
 8455PHFL31,PNB Housing Finance Limited,debt,2016-10-25,2016-10-27,2026-10-27,750.0,775.0,
 SMT,Sahajanand Medical Technologies Limited,mainboard,2026-10-15,2026-10-19,2026-10-23,327.0,344.0,344.0
-TONBO,Tonbo Imaging India Limited,mainboard,2026-10-15,2026-10-19,2026-10-23,665.0,700.0,700.0
 116AFIL29A,Akme Fintrade (India) Limited,debt,2024-06-19,2024-06-21,2026-10-23,114.0,120.0,10000.0
+TONBO,Tonbo Imaging India Limited,mainboard,2026-10-15,2026-10-19,2026-10-23,665.0,700.0,700.0
 ZETWERK,Zetwerk Manufacturing Businesses Limited,mainboard,2026-10-15,2026-10-19,2026-10-23,143.0,151.0,151.0
 BONFIG,Bonfiglioli Transmissions Limited,mainboard,2026-10-15,2026-10-19,2026-10-23,558.0,586.0,586.0
-FUSIONCX,Fusion CX Limited,mainboard,2026-10-14,2026-10-16,2026-10-22,275.0,289.0,289.0
 RAVITA,Ravita Engineering Services Limited,sme,2026-10-14,2026-10-16,2026-10-22,105.0,112.0,112.0
+FUSIONCX,Fusion CX Limited,mainboard,2026-10-14,2026-10-16,2026-10-22,275.0,289.0,289.0
+PARTYPP,Party Cruisers Limited,sme,2021-02-22,2021-02-25,2026-10-21,51.0,51.0,90.0
 LOANFRONT,Vaibhav Vyapaar Limited,sme,2026-10-13,2026-10-15,2026-10-21,51.0,54.0,54.0
 HDFIRE,HD Fire Protect Limited,mainboard,2026-10-13,2026-10-15,2026-10-21,258.0,271.0,271.0
-PARTYPP,Party Cruisers Limited,sme,2021-02-22,2021-02-25,2026-10-21,51.0,51.0,90.0
 857LTFL36,L&T Finance Limited,debt,2019-03-06,2019-03-07,2026-10-15,1000.0,1000.0,99987.0
 RKFAL,R.K. Fashion Accessories Limited,sme,2026-10-05,2026-10-07,2026-10-12,77.0,82.0,82.0
 EVENTIONS,Eventions Limited,sme,2026-09-30,2026-10-05,2026-10-08,112.0,118.0,118.0
@@ -36,49 +37,49 @@ IIFL30,IIFL Finance Limited,debt,2021-03-03,2021-03-18,2026-10-08,1000.0,1000.0,
 PAPADMALJI,Papadmalji Agro Foods Limited,sme,2026-09-29,2026-10-01,2026-10-07,69.0,72.0,72.0
 GREENASIA,Green Asia Impex Limited,sme,2026-09-24,2026-10-01,2026-10-07,84.0,89.0,89.0
 MOFS29,Motilal Oswal Financial Services Limited,debt,2024-04-23,2024-05-03,2026-10-06,1000.0,1000.0,
-SHAHINVEST,Shah Investor's Home Limited,mainboard,2026-09-28,2026-09-30,2026-10-06,159.0,167.0,167.0
 SRIT,Srit India Limited,mainboard,2026-09-28,2026-09-30,2026-10-06,123.0,130.0,130.0
-BMISL,Bench Mark Infotech Services Limited,sme,2026-09-25,2026-09-29,2026-10-05,104.0,110.0,110.0
+SHAHINVEST,Shah Investor's Home Limited,mainboard,2026-09-28,2026-09-30,2026-10-06,159.0,167.0,167.0
 GERMAN,German Green Steel and Power Limited,mainboard,2026-09-25,2026-09-29,2026-10-05,132.0,139.0,139.0
+BMISL,Bench Mark Infotech Services Limited,sme,2026-09-25,2026-09-29,2026-10-05,104.0,110.0,110.0
+HIMALAYAN,Himalayan Solar Limited,sme,2026-09-25,2026-09-29,2026-10-05,98.0,103.0,103.0
 ORIENTCABL,Orient Cables (India) Limited,mainboard,2026-09-25,2026-09-29,2026-10-05,258.0,272.0,272.0
 RUNWALENTR,Runwal Enterprises Limited,mainboard,2026-09-25,2026-09-29,2026-10-05,290.0,302.0,305.0
 ACEVECTOR,AceVector Limited,mainboard,2026-09-25,2026-09-29,2026-10-05,30.0,32.0,32.0
-HIMALAYAN,Himalayan Solar Limited,sme,2026-09-25,2026-09-29,2026-10-05,98.0,103.0,103.0
 AONESTEELS,A-One Steels India Limited,mainboard,2026-09-24,2026-09-28,2026-10-01,385.0,405.0,405.0
 MONEYVIEW,Moneyview Limited,mainboard,2026-09-24,2026-09-28,2026-10-01,32.0,34.0,34.0
-POOJALOGIS,Pooja Logistics Limited,sme,2026-09-23,2026-09-25,2026-09-30,109.0,115.0,115.0
-ARMEE,ArMee Infotech Limited,mainboard,2026-09-23,2026-09-25,2026-09-30,350.0,375.0,375.0
+COREIN,Coreintegra Consulting Services Limited,sme,2026-09-23,2026-09-25,2026-09-30,74.0,78.0,78.0
 SWASTIKAIN,Swastika Infra Limited,mainboard,2026-09-23,2026-09-25,2026-09-30,175.0,185.0,185.0
+ARMEE,ArMee Infotech Limited,mainboard,2026-09-23,2026-09-25,2026-09-30,350.0,375.0,375.0
 ADROITIND,Adroit Industries (India) Limited,mainboard,2026-09-23,2026-09-25,2026-09-30,126.0,134.0,134.0
 ELEVATE,Elevate Campuses Limited,mainboard,2026-09-23,2026-09-25,2026-09-30,343.0,362.0,362.0
-COREIN,Coreintegra Consulting Services Limited,sme,2026-09-23,2026-09-25,2026-09-30,74.0,78.0,78.0
+POOJALOGIS,Pooja Logistics Limited,sme,2026-09-23,2026-09-25,2026-09-30,109.0,115.0,115.0
 VARMORA,Varmora Granito Limited,mainboard,2026-09-22,2026-09-24,2026-09-29,140.0,148.0,148.0
 AXIOMGAS,Axiom Gas Engineering Limited,sme,2026-09-18,2026-09-22,2026-09-25,51.0,54.0,54.0
 SONA,Sonaselection India Limited,mainboard,2026-09-17,2026-09-21,2026-09-24,94.0,99.0,99.0
 SPECTRAA,SpectraA Technology Solutions Limited,sme,2026-09-17,2026-09-21,2026-09-24,112.0,118.0,118.0
 KHERIAAUTO,Kheria Autocomp Limited,sme,2026-09-17,2026-09-21,2026-09-24,96.0,101.0,101.0
+SSRETAIL,SS Retail Limited,mainboard,2026-09-16,2026-09-18,2026-09-23,403.0,424.0,424.0
 HEROMOTORS,Hero Motors Limited,mainboard,2026-09-16,2026-09-18,2026-09-23,79.0,84.0,84.0
 JSIPL,Jindal Supreme (India) Limited,mainboard,2026-09-16,2026-09-18,2026-09-23,88.0,93.0,93.0
-SSRETAIL,SS Retail Limited,mainboard,2026-09-16,2026-09-18,2026-09-23,403.0,424.0,424.0
 MANIKA,Manika Plastech Limited,mainboard,2026-09-11,2026-09-16,2026-09-21,40.0,43.0,43.0
 VEEGALAND,Veegaland Developers Limited,mainboard,2026-09-10,2026-09-15,2026-09-18,130.0,140.0,140.0
 VINOD,Vinod Texworld Limited,sme,2026-09-09,2026-09-11,2026-09-17,94.0,94.0,94.0
 LCCPROJECT,LCC Projects Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,139.0,146.0,146.0
-RENTOMOJO,Rentomojo Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,384.0,404.0,404.0
-STEAMHOUSE,Steamhouse India Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,77.0,81.0,81.0
-ARCIL,Asset Reconstruction Company (India) Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,132.0,139.0,139.0
-MPIMANIPAL,Manipal Payment and Identity Solutions Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,322.0,339.0,339.0
 KARAMTARA,Karamtara Engineering Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,241.0,254.0,254.0
+MPIMANIPAL,Manipal Payment and Identity Solutions Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,322.0,339.0,339.0
+ARCIL,Asset Reconstruction Company (India) Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,132.0,139.0,139.0
+STEAMHOUSE,Steamhouse India Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,77.0,81.0,81.0
+RENTOMOJO,Rentomojo Limited,mainboard,2026-09-09,2026-09-11,2026-09-17,384.0,404.0,404.0
+SCL003,Sammaan Capital Limited,debt,2025-02-27,2025-03-12,2026-09-16,1000.0,1000.0,
+SCL19325A,Sammaan Capital Limited,debt,2024-09-06,2024-09-19,2026-09-16,1000.0,1000.0,
+SCL004,Sammaan Capital Limited,debt,2025-07-15,2025-07-28,2026-09-16,1000.0,1000.0,
 975SCL35,Sammaan Capital Limited,debt,2024-09-06,2024-09-19,2026-09-16,1000.0,1000.0,
 GLASSWALL,Glass Wall Systems (India) Limited,mainboard,2026-09-08,2026-09-10,2026-09-16,172.0,182.0,182.0
 PRASOLCHEM,Prasol Chemicals Limited,mainboard,2026-09-08,2026-09-10,2026-09-16,643.0,676.0,676.0
-SCL19325A,Sammaan Capital Limited,debt,2024-09-06,2024-09-19,2026-09-16,1000.0,1000.0,
-SCL003,Sammaan Capital Limited,debt,2025-02-27,2025-03-12,2026-09-16,1000.0,1000.0,
 KANOHAR,Kanohar Electricals Limited,mainboard,2026-09-08,2026-09-10,2026-09-16,601.0,632.0,632.0
-SCL004,Sammaan Capital Limited,debt,2025-07-15,2025-07-28,2026-09-16,1000.0,1000.0,
 PRANAV,Pranav Constructions Limited,mainboard,2026-09-07,2026-09-09,2026-09-15,118.0,124.0,124.0
-QUALIANCE,Qualiance International Limited,sme,2026-09-04,2026-09-08,2026-09-11,120.0,127.0,127.0
 DOLLEX,Dollex Agrotech Limited,sme,2022-12-15,2022-12-20,2026-09-11,35.0,35.0,38.0
+QUALIANCE,Qualiance International Limited,sme,2026-09-04,2026-09-08,2026-09-11,120.0,127.0,127.0
 805TACA29,Tata Capital Limited,debt,2025-10-06,2025-10-08,2026-09-10,310.0,326.0,
 PFC2026,Power Finance Corporation Limited,debt,2026-01-16,2026-01-30,2026-09-09,1000.0,1000.0,
 DEEPA,Deepa Jewellers Limited,mainboard,2026-09-01,2026-09-03,2026-09-08,168.0,177.0,177.0
@@ -88,37 +89,37 @@ SHANTIINOR,Shanti Inorganics Limited,sme,2026-08-31,2026-09-02,2026-09-07,79.0,8
 PRIORITY,Priority Jewels Limited,mainboard,2026-08-28,2026-09-01,2026-09-04,190.0,200.0,200.0
 ESDS,ESDS Software Solution Limited,mainboard,2026-08-28,2026-09-01,2026-09-04,408.0,429.0,429.0
 LUMINO,Lumino Industries Limited,mainboard,2026-08-27,2026-08-31,2026-09-03,78.0,82.0,82.0
+SUMAX,Sumax Engineering Limited,sme,2026-08-25,2026-08-28,2026-09-02,95.0,101.0,101.0
 ANNU,Annu Projects Limited,mainboard,2026-08-25,2026-08-28,2026-09-02,94.0,99.0,99.0
 12AIL28,AVP Infracon Limited,sme,2024-03-13,2024-03-15,2026-09-02,71.0,75.0,10000.0
-SUMAX,Sumax Engineering Limited,sme,2026-08-25,2026-08-28,2026-09-02,95.0,101.0,101.0
-ABH,ABH Healthcare Limited,sme,2026-08-24,2026-08-27,2026-09-01,96.0,102.0,102.0
 MADHURKNIT,Madhur Knit Crafts Limited,sme,2026-08-24,2026-08-27,2026-09-01,95.0,100.0,100.0
-SYMBIOTEC,Symbiotec Pharmalab Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,938.0,988.0,988.0
-HTEL,Hy-Tech Engineers Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,50.0,53.0,53.0
-SKYWAYS,Skyways Air Services Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,131.0,138.0,138.0
 1150VIES30,Vision Infra Equipment Solutions Limited,sme,2024-09-06,2024-09-10,2026-09-01,155.0,163.0,100000.0
+HTEL,Hy-Tech Engineers Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,50.0,53.0,53.0
+SYMBIOTEC,Symbiotec Pharmalab Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,938.0,988.0,988.0
+SKYWAYS,Skyways Air Services Limited,mainboard,2026-08-24,2026-08-27,2026-09-01,131.0,138.0,138.0
+ABH,ABH Healthcare Limited,sme,2026-08-24,2026-08-27,2026-09-01,96.0,102.0,102.0
 AUGMONT,Augmont Enterprises Limited,mainboard,2026-08-21,2026-08-25,2026-08-31,750.0,788.0,788.0
 TEMPSENS,Tempsens Instruments (India) Limited,mainboard,2026-08-20,2026-08-24,2026-08-28,285.0,300.0,300.0
 GAJA,Gaja Alternative Asset Management Limited,mainboard,2026-08-19,2026-08-21,2026-08-26,152.0,160.0,160.0
 SUNSHINE,Sunshine Pictures Limited,mainboard,2026-08-18,2026-08-20,2026-08-25,342.0,360.0,360.0
 SHANKESH,Shankesh Jewellers Limited,mainboard,2026-08-18,2026-08-20,2026-08-25,88.0,93.0,93.0
-FASCINATE,Fascinate Textiles Limited,sme,2026-08-11,2026-08-19,2026-08-24,142.0,151.0,151.0
 LALITHAA,Lalithaa Jewellery Mart Limited,mainboard,2026-08-17,2026-08-19,2026-08-24,190.0,201.0,201.0
+FASCINATE,Fascinate Textiles Limited,sme,2026-08-11,2026-08-19,2026-08-24,142.0,151.0,151.0
 HORIZONIND,Horizon Industrial Parks Limited,mainboard,2026-08-17,2026-08-19,2026-08-24,57.0,60.0,60.0
 SKYTECH,Skytech Infinite Platform Limited,sme,2026-08-14,2026-08-18,2026-08-21,73.0,77.0,77.0
 CREDENT,Credent Connect N Care Limited,sme,2026-08-13,2026-08-17,2026-08-20,179.0,189.0,189.0
-PRAMODINI,Pramodini Medicare Limited,sme,2026-08-12,2026-08-14,2026-08-19,110.0,118.0,118.0
-SHIPROCKET,Shiprocket Limited,mainboard,2026-08-12,2026-08-14,2026-08-19,92.0,97.0,97.0
 BLEL,Behari Lal Engineering Limited,mainboard,2026-08-12,2026-08-14,2026-08-19,271.0,285.0,285.0
+SHIPROCKET,Shiprocket Limited,mainboard,2026-08-12,2026-08-14,2026-08-19,92.0,97.0,97.0
+PRAMODINI,Pramodini Medicare Limited,sme,2026-08-12,2026-08-14,2026-08-19,110.0,118.0,118.0
 MILKYMIST,Milky Mist Dairy Food Limited,mainboard,2026-08-11,2026-08-13,2026-08-18,133.0,140.0,140.0
-MOLBIO,Molbio Diagnostics Limited,mainboard,2026-08-10,2026-08-12,2026-08-17,768.0,807.0,807.0
 DHOOTTRANS,Dhoot Transmission Limited,mainboard,2026-08-10,2026-08-12,2026-08-17,829.0,871.0,871.0
-OPTIMYSTIX,Optimystix Entertainment India Limited,sme,2026-08-07,2026-08-11,2026-08-14,166.0,175.0,175.0
+MOLBIO,Molbio Diagnostics Limited,mainboard,2026-08-10,2026-08-12,2026-08-17,768.0,807.0,807.0
 LEAP,Leap India Limited,mainboard,2026-08-07,2026-08-11,2026-08-14,151.0,159.0,159.0
 TECHNOCRAF,Technocraft Ventures Limited,mainboard,2026-08-07,2026-08-11,2026-08-14,200.0,212.0,212.0
+OPTIMYSTIX,Optimystix Entertainment India Limited,sme,2026-08-07,2026-08-11,2026-08-14,166.0,175.0,175.0
 SWARAJ,Swaraj Suiting Limited,sme,2022-03-15,2022-03-17,2026-08-13,56.0,56.0,360.0
-ANNAPURNA,Annapurna Swadisht Limited,sme,2022-09-15,2022-09-19,2026-08-12,68.0,70.0,157.0
 ARDEE,Ardee Industries Limited,mainboard,2026-08-05,2026-08-07,2026-08-12,50.0,53.0,53.0
+ANNAPURNA,Annapurna Swadisht Limited,sme,2022-09-15,2022-09-19,2026-08-12,68.0,70.0,157.0
 ANAWIL,Anawil Wire and Engineering Limited,sme,2026-08-03,2026-08-05,2026-08-10,257.0,270.0,270.0
 MVELECTRO,MV Electrosystems Limited,mainboard,2026-07-30,2026-08-03,2026-08-06,400.0,425.0,425.0
 JNPR,Juniper Green Energy Limited,mainboard,2026-07-30,2026-08-03,2026-08-06,214.0,225.0,225.0
@@ -126,16 +127,16 @@ MANIPALHOS,Manipal Health Enterprises Limited,mainboard,2026-07-29,2026-07-31,20
 904NACL28,Northern Arc Capital Limited,debt,2024-09-16,2024-09-19,2026-08-05,249.0,263.0,
 PROPSHOP,Propshop Events and Exhibitions Limited,sme,2026-07-27,2026-07-29,2026-08-03,65.0,69.0,69.0
 CUBEINVIT,Cube Highways Trust,invit,2026-07-22,2026-07-24,2026-07-31,151.0,152.0,156.0
+XTRANET,Xtranet Technologies Limited,mainboard,2026-07-23,2026-07-27,2026-07-30,120.0,127.0,127.0
 LCL,Lohia Corp Limited,mainboard,2026-07-23,2026-07-27,2026-07-30,404.0,425.0,425.0
 INDOMIM,INDO-MIM Limited,mainboard,2026-07-23,2026-07-27,2026-07-30,461.0,485.0,485.0
-XTRANET,Xtranet Technologies Limited,mainboard,2026-07-23,2026-07-27,2026-07-30,120.0,127.0,127.0
 915ICFL28A,IndoStar Capital Finance Limited,debt,2018-05-09,2018-05-11,2026-07-28,570.0,572.0,
 METALIC,Metalic Technoforge Limited,sme,2026-07-21,2026-07-23,2026-07-28,72.0,77.0,77.0
 CMLL,Caliber Mining and Logistics Limited,mainboard,2026-07-17,2026-07-21,2026-07-24,402.0,424.0,424.0
 ALPINETEX,Alpine Texworld Limited,mainboard,2026-07-14,2026-07-16,2026-07-21,100.0,105.0,105.0
 SBIFUNDS,SBI Funds Management Limited,mainboard,2026-07-14,2026-07-16,2026-07-21,545.0,574.0,574.0
-LASERPOWER,Laser Power & Infra Limited,mainboard,2026-07-09,2026-07-13,2026-07-16,203.0,214.0,214.0
 HAPPY,Happy Steels Limited,sme,2026-07-09,2026-07-13,2026-07-16,62.0,66.0,66.0
+LASERPOWER,Laser Power & Infra Limited,mainboard,2026-07-09,2026-07-13,2026-07-16,203.0,214.0,214.0
 KUSUMGAR,Kusumgar Limited,mainboard,2026-07-08,2026-07-10,2026-07-15,398.0,419.0,419.0
 727NGEL36,NTPC Green Energy Limited,debt,2024-11-19,2024-11-22,2026-07-13,102.0,108.0,
 ICELCO,IC Electricals Company Limited,sme,2026-07-03,2026-07-07,2026-07-10,94.0,99.0,99.0
@@ -429,8 +430,8 @@ UGROD5,UGRO Capital Limited,debt,2024-10-10,2024-10-18,2025-04-28,1000.0,1000.0,
 ATCENERGY,ATC Energies System Limited,sme,2025-03-25,2025-03-27,2025-04-02,112.0,118.0,118.0
 SHRIAHIMSA,Shri Ahimsa Naturals Limited,sme,2025-03-25,2025-03-27,2025-04-02,113.0,119.0,119.0
 SPECTRUM,Spectrum Electrical Industries Limited,sme,2018-09-17,2018-09-21,2025-03-28,65.0,65.0,1833.0
-ACTIVEINFR,Active Infrastructures Limited,sme,2025-03-21,2025-03-25,2025-03-28,178.0,181.0,181.0
 RAPIDFLEET,Rapid Fleet Management Services Limited,sme,2025-03-21,2025-03-25,2025-03-28,183.0,192.0,192.0
+ACTIVEINFR,Active Infrastructures Limited,sme,2025-03-21,2025-03-25,2025-03-28,178.0,181.0,181.0
 GCHOTELS,Grand Continent Hotels Limited,sme,2025-03-20,2025-03-24,2025-03-27,107.0,113.0,113.0
 DIVINEHIRA,Divine Hira Jewellers Limited,sme,2025-03-17,2025-03-19,2025-03-24,90.0,90.0,90.0
 MANAV-RE,Manav infra projects Limited,sme,2017-09-04,2017-09-08,2025-03-12,30.0,30.0,11.0
