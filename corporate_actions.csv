@@ -496,6 +496,7 @@ ADM,2025-11-19,dividend,0.51
 ADM,2026-02-17,dividend,0.52
 ADM,2026-05-20,dividend,0.52
 ADM,2026-08-19,dividend,0.52
+ADM,2026-11-18,dividend,0.52
 ADP,2005-03-10,dividend,0.1229
 ADP,2005-06-08,dividend,0.1229
 ADP,2005-09-07,dividend,0.1229
@@ -906,6 +907,7 @@ AFL,2025-11-19,dividend,0.58
 AFL,2026-02-18,dividend,0.61
 AFL,2026-05-20,dividend,0.61
 AFL,2026-08-19,dividend,0.61
+AFL,2026-11-18,dividend,0.61
 AIG,2005-03-02,dividend,2.5
 AIG,2005-06-01,dividend,2.5
 AIG,2005-08-31,dividend,3
@@ -2310,6 +2312,7 @@ APO,2025-11-17,dividend,0.51
 APO,2026-02-19,dividend,0.51
 APO,2026-05-19,dividend,0.563
 APO,2026-08-19,dividend,0.563
+APO,2026-11-18,dividend,0.563
 APTV,2013-03-13,dividend,0.1425
 APTV,2013-05-13,dividend,0.1425
 APTV,2013-08-14,dividend,0.1425
@@ -7115,6 +7118,7 @@ CVX,2025-11-18,dividend,1.71
 CVX,2026-02-17,dividend,1.78
 CVX,2026-05-19,dividend,1.78
 CVX,2026-08-19,dividend,1.78
+CVX,2026-11-18,dividend,1.78
 D,2005-02-23,dividend,0.335
 D,2005-05-25,dividend,0.335
 D,2005-08-24,dividend,0.335
@@ -8719,6 +8723,7 @@ ED,2025-11-19,dividend,0.85
 ED,2026-02-18,dividend,0.888
 ED,2026-05-13,dividend,0.888
 ED,2026-08-19,dividend,0.888
+ED,2026-11-18,dividend,0.888
 EFX,2005-02-17,dividend,0.03
 EFX,2005-05-23,dividend,0.04
 EFX,2005-08-23,dividend,0.04
@@ -9403,6 +9408,7 @@ EQIX,2025-11-19,dividend,4.69
 EQIX,2026-02-25,dividend,5.16
 EQIX,2026-05-20,dividend,5.16
 EQIX,2026-08-19,dividend,5.16
+EQIX,2026-11-18,dividend,5.16
 EQT,2005-02-11,dividend,0.1034
 EQT,2005-05-04,dividend,0.1143
 EQT,2005-08-10,dividend,0.1143
@@ -10222,6 +10228,7 @@ EXPE,2025-11-19,dividend,0.4
 EXPE,2026-03-05,dividend,0.48
 EXPE,2026-05-28,dividend,0.48
 EXPE,2026-08-27,dividend,0.48
+EXPE,2026-11-18,dividend,0.48
 EXR,2005-03-11,dividend,0.228
 EXR,2005-06-13,dividend,0.228
 EXR,2005-09-13,dividend,0.228
@@ -12581,6 +12588,7 @@ HAS,2025-11-19,dividend,0.7
 HAS,2026-02-18,dividend,0.7
 HAS,2026-06-01,dividend,0.7
 HAS,2026-08-19,dividend,0.7
+HAS,2026-11-18,dividend,0.7
 HBAN,2005-03-15,dividend,0.2
 HBAN,2005-06-14,dividend,0.215
 HBAN,2005-09-14,dividend,0.215
@@ -18467,6 +18475,7 @@ MPC,2025-11-19,dividend,1
 MPC,2026-02-18,dividend,1
 MPC,2026-05-20,dividend,1
 MPC,2026-08-19,dividend,1
+MPC,2026-11-18,dividend,1.1
 MPWR,2012-12-19,dividend,1
 MPWR,2014-06-26,dividend,0.15
 MPWR,2014-09-26,dividend,0.15
