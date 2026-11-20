@@ -1462,6 +1462,7 @@ AMAT,2025-11-20,dividend,0.46
 AMAT,2026-02-19,dividend,0.46
 AMAT,2026-05-21,dividend,0.53
 AMAT,2026-08-20,dividend,0.53
+AMAT,2026-11-19,dividend,0.53
 AMCR,2014-02-25,dividend,0.88
 AMCR,2014-09-02,dividend,1.095
 AMCR,2015-09-08,dividend,0.985
@@ -3650,6 +3651,7 @@ BG,2025-11-17,dividend,0.7
 BG,2026-02-17,dividend,0.7
 BG,2026-05-22,dividend,0.72
 BG,2026-08-18,dividend,0.72
+BG,2026-11-17,dividend,0.72
 BKNG,2024-03-07,dividend,0.35
 BKNG,2024-06-07,dividend,0.35
 BKNG,2024-09-06,dividend,0.35
@@ -6127,6 +6129,7 @@ CNP,2025-11-20,dividend,0.22
 CNP,2026-02-19,dividend,0.23
 CNP,2026-05-21,dividend,0.23
 CNP,2026-08-20,dividend,0.24
+CNP,2026-11-19,dividend,0.24
 COF,2005-02-08,dividend,0.027
 COF,2005-05-06,dividend,0.027
 COF,2005-08-08,dividend,0.027
@@ -15497,6 +15500,7 @@ KKR,2025-11-17,dividend,0.185
 KKR,2026-02-17,dividend,0.185
 KKR,2026-05-15,dividend,0.195
 KKR,2026-08-10,dividend,0.195
+KKR,2026-11-19,dividend,0.195
 KLAC,2005-04-28,dividend,0.012
 KLAC,2005-08-11,dividend,0.012
 KLAC,2005-11-10,dividend,0.012
@@ -17273,6 +17277,7 @@ MAR,2025-11-20,dividend,0.67
 MAR,2026-02-26,dividend,0.67
 MAR,2026-05-22,dividend,0.73
 MAR,2026-08-20,dividend,0.73
+MAR,2026-11-19,dividend,0.73
 MAS,2005-01-05,dividend,0.1582
 MAS,2005-04-06,dividend,0.1757
 MAS,2005-07-06,dividend,0.1757
@@ -18987,6 +18992,7 @@ MSFT,2025-11-20,dividend,0.91
 MSFT,2026-02-19,dividend,0.91
 MSFT,2026-05-21,dividend,0.91
 MSFT,2026-08-20,dividend,0.91
+MSFT,2026-11-19,dividend,0.98
 MSI,2005-03-11,dividend,0.1617
 MSI,2005-06-13,dividend,0.1617
 MSI,2005-09-13,dividend,0.1617
@@ -22753,6 +22759,7 @@ PSX,2025-11-17,dividend,1.2
 PSX,2026-02-23,dividend,1.27
 PSX,2026-05-18,dividend,1.27
 PSX,2026-08-18,dividend,1.27
+PSX,2026-11-17,dividend,1.33
 PTC,2006-02-28,split,0.4
 PWR,2018-12-31,dividend,0.04
 PWR,2019-04-04,dividend,0.04
@@ -25044,6 +25051,7 @@ STE,2025-09-04,dividend,0.63
 STE,2026-02-17,dividend,0.63
 STE,2026-06-08,dividend,0.63
 STE,2026-09-04,dividend,0.69
+STE,2026-11-17,dividend,0.69
 STLD,2005-03-29,dividend,0.025
 STLD,2005-06-28,dividend,0.025
 STLD,2005-09-28,dividend,0.025
@@ -28172,6 +28180,7 @@ VRSN,2025-11-18,dividend,0.77
 VRSN,2026-02-19,dividend,0.81
 VRSN,2026-05-19,dividend,0.81
 VRSN,2026-08-19,dividend,0.81
+VRSN,2026-11-17,dividend,0.81
 VRT,2020-12-01,dividend,0.01
 VRT,2021-11-30,dividend,0.01
 VRT,2022-11-29,dividend,0.01
@@ -28520,6 +28529,7 @@ WAB,2025-11-12,dividend,0.25
 WAB,2026-02-17,dividend,0.31
 WAB,2026-05-22,dividend,0.31
 WAB,2026-08-18,dividend,0.31
+WAB,2026-11-17,dividend,0.31
 WDC,2012-09-26,dividend,0.189
 WDC,2012-12-12,dividend,0.189
 WDC,2013-03-26,dividend,0.189
