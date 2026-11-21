@@ -1656,6 +1656,7 @@ AMGN,2025-11-21,dividend,2.38
 AMGN,2026-02-13,dividend,2.52
 AMGN,2026-05-15,dividend,2.52
 AMGN,2026-08-21,dividend,2.52
+AMGN,2026-11-20,dividend,2.52
 AMP,2005-11-02,dividend,0.11
 AMP,2006-01-31,dividend,0.11
 AMP,2006-05-08,dividend,0.11
@@ -5959,6 +5960,7 @@ CMI,2025-11-21,dividend,2
 CMI,2026-02-20,dividend,2
 CMI,2026-05-22,dividend,2
 CMI,2026-08-21,dividend,2.2
+CMI,2026-11-20,dividend,2.2
 CMS,2007-02-05,dividend,0.05
 CMS,2007-05-08,dividend,0.05
 CMS,2007-08-08,dividend,0.05
@@ -10021,6 +10023,7 @@ EVRG,2025-11-21,dividend,0.695
 EVRG,2026-03-10,dividend,0.695
 EVRG,2026-05-22,dividend,0.695
 EVRG,2026-08-18,dividend,0.695
+EVRG,2026-11-20,dividend,0.723
 EW,2010-05-28,split,2
 EW,2015-12-14,split,2
 EW,2020-06-01,split,3
@@ -10882,6 +10885,7 @@ FERG,2026-01-02,dividend,0.89
 FERG,2026-03-06,dividend,0.89
 FERG,2026-05-15,dividend,0.89
 FERG,2026-08-21,dividend,0.89
+FERG,2026-11-20,dividend,0.89
 FFIV,2007-08-21,split,2
 FICO,2005-02-14,dividend,0.02
 FICO,2005-05-23,dividend,0.02
@@ -17708,6 +17712,7 @@ MCO,2025-11-21,dividend,0.94
 MCO,2026-03-02,dividend,1.03
 MCO,2026-05-15,dividend,1.03
 MCO,2026-08-14,dividend,1.03
+MCO,2026-11-20,dividend,1.03
 MDLZ,2005-03-11,dividend,0.205
 MDLZ,2005-06-24,dividend,0.205
 MDLZ,2005-09-02,dividend,0.23
@@ -23041,6 +23046,7 @@ REGN,2025-11-20,dividend,0.88
 REGN,2026-02-20,dividend,0.94
 REGN,2026-05-20,dividend,0.94
 REGN,2026-08-18,dividend,0.94
+REGN,2026-11-20,dividend,0.94
 RF,2005-01-28,dividend,0.34
 RF,2005-04-28,dividend,0.34
 RF,2005-07-28,dividend,0.34
@@ -23896,6 +23902,7 @@ RTX,2025-11-21,dividend,0.68
 RTX,2026-02-20,dividend,0.68
 RTX,2026-05-22,dividend,0.73
 RTX,2026-08-14,dividend,0.73
+RTX,2026-11-20,dividend,0.73
 RVTY,2005-01-19,dividend,0.07
 RVTY,2005-04-20,dividend,0.07
 RVTY,2005-07-20,dividend,0.07
@@ -24608,6 +24615,8 @@ SNA,2025-11-21,dividend,2.44
 SNA,2026-02-24,dividend,2.44
 SNA,2026-05-20,dividend,2.44
 SNA,2026-08-19,dividend,2.44
+SNA,2026-11-20,dividend,2.75
+SNDK,2026-11-20,split,8
 SO,2005-02-03,dividend,0.358
 SO,2005-04-28,dividend,0.373
 SO,2005-07-28,dividend,0.373
@@ -25973,6 +25982,7 @@ TEL,2025-08-22,dividend,0.71
 TEL,2026-02-20,dividend,0.71
 TEL,2026-05-22,dividend,0.78
 TEL,2026-08-21,dividend,0.78
+TEL,2026-11-20,dividend,0.78
 TER,2014-05-07,dividend,0.06
 TER,2014-09-03,dividend,0.06
 TER,2014-12-01,dividend,0.06
