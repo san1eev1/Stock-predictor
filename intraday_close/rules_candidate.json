@@ -1,0 +1,17 @@
+{
+ "since": "2026-11-18",
+ "rules": {
+  "n_long": 1,
+  "n_short": 1,
+  "stop_loss": 1.0,
+  "target": 0.0,
+  "skip_quantile": 0.7,
+  "min_prob": 0.0,
+  "unusual": "skip",
+  "max_gap": 0.0,
+  "skip_friday": false,
+  "avoid_results": false,
+  "avoid_expiry": false,
+  "breakeven": false
+ }
+}
