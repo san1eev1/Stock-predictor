@@ -2568,6 +2568,7 @@ ATO,2025-11-24,dividend,1
 ATO,2026-02-23,dividend,1
 ATO,2026-05-26,dividend,1
 ATO,2026-08-24,dividend,1
+ATO,2026-11-23,dividend,1.09
 AVGO,2010-12-13,dividend,0.007
 AVGO,2011-03-16,dividend,0.008
 AVGO,2011-06-15,dividend,0.009
@@ -17537,6 +17538,7 @@ MCHP,2025-11-24,dividend,0.455
 MCHP,2026-02-23,dividend,0.455
 MCHP,2026-05-22,dividend,0.455
 MCHP,2026-08-24,dividend,0.455
+MCHP,2026-11-23,dividend,0.455
 MCK,2005-02-25,dividend,0.06
 MCK,2005-06-08,dividend,0.06
 MCK,2005-08-30,dividend,0.06
@@ -26033,6 +26035,7 @@ TER,2025-11-24,dividend,0.12
 TER,2026-02-13,dividend,0.13
 TER,2026-05-21,dividend,0.13
 TER,2026-09-04,dividend,0.13
+TER,2026-11-23,dividend,0.13
 TFC,2005-01-12,dividend,0.35
 TFC,2005-04-13,dividend,0.35
 TFC,2005-07-13,dividend,0.38
@@ -26876,6 +26879,7 @@ TSCO,2025-11-24,dividend,0.23
 TSCO,2026-02-24,dividend,0.24
 TSCO,2026-05-27,dividend,0.24
 TSCO,2026-08-24,dividend,0.24
+TSCO,2026-11-23,dividend,0.24
 TSLA,2020-08-31,split,5
 TSLA,2022-08-25,split,3
 TSN,2005-02-25,dividend,0.04
@@ -28360,6 +28364,7 @@ VTRS,2025-11-24,dividend,0.12
 VTRS,2026-03-09,dividend,0.12
 VTRS,2026-05-22,dividend,0.12
 VTRS,2026-08-21,dividend,0.12
+VTRS,2026-11-23,dividend,0.12
 VZ,2005-01-06,dividend,0.3462
 VZ,2005-04-06,dividend,0.3642
 VZ,2005-07-06,dividend,0.3642
