@@ -129,3 +129,24 @@ def test_book_never_invests_more_than_its_capital(setup):
                  IntradayRules(n_long=5, n_short=5), 10_000)
     trades = PI.open_trades(conn)
     assert sum(t["qty"] * t["entry_price"] for t in trades) <= 10_000
+
+
+def test_missed_square_off_is_judged_later(tmp_path, setup, monkeypatch):
+    from datetime import datetime
+
+    from stockpredictor.data import intraday as I
+    from stockpredictor.live import monitor as MON
+
+    conn, model, today = setup
+    d = today["date"].iloc[0]
+    prices = dict(zip(today["symbol"], today["c30"]))
+    PI.run_picks(conn, today, model, prices, d, IntradayRules(n_long=2, n_short=2), 10_000)
+    assert PI.open_trades(conn)                                   # Mac asleep at 12:30
+    summ = today[["symbol", "date"]].assign(px_1230=today["c30"] * 1.01, px_1515=today["c30"])
+    monkeypatch.setattr(I, "load_summaries", lambda store_dir: summ)
+    mon = MON.Monitor.__new__(MON.Monitor)
+    mon.conn, mon.store_dir = conn, tmp_path
+    n = mon.catch_up_judging(datetime(d.year, d.month, d.day) + pd.Timedelta(days=1))
+    assert n > 0 and PI.open_trades(conn) == []
+    assert conn.execute("SELECT COUNT(*) FROM predictions WHERE horizon='intraday' AND correct "
+                        "IS NULL").fetchone()[0] == 0

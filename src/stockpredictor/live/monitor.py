@@ -197,6 +197,13 @@ class Monitor:
             _set(self.conn, "state_pulled_day", f"{now:%Y-%m-%d}")
             if self.pull_state(now):                 # GitHub's evening work, before trading
                 done.append("state-from-github")
+        if _setting(self.conn, "judge_catchup_day") != f"{now:%Y-%m-%d}":
+            _set(self.conn, "judge_catchup_day", f"{now:%Y-%m-%d}")
+            try:
+                if self.catch_up_judging(now):
+                    done.append("judged-missed-days")
+            except Exception:
+                log.exception("catch-up judging failed")
         if not self._started:
             self._started = True
             self.startup_job(now)
@@ -724,6 +731,36 @@ class Monitor:
             [(s, stamp, float(sc), int(rk), official.get(s), live.get(s))
              for s, sc, rk in zip(now_rows["symbol"], scores, ranks)])
         self.conn.commit()
+
+    def catch_up_judging(self, now: datetime) -> int:
+        """Past intraday picks never judged (the Mac was asleep or off at the 12:30 / 15:15
+        square-off): judge them - and close that day's left-open paper trades - at the
+        12:30 / 15:15 prices in GitHub's intraday summaries, so the models still learn."""
+        from stockpredictor.data import intraday as I
+
+        since = f"{now - timedelta(days=30):%Y-%m-%d}"
+        rows = self.conn.execute(
+            "SELECT DISTINCT date, horizon FROM predictions WHERE horizon IN (?, ?, ?) AND "
+            "date < ? AND date >= ? AND correct IS NULL ORDER BY date",
+            (*PI.BOOKS, f"{now:%Y-%m-%d}", since)).fetchall()
+        if not rows:
+            return 0
+        summ = I.load_summaries(self.store_dir)
+        judged = 0
+        for day, book in rows:
+            col, at = ("px_1230", "12:30") if book == PI.HORIZON else ("px_1515", "15:15")
+            s = summ[summ["date"] == pd.Timestamp(day)].dropna(subset=[col])
+            prices = dict(zip(s["symbol"], s[col]))
+            if not prices:
+                continue                      # summaries not published yet: next time
+            for t in PI.open_trades(self.conn, book):
+                if str(t["entry_time"]).startswith(day) and t["symbol"] in prices:
+                    PI.close_trade(self.conn, t, prices[t["symbol"]],
+                                   f"{at} square-off (judged later)", f"{day} {at}")
+            judged += PI.evaluate_day(self.conn, day, prices, book)
+        if judged:
+            log.info("Judged %d intraday picks the Mac missed (from GitHub's summaries)", judged)
+        return judged
 
     def pull_state(self, now: datetime) -> bool:
         from stockpredictor import cloud
