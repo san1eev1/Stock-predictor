@@ -45,6 +45,9 @@ def yahoo_prices(symbols: list[str]) -> tuple[dict[str, float], datetime | None]
     return out, newest
 
 
+NIFTY_TOKEN = "99926000"      # Angel One token of the Nifty 50 index
+
+
 class LivePrices:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -92,10 +95,22 @@ class LivePrices:
         (e.g. a failed request) - callers treat None as open and ask again later."""
         if not in_market_hours():
             return False
+        now = now_ist()
+        # Angel One first: today's Nifty 5-minute candles (a holiday answers with none).
+        if now.time() >= time(9, 30):
+            try:
+                client = self._angel_client()
+                if client is not None:
+                    start = now.replace(hour=9, minute=15, second=0, microsecond=0, tzinfo=None)
+                    bars = client.candles(NIFTY_TOKEN, "FIVE_MINUTE", start,
+                                          now.replace(tzinfo=None), waits=(0, 2))
+                    return len(bars) > 0
+            except Exception:
+                pass
         try:
             _, newest = yahoo_prices(["RELIANCE"])
         except Exception:
             return None
         if newest is None:
             return None
-        return newest.astimezone(IST).date() == now_ist().date()
+        return newest.astimezone(IST).date() == now.date()

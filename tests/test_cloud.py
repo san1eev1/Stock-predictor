@@ -142,3 +142,34 @@ def test_mac_takes_over_newer_state_but_keeps_portfolio_and_todays_trading(tmp_p
     m.commit()
     cloud.publish_state(gh)
     assert not cloud.pull_state(m, "2026-11-17")      # today's trading started: never replace
+
+
+def test_incomplete_piece_upload_is_never_used(tmp_path, monkeypatch):
+    subprocess, cloud, db, store = _paper_state_imports()
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    monkeypatch.setattr(store, "default_remote", lambda: str(bare))
+    src = tmp_path / "mac.db"
+    db.init_db(src)
+    c = db.connect(src)
+    c.execute("INSERT INTO paper_accounts (horizon, capital, cash) VALUES ('longterm', 10000, 9000)")
+    c.commit()
+    assert cloud.upload_pieces(src, piece_kb=1) >= 1
+    assert cloud.fetch_state(tmp_path / "ok.db")                    # complete: used
+    real_git = store._git
+    calls = {"n": 0}
+
+    def flaky(*a, **k):                                             # network drops mid-upload
+        if a[0] == "push":
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise RuntimeError("network")
+        return real_git(*a, **k)
+    monkeypatch.setattr(store, "_git", flaky)
+    monkeypatch.setattr(cloud._time, "sleep", lambda s: None)
+    try:
+        cloud.upload_pieces(src, piece_kb=1)
+    except RuntimeError:
+        pass
+    monkeypatch.setattr(store, "_git", real_git)
+    assert not cloud.fetch_state(tmp_path / "bad.db")               # partial: ignored

@@ -166,8 +166,10 @@ def angel_bars(client, token: str, start: date, end: date,
     rows = []
     for frm, to in chunk_ranges(start, end, MAX_DAYS_PER_REQUEST[interval]):
         rows += client.candles(token, interval, frm, to, waits=waits)
-    if not rows:
-        return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+    if not rows:          # holiday / no trades yet: an empty frame with a datetime column
+        return pd.DataFrame({"ts": pd.Series(dtype="datetime64[ns]"),
+                             **{c: pd.Series(dtype=float)
+                                for c in ("open", "high", "low", "close", "volume")}})
     df = pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume"])
     df["ts"] = _to_ist_naive(df["ts"])
     return df

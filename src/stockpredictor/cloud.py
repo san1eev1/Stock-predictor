@@ -12,6 +12,8 @@ The real portfolio you enter yourself (portfolio_trades) never leaves the Mac (p
 from __future__ import annotations
 
 import gzip
+import hashlib
+import json
 import logging
 import shutil
 import sqlite3
@@ -29,6 +31,7 @@ STATE_BRANCH = _MARKET.state_branch       # India "paper-state", US "paper-state
 STATE_FILE = "state.db"
 PRIVATE_TABLES = ("portfolio_trades",)
 SAVED_KEY = "state_saved_at"
+MANIFEST = "state.manifest.json"
 
 
 def _saved_at(conn: sqlite3.Connection, schema: str = "main") -> str:
@@ -52,7 +55,16 @@ def fetch_state(dest: Path) -> bool:
         src = Path(tmp) / "s" / STATE_FILE
         parts = sorted((Path(tmp) / "s").glob(STATE_FILE + ".gz.part*"))
         if not src.exists() and parts:            # uploaded in small pieces (upload_pieces)
-            src.write_bytes(gzip.decompress(b"".join(p.read_bytes() for p in parts)))
+            data = b"".join(p.read_bytes() for p in parts)
+            man = Path(tmp) / "s" / MANIFEST
+            if not man.exists():
+                log.warning("paper state upload incomplete (no manifest) - not used")
+                return False
+            m = json.loads(man.read_text())
+            if m.get("pieces") != len(parts) or m.get("sha256") != hashlib.sha256(data).hexdigest():
+                log.warning("paper state upload incomplete or damaged - not used")
+                return False
+            src.write_bytes(gzip.decompress(data))
         if not src.exists():
             return False
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +132,21 @@ def upload_pieces(db: Path, piece_kb: int = 15) -> int:
             else:
                 raise RuntimeError(f"could not upload piece {n}")
             n += 1
+        # Last: the manifest. A state is only used once every piece has arrived intact.
+        (repo / MANIFEST).write_text(json.dumps({"pieces": n,
+                                                 "sha256": hashlib.sha256(data).hexdigest()}))
+        store._git("add", "-A", cwd=repo)
+        store._git("-c", "user.name=stockpredictor", "-c", "user.email=s@localhost",
+                   "commit", "-q", "-m", "state manifest", cwd=repo)
+        for _ in range(6):
+            try:
+                store._git("push", "-q", "--force", store.default_remote(),
+                           f"{STATE_BRANCH}:refs/heads/{STATE_BRANCH}", cwd=repo)
+                break
+            except Exception:
+                _time.sleep(5)
+        else:
+            raise RuntimeError("could not upload the manifest")
         return n
 
 
@@ -176,7 +203,9 @@ def evening(settings, store_dir: Path) -> None:
     feedback for tonight's training, then publish the state."""
     from stockpredictor.live.prices import now_ist
 
-    fetch_state(Path(settings.db_path))
+    if not fetch_state(Path(settings.db_path)):     # never decide on (or publish) an empty
+        log.warning("no complete paper state from the Mac - evening work skipped")   # state
+        return
     now = now_ist()
     if now.hour < 9:          # GitHub's evening runs often start after midnight: that
         now = (now - timedelta(days=1)).replace(hour=23, minute=30)   # is still yesterday's
