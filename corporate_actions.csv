@@ -6555,6 +6555,7 @@ COST,2026-01-30,dividend,1.3
 COST,2026-05-01,dividend,1.47
 COST,2026-07-24,dividend,1.47
 COST,2026-10-30,dividend,1.47
+COST,2026-11-24,dividend,30
 CPRT,2012-03-29,split,2
 CPRT,2017-04-11,split,2
 CPRT,2022-11-04,split,2
@@ -15064,6 +15065,7 @@ JNJ,2025-11-25,dividend,1.3
 JNJ,2026-02-24,dividend,1.3
 JNJ,2026-05-26,dividend,1.34
 JNJ,2026-08-25,dividend,1.34
+JNJ,2026-11-24,dividend,1.34
 JPM,2005-01-04,dividend,0.34
 JPM,2005-04-04,dividend,0.34
 JPM,2005-07-01,dividend,0.34
@@ -16177,6 +16179,7 @@ LH,2025-11-26,dividend,0.72
 LH,2026-02-27,dividend,0.72
 LH,2026-05-29,dividend,0.72
 LH,2026-08-28,dividend,0.72
+LH,2026-11-24,dividend,0.72
 LHX,2005-03-10,dividend,0.0567
 LHX,2005-03-31,split,2
 LHX,2005-05-26,dividend,0.0567
@@ -22621,6 +22624,7 @@ PRU,2025-11-18,dividend,1.35
 PRU,2026-02-17,dividend,1.4
 PRU,2026-05-26,dividend,1.4
 PRU,2026-08-25,dividend,1.4
+PRU,2026-11-24,dividend,1.4
 PSA,2005-03-11,dividend,0.45
 PSA,2005-06-13,dividend,0.45
 PSA,2005-09-13,dividend,0.5
@@ -27967,6 +27971,7 @@ VLO,2025-11-20,dividend,1.13
 VLO,2026-02-05,dividend,1.2
 VLO,2026-05-21,dividend,1.2
 VLO,2026-07-31,dividend,1.2
+VLO,2026-11-24,dividend,1.2
 VLTO,2023-12-28,dividend,0.09
 VLTO,2024-03-27,dividend,0.09
 VLTO,2024-06-28,dividend,0.09
@@ -28210,6 +28215,7 @@ VRT,2025-11-25,dividend,0.063
 VRT,2026-03-17,dividend,0.063
 VRT,2026-06-15,dividend,0.063
 VRT,2026-09-14,dividend,0.063
+VRT,2026-11-24,dividend,0.1
 VST,2016-12-15,dividend,2.32
 VST,2019-03-14,dividend,0.125
 VST,2019-06-13,dividend,0.125
@@ -29857,6 +29863,7 @@ XYL,2025-11-25,dividend,0.4
 XYL,2026-02-24,dividend,0.43
 XYL,2026-05-28,dividend,0.43
 XYL,2026-08-27,dividend,0.43
+XYL,2026-11-24,dividend,0.43
 YUM,2005-01-12,dividend,0.0359
 YUM,2005-04-13,dividend,0.0359
 YUM,2005-07-13,dividend,0.0413
