@@ -1,6 +1,6 @@
 # Stock Predictor — Project Plan
 
-Personal-use AI stock predictor for the Indian market (Nifty 100).
+Personal-use stock predictor for the Indian market (Nifty 100).
 Everything runs **locally on my laptop** and costs **₹0** (no paid APIs, no cloud).
 
 ---
@@ -175,7 +175,7 @@ then **intraday** (needs Angel One). Telegram was dropped.
 ### ✅ Learning from paper trading
 
 - Daily long-term retraining on all history (5-day snapshot grid anchored on the newest day) plus judged paper predictions as weighted feedback (wrong 2×, right 1.5×).
-- Live strategy race on paper (AI / 50-50 blend / momentum); automatic switch after 20+ judged days if a variant leads by 5+ accuracy points.
+- Live strategy race on paper (model / 50-50 blend / momentum); automatic switch after 20+ judged days if a variant leads by 5+ accuracy points.
 - Weekly tuning also covers recency weighting and tail (extreme-outcome) weighting.
 - Angel One: login check at start, background 2-year intraday backfill, daily after-close top-up.
 

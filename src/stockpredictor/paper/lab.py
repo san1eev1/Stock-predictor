@@ -76,6 +76,25 @@ LABELS = {s.book: s.label for s in (*CASH, FUTURES)}
 
 # --- news --------------------------------------------------------------------------------
 
+def about_company(df: pd.DataFrame, universe: pd.DataFrame) -> pd.Series:
+    """True where the headline names its own company (Google News also returns stories that
+    only mention it in passing or match another firm)."""
+    from stockpredictor.nlp import relevance as REL
+
+    names = dict(zip(universe["symbol"], universe.get("name", universe["symbol"])))
+    keys: dict[str, list[str]] = {}
+    out = []
+    for sym, title in zip(df["symbol"].astype(str), df["title"].astype(str)):
+        if sym not in keys:
+            words = REL._name_words(names.get(sym) or sym)
+            own = [w for w in words if w not in REL.GENERIC]
+            keys[sym] = own or [" ".join(words[:2])]
+        low = " " + " ".join(REL._words(title)) + " "
+        out.append(any(f" {w} " in low for w in keys[sym] if w)
+                   or f" {sym.lower()} " in low)
+    return pd.Series(out, index=df.index, dtype=bool)
+
+
 def news_scores(news: pd.DataFrame, universe: pd.DataFrame, since: pd.Timestamp,
                 until: pd.Timestamp) -> pd.DataFrame:
     """Per stock: company news since `since` (UTC) and its sector's theme news.
@@ -89,6 +108,7 @@ def news_scores(news: pd.DataFrame, universe: pd.DataFrame, since: pd.Timestamp,
     w["rel"] = w["relevance"] if "relevance" in w else 1.0
     comp = w[~w["symbol"].astype(str).str.startswith(N.THEME_PREFIX)]
     comp = comp[comp["rel"] >= N.RELEVANT * 0.75]
+    comp = comp[about_company(comp, universe)] if len(comp) else comp
     g = comp.groupby("symbol")
     out = pd.DataFrame({
         "n": g.size(),

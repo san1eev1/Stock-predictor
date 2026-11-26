@@ -97,7 +97,8 @@ JUNK = re.compile(
     r"how to check|allotment status|news by .{0,40} on tradingview|"
     r"valuation(?:s)? (?:check|snapshot)|key (?:financial )?ratios|fundamental analysis|"
     r"brokerage calls|how should you trade|market holiday|buildup report|price action|"
-    r"and momentum\b|where is he betting|trade spotlight|share news today", re.I)
+    r"and momentum\b|where is he betting|trade spotlight|share news today|"
+    r"\bm-?cap\b|market cap(?:italisation|italization)? (?:rank|spot|list|club)|most valuable (?:firms|companies)", re.I)
 JUNK_SOURCES = {"univest", "marketsmojo", "multibagg ai", "ad-hoc-news.de", "simply wall st",
                 "trade brains", "facebook", "freejobalert.com", "openpr.com", "instagram",
                 "youtube", "x.com", "scripbox", "stockinvest.us", "marketbeat", "getmoneyrich",

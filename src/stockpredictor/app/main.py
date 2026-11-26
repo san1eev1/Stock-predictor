@@ -482,8 +482,25 @@ def overview_cards():
                                   rupees(lt["equity"] - lt["cash"]),
                                   f"{lt.get('positions', 0)} holdings")]
     st.subheader("Longer view")
-    UI.cards([UI.gain_card("Intraday and F&O, last 30 days", month, month_inv or 1, scale=0.05,
-                           label_base="invested"), *longterm])
+    st.caption("Each paper book on its own: gain or loss over the last 30 days after costs, "
+               "as a share of the book's capital.")
+    from stockpredictor.paper import lab as LAB
+
+    labels, caps = _all_books()
+    h = LAB.history(c, tuple(labels))
+    h = h[h["day"] >= f"{now - timedelta(days=30):%Y-%m-%d}"]
+    per = h.groupby("book").agg(pnl=("pnl", "sum"), days=("day", "nunique"))
+    book_cards = []
+    for book, label in labels.items():
+        if book not in per.index:
+            continue
+        g, n = float(per.loc[book, "pnl"]), int(per.loc[book, "days"])
+        book_cards.append(UI.card(label, UI.money(g), f"{g / caps[book]:+.2%} of {rupees(caps[book])} "
+                                  f"over {n} day{'s' if n != 1 else ''}",
+                                  abs(g / caps[book]) / 0.05,
+                                  "up" if g > 0 else "down" if g < 0 else "neutral"))
+    UI.cards([*longterm, *book_cards] or
+             [UI.card("No closed paper trades in 30 days", "₹0", "", 0.0)])
 
 
 # --- US stocks (S&P 500): runs on GitHub (us-daily.yml); shown from its published state ---
@@ -846,6 +863,7 @@ def page_news():
     w = w[~w["title"].astype(str).str.contains(N.PRICE_MOVE)]
     themes = w[w["symbol"].astype(str).str.startswith(N.THEME_PREFIX)]
     comp = w[~w.index.isin(themes.index)]
+    comp = comp[LAB.about_company(comp, x.universe)] if len(comp) else comp
     comp = comp.assign(weight=comp["sentiment"] * comp.get("relevance", 1.0))
     ns = LAB.news_scores(df, x.universe, since, until)
     top = ns[ns["n"] > 0].sort_values("score")
@@ -892,134 +910,9 @@ def html_escape(s: str) -> str:
 # --- Learn --------------------------------------------------------------------------------
 
 def page_learn():
-    st.title("Learn")
-    st.caption("How to read an IPO, how algorithmic trading is done properly, and how option "
-               "selling works, with the evidence from this project's own experiments.")
-    t1, t2, t3, t4 = st.tabs(["Analysing an IPO", "Algo trading", "Option selling", "Reading list"])
-    with t1:
-        st.markdown("""
-### Analysing an IPO, step by step
+    from stockpredictor.app import learn
 
-1. **Read the red herring prospectus (RHP).** The business, the risk factors, three years of
-   financials and the "objects of the issue". It is on SEBI's and NSE's sites.
-2. **Fresh issue or offer for sale?** A fresh issue raises money for the company; an offer for
-   sale (OFS) is existing owners selling. A large OFS from private-equity holders is a reason
-   to look harder at the price.
-3. **Price it against listed peers.** At the top of the price band compare P/E, EV/EBITDA,
-   price-to-book, return on equity and growth. Paying more than peers needs faster growth.
-4. **Check ownership after listing.** Promoter holding, any pledged shares, and lock-ins.
-5. **Read the anchor book.** Large institutions buy the day before opening; their names and
-   the 30/90-day lock-in tell you who is committed.
-6. **Watch subscription by category, especially on the last day.** Institutions (QIBs) bid
-   mostly on the final day, and their demand is the strongest single signal. In our data
-   (NSE mainboard IPOs since late 2023):
-   - QIB under 3×: 26% listed above the issue price (median −5%)
-   - QIB 10–50×: 57% (median +5%)
-   - QIB 50–100×: 86% (median +19%)
-   - QIB over 100×: 95% (median +29%)
-7. **Treat the grey-market premium as gossip.** It is unofficial and easy to move.
-8. **Know your allotment odds.** Heavy retail oversubscription makes allotment a lottery.
-9. **Decide the listing-day plan in advance.** IPOs list worse in falling markets; decide what
-   you will do at the open before it happens.
-
-The **IPO analysis** page applies a model trained on past listings (subscription by category,
-issue size, market mood). Tested year by year on IPOs it had not seen, its "Apply" calls
-listed up 88% of the time (median +23%) versus 65% for all IPOs.
-
-**Red flags:** QIB demand under 3×, a mostly-OFS issue at a premium to peers, pledged promoter
-shares, a sector in decline, and a lot so large that it is hard to sell on listing day.
-""")
-    with t2:
-        st.markdown("""
-### Algo trading, done properly
-
-An algorithm is a rule a computer follows exactly: what to buy or sell, how much, and when to
-get out. Writing the rule is easy; knowing whether it has an edge is the work.
-
-**The path from idea to money:** an idea with a reason behind it → a backtest on history →
-walk-forward testing (each year judged by a model trained only on earlier years) → paper
-trading on live prices → small real money. Each step kills most ideas, which is the point.
-
-**The traps this project has hit, with numbers:**
-- **Survivorship bias.** Testing only on today's index members hides the companies that
-  failed. Our long-term backtest fell from 21.6% to 12.4% a year once delisted stocks were
-  included.
-- **Overfitting and multiple testing.** Try enough settings and one will look brilliant by
-  luck. We require a paired t-statistic of at least 2 against the current model, a held-out
-  period, and a stricter bar the more settings we try.
-- **Costs.** Brokerage with a ₹5 minimum turned ₹1,000 trades into 1.32% round-trip costs; at
-  3 trades a side on ₹10,000 it is 0.84%. A model with a 0.05% edge per trade cannot beat that.
-- **New information beats cleverer models.** Ten price-only ideas failed; F&O open-interest
-  data was the first to clearly improve the intraday model (t = 9 over 2,433 days).
-
-**Risk before return:** size each position so one bad day cannot hurt much, cap the daily
-loss, and judge a strategy by its worst fall as well as its average.
-
-**How this system learns:** every pick is judged after its horizon, every paper trade's result
-goes to the nightly GitHub training, and new settings are adopted only when they beat the
-current ones on data they have not seen.
-""")
-    with t3:
-        st.markdown("""
-### Option selling
-
-**Why it can work.** An option's price includes the volatility the market expects. Index
-options are usually priced for more movement than actually happens (the volatility risk
-premium): Nifty's VIX typically sits 2–4 points above the volatility that follows. A seller
-collects that difference as the option loses time value (theta) through the day.
-
-**Why it is dangerous.** The seller's gain is small and frequent, the loss rare and large. A
-few big-move days decide a year: one public backtest of a time-based Nifty straddle made
-₹19,405 in a year but −₹94,377 without its 25 best days. Costs and spreads eat thin edges;
-same-day iron condors that win 75% of the time can still lose money at realistic fills.
-
-**The structures** (all sell time value; the bought wings cap the worst loss):
-- **Straddle:** sell the at-the-money call and put. Most premium, unlimited risk.
-- **Strangle:** sell a call and put away from the money. Less premium, more room.
-- **Iron fly:** a straddle plus bought wings. Capped loss, lower margin.
-- **Iron condor:** a strangle plus bought wings. Capped loss, wider profit zone.
-
-**Rules in India (2025–26).** Nifty weekly options expire on Tuesdays; one weekly index
-contract per exchange; Nifty lot size 65; extra margin on short options on expiry day.
-
-**What the five paper books test:** whether entering at 9:20 or 11:00 is better, whether
-taking 50% of the credit early beats holding to 15:15, whether selling only when VIX is above
-realized volatility avoids the bad days, and whether expiry day is where the edge is.
-""")
-        x = np.arange(25200, 26801, 10)
-        credit, lot = 252.0, 65
-        pnl = (credit - np.abs(x - 26000) + np.maximum(np.abs(x - 26000) - 500, 0)) * lot
-        pay = pd.DataFrame({"Nifty at the close": x, "Profit or loss (₹)": pnl})
-        st.altair_chart(alt.Chart(pay).mark_area(opacity=0.25, color=UI.NEUTRAL,
-                                                 line={"color": UI.NEUTRAL}).encode(
-            x=alt.X("Nifty at the close:Q", scale=alt.Scale(zero=False)),
-            y="Profit or loss (₹):Q").properties(height=240, title="Iron fly at 26,000, wings "
-                                                    "500 points away, ₹252 credit, 1 lot of 65"),
-            width="stretch")
-    with t4:
-        st.markdown("""
-### Reading list
-
-**Papers**
-- Coval & Shumway (2001), [Expected Option Returns](https://business.baylor.edu/don_cunningham/Option%20Returns.pdf), Journal of Finance.
-- Bakshi & Kapadia (2003), *Delta-Hedged Gains and the Negative Market Volatility Risk Premium*, Review of Financial Studies.
-- Gu, Kelly & Xiu (2020), [Empirical Asset Pricing via Machine Learning](https://dachxiu.chicagobooth.edu/download/ML.pdf), Review of Financial Studies.
-- Pan & Poteshman (2006), [The Information in Option Volume for Future Stock Prices](https://www.mit.edu/~junpan/volume.pdf), Review of Financial Studies.
-- Lou, Polk & Skouras (2019), [A Tug of War: Overnight Versus Intraday Expected Returns](https://www.sciencedirect.com/science/article/abs/pii/S0304405X19300650), Journal of Financial Economics.
-- Gao, Han, Li & Zhou (2018), [Market Intraday Momentum](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2440866), Journal of Financial Economics.
-- Ritter & Welch (2002), *A Review of IPO Activity, Pricing, and Allocations*, Journal of Finance.
-
-**Books**
-- Marcos López de Prado, *Advances in Financial Machine Learning*: backtest overfitting, purged cross-validation.
-- Ernest Chan, *Algorithmic Trading: Winning Strategies and Their Rationale*.
-- Sheldon Natenberg, *Option Volatility and Pricing*.
-- Euan Sinclair, *Volatility Trading*.
-
-**Practitioner material**
-- AlgoTest, [The 9:20 straddle strategy](https://algotest.in/blog/the-920-straddle-strategy-defined/).
-- Option Alpha, [0DTE strategies: insights from 25k trades](https://optionalpha.com/blog/0dte).
-- Quantsapp, [Backtests of NSE option strategies](https://www.quantsapp.com/backtesting/strategies).
-""")
+    learn.render()
 
 
 # --- Pages -------------------------------------------------------------------------
@@ -2085,8 +1978,8 @@ def training_history():
 
 
 def strategy_race():
-    st.subheader("🏁 Live strategy race")
-    st.caption("Every day three variants also make paper predictions: the AI model, a 50/50 "
+    st.subheader("Live strategy race")
+    st.caption("Every day three variants also make paper predictions: the model, a 50/50 "
                "blend with plain momentum, and momentum only. Each is judged after 1 week like "
                "the real picks. Once every variant has 20+ judged days, the system switches to "
                "the one with the best live accuracy if it leads by 5+ points.")
@@ -2098,9 +1991,10 @@ def strategy_race():
     if race.empty:
         msg = (f"Race started {started[0]}; {started[1]} prediction days so far. "
                if started[0] else "The race starts with the first daily decision. ")
-        st.info(msg + f"First results one week later. Currently using: **{now_using}**.")
+        st.info(msg + f"First results one week later. Currently using: **{now_using.replace('AI model', 'Model')}**.")
         return
     race["Using now"] = ["✅" if v == now_using else "" for v in race["variant"]]
+    race["variant"] = race["variant"].replace({"AI model": "Model"})
     st.dataframe(race.rename(columns={
         "variant": "Strategy", "days": "Judged days", "predictions": "Predictions",
         "accuracy": "Live accuracy", "random": "Random picks",

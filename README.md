@@ -1,15 +1,19 @@
 # Stock Predictor
 
-Personal AI stock predictor for the **Nifty LargeMidcap 250** (Nifty 100 + Midcap 150), with two
-tracks:
+Personal stock predictor and paper-trading desk for the **Nifty LargeMidcap 250** (Nifty 100 +
+Midcap 150), with a smaller S&P 500 version:
 
-- **Long-term:** 1-week predictions — the top 10 buy candidates after every close, judged
-  after a week against Nifty 50; a ₹1 lakh buy-only paper portfolio holding the 5 best.
-- **Intraday — two competing models:** at 9:45 each lists the top 10 buys and top 10 sells
-  (separate tables) from the first 30 minutes and paper-trades only the 5 best buys + 5 best sells (fewer
-  trades, lower costs; all 10 + 10 are still judged and learned from). One trades **until 12:30**, the other **until the close (15:15 square-off)**, each
-  on its own ₹1 lakh a day. After the close they are compared, both learn from the full session,
-  and each can learn from the other.
+- **Long-term:** weekly picks; a ₹1 lakh buy-only paper portfolio holding the 5 best, with a
+  negative-news filter.
+- **Intraday:** at 9:46 two models rank every stock from the first 30 minutes. The best 25 buys
+  and 25 sells are saved and judged every day; 3-5 a side are paper-traded, chosen by news,
+  sector and market direction and skipping stocks that are moving sideways. One book trades
+  **until 12:30**, the other **until the close (15:15)**, each with its own capital.
+- **Strategy lab:** rule-based books from the research literature (news drift, gap fade without
+  news, stocks in play, weekly reversal, Nifty last-half-hour momentum), F&O books and five
+  hedged option-selling books, all ranked on one leaderboard.
+- **News:** company and sector news, scored for tone and for how much such headlines have moved
+  their stock in the past.
 
 Both have live prices every minute, paper trading, accuracy tracking (buy and sell picks
 separately), your real portfolio and a local dashboard. See [PLAN.md](PLAN.md) for the build
@@ -47,7 +51,7 @@ The dashboard is a **local web page** at <http://localhost:8501> (any browser, o
 
 1. Terminal: `brew install python@3.12 libomp git gh`
 2. `git clone https://github.com/san1eev1/Stock-predictor.git`, then in VS Code
-   **File → Open Folder… → Stock-predictor** (branch `claude/vibrant-heisenberg-yabdry`).
+   **File → Open Folder… → Stock-predictor**.
 3. Install the recommended **Python** extension when VS Code asks.
 4. `Cmd+Shift+P` → **Tasks: Run Task** → **1. First-time setup**.
 5. Put your Angel One keys in `.env` (real-time prices + intraday history), then run the task
@@ -100,7 +104,7 @@ stopping. Set `CLOUD_TRAINING=0` in `.env` to train everything on the Mac instea
   on only if it proves itself.
 - **Intraday:** the first 30 minutes (gap, move, range, VWAP, volume) vs the whole market
   **and vs the stock's own sector**, plus yesterday's daily context.
-- **Live race (long-term):** AI model vs 50/50 blend with momentum vs momentum only, each paper
+- **Live race (long-term):** the model vs 50/50 blend with momentum vs momentum only, each paper
   predicting; after 20+ judged days the best live variant takes over if it leads by 5+ points.
 
 ### Accuracy and profit work (Sep 2026)
