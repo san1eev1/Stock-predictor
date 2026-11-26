@@ -19,7 +19,7 @@ SERIES = {     # the night desk (app/ui.py): marigold, cyan, lilac, jade-teal
     "Sell book": ("#A59CC6", "#A59CC6"),
 }
 SINGLE = ("#C4AB7C", "#C4AB7C")
-GOOD, CRITICAL = "#8DBA9E", "#D08C80"
+GOOD, CRITICAL = "#5FA672", "#D9534F"
 
 
 def _dark() -> bool:

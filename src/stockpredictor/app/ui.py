@@ -8,8 +8,8 @@ import html
 
 import streamlit as st
 
-# Muted on purpose: nothing glows. Sand accent, sage gains, clay losses.
-UP, DOWN, NEUTRAL = "#8DBA9E", "#D08C80", "#C4AB7C"
+# Muted on purpose: nothing glows. Sand accent, calm green gains, plain red losses.
+UP, DOWN, NEUTRAL = "#5FA672", "#D9534F", "#C4AB7C"
 
 _NIGHT = {"bg": "#111413", "surface": "#171B1A", "raised": "#1D2220", "rule": "#283029",
           "ink": "#E3E6E2", "muted": "#8E9792", "up": UP, "down": DOWN, "signal": NEUTRAL}

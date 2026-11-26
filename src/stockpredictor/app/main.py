@@ -2322,10 +2322,11 @@ def page_settings():
     st.write(f"Angel One keys: {'✅ set' if SETTINGS.angel.is_complete else '— not set (Yahoo used for live prices)'}")
 
 
+# Reached from the top-right bar, not listed in the sidebar.
 PORTFOLIO_PAGE = st.Page(page_portfolio, url_path="portfolio", title="My portfolio",
-                         icon=":material/account_balance_wallet:")
+                         icon=":material/account_balance_wallet:", visibility="hidden")
 SETTINGS_PAGE = st.Page(page_settings, url_path="settings", title="Settings",
-                        icon=":material/settings:")
+                        icon=":material/settings:", visibility="hidden")
 pages = {
     "Today": [st.Page(page_overview, title="Overview", icon=":material/space_dashboard:", default=True)],
     "Trading desk": [
@@ -2345,8 +2346,7 @@ pages = {
         st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon=":material/target:"),
         st.Page(page_model, url_path="model", title="Model", icon=":material/neurology:")],
     "Learn": [st.Page(page_learn, url_path="learn", title="IPOs, algos, options", icon=":material/school:")],
-    "You": [
-        PORTFOLIO_PAGE, SETTINGS_PAGE],
+    "": [PORTFOLIO_PAGE, SETTINGS_PAGE],
 }
 UI.setup()
 sidebar()
