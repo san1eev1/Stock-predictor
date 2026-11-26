@@ -441,7 +441,31 @@ def _us_state(slot: int) -> str | None:
     except Exception:
         if not dest.exists():
             return None
+    _us_fix_splits(dest, repo)
     return str(dest)
+
+
+def _us_fix_splits(db_path, repo: str) -> None:
+    """Splits / bonus issues on the downloaded copy (the same once-only repair GitHub's run
+    applies), so a split never shows as a loss while the next run is pending."""
+    import io
+    import sqlite3
+    import urllib.request
+
+    from stockpredictor.paper import splits as SP
+
+    try:
+        with urllib.request.urlopen(f"https://raw.githubusercontent.com/{repo}/market-data-us/"
+                                    "corporate_actions.csv", timeout=60) as r:
+            acts = pd.read_csv(io.BytesIO(r.read()))
+        c = sqlite3.connect(db_path)
+        c.row_factory = sqlite3.Row
+        today = f"{pd.Timestamp.now(tz='America/New_York'):%Y-%m-%d}"
+        SP.repair(c, acts, fractional=True)
+        SP.adjust_open(c, acts, today, fractional=True)
+        c.close()
+    except Exception:
+        pass
 
 
 def _us_conn():
@@ -461,7 +485,7 @@ def _us_prices(c) -> dict[str, float]:
     return dict(zip(last["symbol"], last["close"]))
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False)
 def _us_quotes(symbols: tuple[str, ...], slot: str) -> dict[str, float]:
     """Latest Yahoo prices for US symbols (BRK.B -> BRK-B). `slot` sets how often: a
     5-minute bucket for holdings, the date for sold stocks (once a day)."""
@@ -480,10 +504,13 @@ def _us_quotes(symbols: tuple[str, ...], slot: str) -> dict[str, float]:
 
 def page_us_paper():
     st.title("US stocks paper book")
+    if st.button("Refresh prices", icon=":material/refresh:",
+                 help="Get the latest prices and the latest book from GitHub now"):
+        _us_quotes.clear()
+        _us_state.clear()
     us_paper_body()
 
 
-@st.fragment(run_every=300)
 def us_paper_body():
     st.caption("The S&P 500 long-term book, run on GitHub after each US close: it buys the "
                "top-ranked stocks (fractional shares, no commission) and sells a holding when it "
@@ -500,7 +527,7 @@ def us_paper_body():
         st.info("No paper account yet.")
         return
     now_ny = pd.Timestamp.now(tz="America/New_York")
-    live = _us_quotes(tuple(sorted(held["symbol"])), f"{now_ny:%Y-%m-%d %H}:{now_ny.minute // 5}")
+    live = _us_quotes(tuple(sorted(held["symbol"])), f"{now_ny:%Y-%m-%d}")
     held["close"] = held["symbol"].map(px)
     held["price"] = held["symbol"].map(live).fillna(held["close"])
     held["value"] = held["qty"] * held["price"].fillna(held["entry_price"])
@@ -525,9 +552,9 @@ def us_paper_body():
         st.info(f"**Next US close** — buy: {buys} · sell: {sells}")
     st.subheader("Holdings")
     open_ = 9.5 <= now_ny.hour + now_ny.minute / 60 < 16 and now_ny.weekday() < 5
-    st.caption(f"Prices live from Yahoo, refreshed every 5 minutes (last {now_ny:%H:%M} New York; "
-               f"{'market open' if open_ else 'market closed: last trade'}). Book decisions still "
-               "use the official close.")
+    st.caption(f"Prices from Yahoo, fetched once a day; press **Refresh prices** for the latest "
+               f"({'market open' if open_ else 'market closed: last trade'}). Book decisions "
+               "still use the official close.")
     if held.empty:
         st.caption("Nothing held yet.")
     else:
