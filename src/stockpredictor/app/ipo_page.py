@@ -63,8 +63,8 @@ def reading(row: dict, bids: pd.DataFrame, nifty_20d: float | None) -> list[tupl
                     f"Institutions: {q:.1f}× ({w}{', so far' if row.get('_open') else ''}). "
                     "In this system's data, issues that closed with QIB demand "
                     + ("above 50× listed up about 9 times in 10." if q >= 50 else
-                       "of 10–50× listed up a little over half the time." if q >= 10 else
-                       "of 3–10× were close to a coin toss." if q >= 3 else
+                       "of 10–50× listed up about 6 times in 10." if q >= 10 else
+                       "of 3–10× listed up only about 4 times in 10." if q >= 3 else
                        "under 3× listed up only about 1 time in 4.")))
     qbid = bids[bids["key"].isin(["1(a)", "1(b)", "1(c)", "1(d)"])] if not bids.empty else bids
     if not qbid.empty and qbid["bid"].sum() > 0:
