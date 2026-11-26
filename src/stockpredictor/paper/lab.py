@@ -76,22 +76,39 @@ LABELS = {s.book: s.label for s in (*CASH, FUTURES)}
 
 # --- news --------------------------------------------------------------------------------
 
+# Company names that are everyday words: need the ticker or the fuller name in the headline.
+AMBIGUOUS = {"block", "dow", "target", "gap", "visa", "match", "ball", "general", "first",
+             "american", "united", "public", "global", "national", "southern", "best", "news",
+             "fox", "intuitive", "progressive", "regions", "state", "street", "principal",
+             "republic", "service", "services", "digital", "realty", "trust", "insulet",
+             "corning", "global", "lennar", "nucor", "alliant", "entergy", "hess", "loews"} - {
+             "corning", "lennar", "nucor", "alliant", "entergy", "hess", "loews", "insulet"}
+
+
 def about_company(df: pd.DataFrame, universe: pd.DataFrame) -> pd.Series:
     """True where the headline names its own company (Google News also returns stories that
-    only mention it in passing or match another firm)."""
+    only mention it in passing or match another firm). Names that are everyday words
+    (Block, Dow, Target) need the ticker in capitals or the name with Inc / Corp / Ltd."""
+    import re
+
     from stockpredictor.nlp import relevance as REL
 
     names = dict(zip(universe["symbol"], universe.get("name", universe["symbol"])))
-    keys: dict[str, list[str]] = {}
+    pats: dict[str, re.Pattern] = {}
     out = []
     for sym, title in zip(df["symbol"].astype(str), df["title"].astype(str)):
-        if sym not in keys:
+        if sym not in pats:
             words = REL._name_words(names.get(sym) or sym)
-            own = [w for w in words if w not in REL.GENERIC]
-            keys[sym] = own or [" ".join(words[:2])]
-        low = " " + " ".join(REL._words(title)) + " "
-        out.append(any(f" {w} " in low for w in keys[sym] if w)
-                   or f" {sym.lower()} " in low)
+            own = [w for w in words if w not in REL.GENERIC and w not in AMBIGUOUS]
+            alts = [rf"\b{re.escape(w)}\b" for w in own]
+            if not own and words:
+                lead = r"\s+".join(map(re.escape, words[:2]))
+                alts.append(rf"\b{lead}\b" + ("" if len(words) > 1 else
+                            r"\s+(?:inc|corp|corporation|co|company|ltd|limited|group|plc)\b"))
+            pats[sym] = (re.compile("|".join(alts), re.I) if alts else None,
+                         re.compile(rf"(?<![A-Za-z]){re.escape(sym)}(?![A-Za-z])"))
+        name_pat, tick_pat = pats[sym]
+        out.append(bool(name_pat and name_pat.search(title)) or bool(tick_pat.search(title)))
     return pd.Series(out, index=df.index, dtype=bool)
 
 
@@ -377,3 +394,50 @@ def leaderboard(hist: pd.DataFrame, capital: dict[str, float], labels: dict[str,
                      "t-stat": t,
                      "On capital": float(h.sum()) / capital.get(book, 1)})
     return pd.DataFrame(rows).sort_values("Total", ascending=False)
+
+
+# --- where the money went ----------------------------------------------------------------
+
+def attribution(conn: sqlite3.Connection, summaries: pd.DataFrame, universe: pd.DataFrame,
+                books: dict[str, str], days: int = 60) -> pd.DataFrame:
+    """Each cash book's closed trades split into: the market's move, the sector's move,
+    stock picking (what is left) and costs, in rupees. Market and sector moves are the median
+    of all stocks (or the stock's sector) from 9:45 to the book's exit time, signed by the
+    trade's side. Approximate: trades stopped early are compared with the full window."""
+    since = f"{pd.Timestamp.now() - pd.Timedelta(days=days):%Y-%m-%d}"
+    q = ",".join("?" * len(books))
+    t = pd.read_sql(f"SELECT horizon, symbol, side, qty, entry_price, exit_price, costs, pnl, "
+                    f"substr(entry_time, 1, 10) AS day FROM paper_trades WHERE horizon IN ({q}) "
+                    f"AND status = 'closed' AND entry_time >= ?", conn, params=[*books, since])
+    if t.empty or summaries.empty:
+        return pd.DataFrame()
+    sm = summaries.copy()
+    sm["day"] = pd.to_datetime(sm["date"]).dt.strftime("%Y-%m-%d")
+    sm = sm.merge(universe[["symbol", "industry"]], on="symbol", how="left")
+    out = []
+    for book, label in books.items():
+        b = t[t["horizon"] == book]
+        if b.empty:
+            continue
+        col = "px_1230" if book == PI.HORIZON else "px_1515"
+        if col not in sm:
+            continue
+        sm["_r"] = sm[col] / sm["c30"] - 1
+        mkt = sm.groupby("day")["_r"].median()
+        sec = sm.groupby(["day", "industry"])["_r"].median()
+        ind = dict(zip(universe["symbol"], universe["industry"]))
+        rows = []
+        for r in b.itertuples():
+            sign = 1 if r.side == "long" else -1
+            notional = r.qty * r.entry_price
+            gross = sign * (r.exit_price - r.entry_price) * r.qty
+            m = mkt.get(r.day, np.nan)
+            sc = sec.get((r.day, ind.get(r.symbol)), np.nan)
+            m_part = sign * m * notional if pd.notna(m) else 0.0
+            s_part = sign * (sc - m) * notional if pd.notna(sc) and pd.notna(m) else 0.0
+            rows.append((gross, m_part, s_part, gross - m_part - s_part, r.costs, r.pnl))
+        a = np.array(rows).sum(axis=0)
+        out.append({"Strategy": label, "Trades": len(b), "Market's move": a[1],
+                    "Sector's move": a[2], "Stock picking": a[3], "Costs": -a[4],
+                    "Net": a[5]})
+    return pd.DataFrame(out)

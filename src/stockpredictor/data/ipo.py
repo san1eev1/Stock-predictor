@@ -108,6 +108,55 @@ def parse_subscription(js: dict) -> dict:
     return out
 
 
+# Every row of NSE's bid table, in plain names (the breakdown under QIB and NII included).
+CATEGORY_NAMES = {
+    "1": "Institutions (QIB)", "1(a)": "  Foreign institutions", "1(b)": "  Banks and insurers",
+    "1(c)": "  Mutual funds", "1(d)": "  Other institutions",
+    "2": "HNI / NII (above ₹2 lakh)", "2.1": "  Big HNI (above ₹10 lakh)",
+    "2.2": "  Small HNI (₹2–10 lakh)", "3": "Retail (up to ₹2 lakh)", "4": "Employees",
+    "5": "Shareholders of the parent", "6": "Policyholders"}
+
+
+def bid_table(rows: list[dict]) -> pd.DataFrame:
+    """NSE bid details -> category, times subscribed, shares offered, shares bid."""
+    out = []
+    for r in rows or []:
+        sr, cat = str(r.get("srNo") or ""), str(r.get("category") or "")
+        if cat == "Category":
+            continue
+        name = "Total" if cat == "Total" else CATEGORY_NAMES.get(sr)
+        if name is None:
+            continue
+        out.append({"key": sr or "total", "category": name,
+                    "times": _num(r.get("noOfTime", r.get("noOfTotalMeant"))),
+                    "offered": _num(r.get("noOfSharesOffered", r.get("noOfShareOffered"))),
+                    "bid": _num(r.get("noOfsharesBid", r.get("noOfSharesBid")))})
+    return pd.DataFrame(out, columns=["key", "category", "times", "offered", "bid"])
+
+
+def _shares(text: str, label: str) -> float | None:
+    m = re.search(label + r"[^0-9₹]{0,40}([\d,]{4,})\s*(?:equity\s*)?shares", text, re.I)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def parse_detail(js: dict) -> dict:
+    """NSE ipo-detail -> lot, fresh / offer-for-sale shares, lead managers, bid table."""
+    info = {str(r.get("title") or ""): str(r.get("value") or "").strip('"')
+            for r in ((js or {}).get("issueInfo") or {}).get("dataList", [])}
+    size = info.get("Issue Size", "")
+    lot = re.search(r"([\d,]+)\s*Equity", info.get("Bid Lot", ""))
+    return {"lot": float(lot.group(1).replace(",", "")) if lot else None,
+            "fresh_shares": _shares(size, "Fresh Issue"),
+            "ofs_shares": _shares(size, "Offer for Sale"),
+            "issue_text": size[:300], "managers": info.get("Book Running Lead Managers", ""),
+            "face_value": info.get("Face Value", ""),
+            "bids": bid_table((js or {}).get("bidDetails"))}
+
+
+def detail(s: requests.Session, symbol: str, series: str = "EQ") -> dict:
+    return parse_detail(_get(s, f"ipo-detail?symbol={symbol}&series={series}"))
+
+
 def subscription(s: requests.Session, symbol: str) -> dict:
     return {"symbol": symbol, **parse_subscription(_get(s, f"ipo-active-category?symbol={symbol}"))}
 

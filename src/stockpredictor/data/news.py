@@ -98,11 +98,31 @@ JUNK = re.compile(
     r"valuation(?:s)? (?:check|snapshot)|key (?:financial )?ratios|fundamental analysis|"
     r"brokerage calls|how should you trade|market holiday|buildup report|price action|"
     r"and momentum\b|where is he betting|trade spotlight|share news today|"
-    r"\bm-?cap\b|market cap(?:italisation|italization)? (?:rank|spot|list|club)|most valuable (?:firms|companies)", re.I)
+    r"\bm-?cap\b|market cap(?:italisation|italization)? (?:rank|spot|list|club)|most valuable (?:firms|companies)|"
+    # predictions and opinion: "likely to rise", "could soar", "should you buy", "here's why"
+    r"likely to (?:rise|fall|gain|rally|surge|jump|drop|soar|crash|outperform|underperform)|"
+    r"(?:could|may|might|will|set to|poised to|ready to) (?:soar|surge|rally|skyrocket|double|triple|"
+    r"crash|plunge|tumble|explode|rocket|outperform|beat the market)|"
+    r"\bshould you\b|here'?s why|is it (?:time|too late) to|worth (?:buying|owning)|"
+    r"buy the dip|(?:top|best|cheapest|hottest) .{0,40}stocks?\b|stocks? (?:to|you can) (?:own|hold|buy)|"
+    r"millionaire|retire (?:rich|early)|forever stock|no-brainer|\bupside\b|downside risk|"
+    r"(?:bull|bear)ish (?:on|bet|case)|(?:bull|bear) case|analysts? (?:see|expect|predict|say)|"
+    r"experts? (?:see|say|predict)|wall street (?:expects|thinks|sees)|"
+    r"(?:rise|fall|gain|drop|move)s? (?:today|this week)\??$|what'?s going on with|"
+    r"why .{0,60} (?:stock|shares) (?:is|are|was|were) (?:up|down|soaring|falling|rising|sinking|jumping)|"
+    r"if you (?:had )?invested|you would have|what does .{0,80} mean|fair value|"
+    r"analysts?'? (?:price )?targets?|(?:stock|shares) (?:joins?|leads?|lags?) .{0,40}(?:sell-?off|rally|slide)|"
+    r"(?:stock|shares) tests? \$|\b(?:nasdaq|s&p 500|dow) (?:falls?|rises?|drops?|gains?|jumps?|slides?)", re.I)
 JUNK_SOURCES = {"univest", "marketsmojo", "multibagg ai", "ad-hoc-news.de", "simply wall st",
                 "trade brains", "facebook", "freejobalert.com", "openpr.com", "instagram",
                 "youtube", "x.com", "scripbox", "stockinvest.us", "marketbeat", "getmoneyrich",
-                "equitypandit", "stocksrunner", "findarticles.com", "news today"}
+                "equitypandit", "stocksrunner", "findarticles.com", "news today",
+                # US opinion and ratings mills
+                "the motley fool", "motley fool", "fool.com", "zacks investment research",
+                "zacks.com", "zacks", "investorplace", "24/7 wall st.", "seeking alpha",
+                "tipranks", "insider monkey", "gurufocus", "benzinga pro", "stocktitan",
+                "marketbeat.com", "ainvest", "barchart.com", "the globe and mail (stock picks)",
+                "finimize", "investing.com (analysis)"}
 
 
 def is_noise(title: str, source: str = "") -> bool:

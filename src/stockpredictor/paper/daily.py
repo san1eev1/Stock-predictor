@@ -41,6 +41,20 @@ def run_daily(conn: sqlite3.Connection, ctx: E.MarketContext, capital: float,
               model: M.LongTermModel | None = None) -> list[dict]:
     """Run decisions for every trading day since the last one (catch-up), then evaluate."""
     E.ensure_account(conn, capital)
+    try:                       # splits / bonus issues: keep held positions on the data's basis
+        from stockpredictor import store
+        from stockpredictor.config import MARKET
+        from stockpredictor.paper import splits as SP
+
+        acts = store.load_actions(ctx.store_dir) if getattr(ctx, "store_dir", None) else None
+        if acts is None or acts.empty:
+            acts = store.load_actions()
+        today = f"{ctx.daily['date'].max():%Y-%m-%d}"
+        for line in SP.repair(conn, acts, MARKET.fractional) + \
+                SP.adjust_open(conn, acts, today, MARKET.fractional):
+            print(line, flush=True)
+    except Exception as exc:
+        print(f"split adjustment skipped: {exc}", flush=True)
     model = model or load_or_train(ctx)
     rules, mode = get_rules(conn)
     last = conn.execute("SELECT value FROM app_settings WHERE key = 'lt_last_decision'").fetchone()

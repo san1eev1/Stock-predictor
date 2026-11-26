@@ -402,6 +402,16 @@ class Monitor:
                     continue
                 hit = p <= pos.entry_price * (1 - rules.stop_loss) if side == "long" \
                     else p >= pos.entry_price * (1 + rules.stop_loss)
+                if hit and (p < pos.entry_price * 0.6 or p > pos.entry_price * 1.6):
+                    # most likely a split or bonus issue (adjusted in the evening run), not
+                    # a real move: don't sell on it
+                    if _setting(self.conn, f"split_warn_{sym}") != now.strftime("%Y-%m-%d"):
+                        _set(self.conn, f"split_warn_{sym}", now.strftime("%Y-%m-%d"))
+                        alert(self.conn, f"paper-{h}", "info", sym,
+                              f"{now:%Y-%m-%d} {sym} is {p / pos.entry_price - 1:+.0%} from its "
+                              "entry: probably a split or bonus issue, so no stop-loss sale; "
+                              "the evening run adjusts the position")
+                    continue
                 if hit:
                     E.queue_orders(self.conn, [(sym, "stop-loss")], [], stamp, h)
                     E.fill_pending(self.conn, {sym: p}, stamp, rules, horizon=h)

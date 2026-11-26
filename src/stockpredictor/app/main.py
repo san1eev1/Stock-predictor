@@ -296,123 +296,43 @@ def money_panel(t: pd.DataFrame, capital: float, what: str = "shares") -> None:
 
 @st.cache_data(ttl=900, show_spinner="Getting IPOs from NSE…")
 def _ipos_now(day: str) -> tuple[pd.DataFrame, str]:
+    """Open and coming IPOs with their terms (lot, fresh / offer for sale) and the live bid
+    table by investor type."""
     from stockpredictor.data import ipo as IPO
 
     try:
         s = IPO.session()
         issues = IPO.open_issues(s)
-        subs = []
-        for sym in issues["symbol"]:
-            try:
-                subs.append(IPO.subscription(s, sym))
-            except Exception:
-                pass
-        sub = pd.DataFrame(subs, columns=IPO.SUB_COLS)
-        return issues.merge(sub, on="symbol", how="left"), ""
     except Exception as exc:
         return pd.DataFrame(), str(exc)
+    rows = []
+    for _, r in issues.iterrows():
+        extra = {}
+        try:
+            extra = IPO.detail(s, r["symbol"], "SME" if r["segment"] == "sme" else "EQ")
+        except Exception:
+            pass
+        try:                         # the category table updates during the day; prefer it
+            js = IPO._get(s, f"ipo-active-category?symbol={r['symbol']}")
+            live = IPO.bid_table(js.get("dataList"))
+            if not live.empty and live["offered"].fillna(0).sum() > 0:
+                extra["bids"] = live
+        except Exception:
+            pass
+        rows.append({**r.to_dict(), **extra})
+    return pd.DataFrame(rows), ""
 
 
 def page_ipo():
+    from stockpredictor.app import ipo_page
     from stockpredictor.config import SHARED_MODELS_DIR
     from stockpredictor.models import ipo as MIPO
 
-    st.title("IPO analysis")
-    st.caption("Mainboard IPOs open on NSE now or coming up, with a learned view: the chance of "
-               "listing above the issue price, from how past NSE IPOs with similar demand "
-               "(QIB / HNI / retail subscription), size and market mood actually listed. "
-               "Grey-market premium is not used (no reliable source). Refreshes every 15 minutes.")
-    model = MIPO.IPOModel.load(SHARED_MODELS_DIR / "ipo")
     today = pd.Timestamp(now_ist().date())
     issues, err = _ipos_now(f"{today:%Y-%m-%d}")
-    if err:
-        st.warning(f"NSE did not answer ({err[:120]}). Try again in a few minutes.")
-    if issues.empty and not err:
-        st.info("No IPO is open or announced on NSE right now.")
     m = ctx()
-    for r in issues.itertuples():
-        row = pd.Series(r._asdict())
-        with st.container(border=True):
-            a, b = st.columns([3, 2])
-            a.markdown(f"### {row['company'] or row['symbol']}")
-            a.caption(f"{row['symbol']} · {row['segment']} · price band ₹{row['price_low']:g}–"
-                      f"{row['price_high']:g} · bidding {row['start']:%d %b} – {row['end']:%d %b}"
-                      if pd.notna(row['start']) else f"{row['symbol']} · {row['segment']}")
-            subs = [(name, row.get(key)) for name, key in (
-                ("Institutions (QIB)", "qib_x"), ("HNI", "nii_x"), ("Retail", "rii_x"), ("Total", "total_x"))]
-            b.markdown("**Subscribed so far**  \n" + "  \n".join(
-                f"{name}: **{v:.1f}×**" if pd.notna(v) else f"{name}: not yet" for name, v in subs))
-            if row["segment"] != "mainboard":
-                st.caption("SME issue: not scored (thin trading after listing, no usable history).")
-                continue
-            if model is None:
-                st.caption("The IPO model trains in tonight's GitHub run.")
-                continue
-            if pd.notna(row["start"]) and row["start"] > today:
-                st.info("Not open for bidding yet.")
-                continue
-            x = MIPO.add_inputs(pd.DataFrame([row]).assign(issue_price=None),
-                                m.indices if m is not None else pd.DataFrame(columns=["symbol", "date", "close"]))
-            x["recent_listings"] = model.info.get("recent_listings_now")
-            label, p, why = MIPO.verdict(model, x.iloc[0], closes_today=row["end"] == today,
-                                         still_open=row["end"] >= today)
-            show = {"Apply": st.success, "Avoid": st.error, "Neutral": st.warning,
-                    "Wait": st.info}[label]
-            show(f"**{label}** — chance of listing above the issue price: **{p:.0%}**")
-            for w in why:
-                st.markdown(f"- {w}")
-
-    if model is not None:
-        info = model.info
-        st.subheader("How reliable is this?")
-        wf = info.get("walk_forward") or {}
-        if wf:
-            c = st.columns(3)
-            c[0].metric("All IPOs (tested year by year)", f"{wf['all_listed_up']:.0%} listed up",
-                        f"median {wf['all_median_gain']:+.0%}", delta_color="off")
-            if wf.get("apply_n"):
-                c[1].metric(f"'Apply' calls ({wf['apply_n']})", f"{wf['apply_listed_up']:.0%} listed up",
-                            f"median {wf['apply_median_gain']:+.0%}", delta_color="off")
-            if wf.get("avoid_n"):
-                c[2].metric(f"'Avoid' calls ({wf['avoid_n']})", f"{wf['avoid_listed_up']:.0%} listed up",
-                            f"median {wf['avoid_median_gain']:+.0%}", delta_color="off")
-            st.caption(f"Each year's IPOs were judged by a model trained only on earlier years "
-                       f"({info['ipos']} mainboard IPOs since {info['since'][:4]}).")
-        qb = pd.DataFrame(info.get("qib_buckets", []))
-        if not qb.empty:
-            qb["QIB demand"] = [f"{lo:g}–{'∞' if hi > 1e9 else f'{hi:g}'}×" for lo, hi in zip(qb["lo"], qb["hi"])]
-            st.dataframe(qb[["QIB demand", "n", "listed_up", "median_gain"]].rename(columns={
-                "n": "IPOs", "listed_up": "Listed up", "median_gain": "Median listing-day gain"}),
-                hide_index=True, width="stretch", column_config={
-                    "Listed up": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
-                    "Median listing-day gain": st.column_config.NumberColumn(format="percent")})
-        rec = pd.DataFrame(info.get("recent", []))
-        if not rec.empty:
-            st.subheader("Recent listings")
-            st.dataframe(rec.iloc[::-1], hide_index=True, width="stretch", column_config={
-                "gain_open": st.column_config.NumberColumn("Listing open", format="percent"),
-                "gain_close": st.column_config.NumberColumn("Listing-day close", format="percent")})
-
-    with st.expander("Before you apply — what to check"):
-        st.markdown("""
-- **Red herring prospectus (RHP)** on SEBI/NSE: business, risks, litigation, related-party deals.
-- **Fresh issue vs offer for sale**: money going into the company, or existing holders selling?
-- **Valuation vs listed peers**: P/E, price-to-book, margins and growth at the upper price band.
-- **Anchor investors**: who bought the day before opening, and their lock-in period.
-- **Promoter holding after the issue** and any pledged shares.
-- **Final-day QIB demand**: institutions bid last; it is the strongest single signal here.
-- **Allotment odds**: heavy retail oversubscription means a small chance of getting a lot.
-- **Market mood** on listing day: IPOs list worse in falling markets.
-""")
-    with st.expander("Learn more"):
-        st.markdown("""
-- SEBI — *Issue of Capital and Disclosure Requirements (ICDR) Regulations, 2018*: the IPO rulebook.
-- NSE — IPO pages (current issues, bid details by category, past issues).
-- Jay R. Ritter (University of Florida) — IPO data and research pages.
-- Ritter & Welch (2002), *A Review of IPO Activity, Pricing, and Allocations*, Journal of Finance.
-- Loughran & Ritter (2002), *Why Don't Issuers Get Upset About Leaving Money on the Table in IPOs?*,
-  Review of Financial Studies.
-""")
+    ipo_page.render(issues, err, MIPO.IPOModel.load(SHARED_MODELS_DIR / "ipo"),
+                    m.indices if m is not None else None, today)
 
 
 # --- Overview ------------------------------------------------------------------------
@@ -603,6 +523,8 @@ def page_us_paper():
                                             for k in ("Bought at", "Sold at", "Gain / loss")}
             | {"Return": st.column_config.NumberColumn(format="percent"),
                "Shares": st.column_config.NumberColumn(format="%.4f")})
+    us_news_section(list(held["symbol"]) + list(pend["symbol"]) if not pend.empty
+                    else list(held["symbol"]), "News on the book's stocks")
     eq = pd.read_sql("SELECT date, equity FROM paper_equity WHERE horizon = 'longterm' ORDER BY date", c)
     if len(eq) > 1:
         st.subheader("Book value")
@@ -610,6 +532,78 @@ def page_us_paper():
                                                 opacity=0.15).encode(
             x=alt.X("date:T", title=None),
             y=alt.Y("equity:Q", title="Book value ($)", scale=alt.Scale(zero=False))), width="stretch")
+
+
+@st.cache_data(ttl=1800, show_spinner="Getting US news from GitHub…")
+def _us_news(slot: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The US data branch's last two months of scored headlines and its universe."""
+    import io
+    import urllib.request
+
+    repo = store.default_remote().rstrip("/").removesuffix(".git").split("github.com/")[-1]
+    base = f"https://raw.githubusercontent.com/{repo}/market-data-us/"
+
+    def get(path):
+        with urllib.request.urlopen(base + path, timeout=30) as r:
+            return pd.read_csv(io.BytesIO(r.read()))
+    try:
+        uni = get("universe.csv")
+    except Exception:
+        return pd.DataFrame(columns=N.NEWS_COLS), pd.DataFrame(columns=["symbol", "name"])
+    now = pd.Timestamp.now(tz="UTC")
+    parts = []
+    for m in {f"{now:%Y-%m}", f"{now - pd.Timedelta(days=28):%Y-%m}"}:
+        try:
+            parts.append(get(f"news/{m}.csv"))
+        except Exception:
+            pass
+    if not parts:
+        return pd.DataFrame(columns=N.NEWS_COLS), uni
+    df = pd.concat(parts, ignore_index=True)
+    df["published"] = pd.to_datetime(df["published"], utc=True)
+    keep = [not N.is_noise(t, s_) for t, s_ in zip(df["title"], df.get("source", "").fillna(""))]
+    return df[keep].reset_index(drop=True), uni
+
+
+def us_news_section(symbols: list[str], title: str) -> None:
+    """Company news for the US book: the stocks in `symbols` first, then the strongest
+    headlines across the S&P 500 (last 3 days)."""
+    from stockpredictor.paper import lab as LAB
+
+    df, uni = _us_news(int(datetime.now().timestamp() // 1800))
+    st.subheader(title)
+    if df.empty:
+        st.caption("No US news yet: GitHub fetches it after each US close.")
+        return
+    recent = df[(df["published"] > pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=3))
+                & df["sentiment"].notna()].copy()
+    recent = recent[~recent["title"].astype(str).str.contains(N.PRICE_MOVE)]
+    if not recent.empty and "name" in uni:
+        recent = recent[LAB.about_company(recent, uni)]
+    if recent.empty:
+        st.caption("No company news in the last 3 days.")
+        return
+    recent["When"] = recent["published"].dt.tz_convert("America/New_York").dt.strftime("%d %b %H:%M")
+    recent["Tone"] = recent["sentiment"].map(lambda v: f"{v:+.2f}")
+    mine = recent[recent["symbol"].isin(symbols)].sort_values("published", ascending=False)
+    other = recent[~recent["symbol"].isin(symbols)]
+    other = other.loc[other["sentiment"].abs().sort_values(ascending=False).index].head(40)
+    cols = {"When": "When (New York)", "symbol": "Stock", "title": "Headline", "Tone": "Tone",
+            "url": "Link"}
+    cfg = {"Link": st.column_config.LinkColumn(display_text="open")}
+    st.markdown("**Your stocks**")
+    if mine.empty:
+        st.caption("No news on these stocks in the last 3 days.")
+    else:
+        st.dataframe(mine[list(cols)].rename(columns=cols), hide_index=True, width="stretch",
+                     column_config=cfg)
+    st.markdown("**Strongest company news in the S&P 500**")
+    st.dataframe(other[list(cols)].rename(columns=cols), hide_index=True, width="stretch",
+                 column_config=cfg)
+    st.caption("Only company events (results, guidance, deals, approvals, lawsuits, management). "
+               "Predictions, ratings, \"stocks to buy\" lists and opinion pieces are left out. "
+               "Tone from FinBERT: −1 very negative, +1 very positive. A holding with strongly "
+               "negative news is sold at the next close.")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -669,6 +663,7 @@ def page_us_research():
             width="stretch", column_config={"Confidence": st.column_config.ProgressColumn(
                 format="percent", min_value=0, max_value=1),
                 "Last close": st.column_config.NumberColumn(format="$%.2f")})
+    us_news_section(list(picks["symbol"]), "News on the picks")
 
 # --- Option selling lab ------------------------------------------------------------------
 
@@ -818,6 +813,30 @@ def lab_board(LAB):
             color=alt.Color("Strategy:N", legend=alt.Legend(orient="bottom", columns=3)),
             tooltip=["Strategy", alt.Tooltip("day:T"), alt.Tooltip("Cumulative return:Q", format="+.2%")]
         ).properties(height=320), width="stretch")
+
+    st.subheader("Where the money went")
+    try:
+        from stockpredictor.data import intraday as I
+
+        cash = {b: l for b, l in labels.items() if b in (*PI.BOOKS, *LAB.CASH_BOOKS)}
+        x = ctx()
+        att = LAB.attribution(c, I.load_summaries(STORE), x.universe if x is not None
+                              else store.load_universe(STORE), cash)
+    except Exception:
+        att = pd.DataFrame()
+    if att.empty:
+        st.caption("Appears once the stock books have closed trades.")
+    else:
+        money = ["Market's move", "Sector's move", "Stock picking", "Costs", "Net"]
+        show = att.copy()
+        for col in money:
+            show[col] = show[col].map(UI.money)
+        st.dataframe(show, hide_index=True, width="stretch")
+        st.caption("Last 60 days of the stock books, split into what the whole market did "
+                   "while the trades were open, what the stock's sector did beyond that, the "
+                   "stock picking itself (the rest), and costs. A long-short book should earn "
+                   "from stock picking; if picking is positive but the net is negative, costs "
+                   "or the market's direction are the problem, not the picks.")
 
     st.subheader("Today in the lab")
     day = f"{now_ist():%Y-%m-%d}"

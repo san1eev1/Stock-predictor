@@ -71,7 +71,9 @@ class MarketContext:
             indices = indices[indices["date"] >= since].reset_index(drop=True)
             if "published" in news and not news.empty:
                 news = news[news["published"] >= since.tz_localize("UTC")]
-        return cls(daily, indices, universe, feats, R.add_relevance(news, universe))
+        out = cls(daily, indices, universe, feats, R.add_relevance(news, universe))
+        out.store_dir = store_dir          # for corporate actions (paper/splits.py)
+        return out
 
     def closes_on(self, date: pd.Timestamp) -> dict[str, float]:
         d = self.daily[self.daily["date"] <= date]
