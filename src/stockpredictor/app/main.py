@@ -862,14 +862,18 @@ def lab_board(LAB):
 def page_news():
     from stockpredictor.paper import lab as LAB
 
+    from stockpredictor.data import announcements as A
+
     st.title("Stock news")
-    st.caption("Only news about a company or its sector: results, orders, approvals, management, "
-               "regulation, policy. Tips, price reports and market commentary are dropped. Each "
-               "headline's tone comes from FinBERT; its weight from a model that learned, on "
-               f"past headlines, which kinds came with real moves in the stock. The News drift "
-               "book in the Strategy lab trades on this.")
-    df = news()
+    st.caption("News that can still matter for the price. First the companies' own filings on NSE "
+               "(they must tell the exchange before anyone else; media stories follow minutes to "
+               "hours later), then what is scheduled ahead, then company and sector news. Reports "
+               "written after the price moved (\"shares rise 2%\"), tips, predictions and "
+               "market commentary are left out.")
+    df = A.merge_news(news(), A.load_live(config.DATA_DIR / "cache"))
     x = ctx()
+    filings_live(x)
+    coming_up(x)
     if df.empty or x is None:
         st.info("No news yet: GitHub fetches it at 8:30, 10:00, 12:00, 14:00 and 17:00 on weekdays.")
         return
@@ -879,10 +883,12 @@ def page_news():
     since = (LAB.last_close_utc(x, pd.Timestamp(now_ist().date())) if hours == "Last close"
              else until - pd.Timedelta(hours={"24 hours": 24, "3 days": 72, "7 days": 168}[hours]))
     w = df[(df["published"] > since) & df["sentiment"].notna()].copy()
-    w = w[~w["title"].astype(str).str.contains(N.PRICE_MOVE)]
+    is_filing = w["source"].astype(str).eq(A.SOURCE) if "source" in w else False
+    w = w[is_filing | ~w["title"].astype(str).str.contains(N.PRICE_MOVE)]
     themes = w[w["symbol"].astype(str).str.startswith(N.THEME_PREFIX)]
     comp = w[~w.index.isin(themes.index)]
-    comp = comp[LAB.about_company(comp, x.universe)] if len(comp) else comp
+    if len(comp):
+        comp = comp[LAB.about_company(comp, x.universe) | comp["source"].astype(str).eq(A.SOURCE)]
     comp = comp.assign(weight=comp["sentiment"] * comp.get("relevance", 1.0))
     ns = LAB.news_scores(df, x.universe, since, until)
     top = ns[ns["n"] > 0].sort_values("score")
@@ -920,6 +926,71 @@ def page_news():
         columns={"symbol": "Stock", "title": "Headline", "url": "Link"}).head(300),
         hide_index=True, width="stretch",
         column_config={"Link": st.column_config.LinkColumn(display_text="open")})
+
+
+@st.fragment(run_every=REFRESH)
+def filings_live(x) -> None:
+    """Today's material NSE filings for our stocks, newest first (the Mac polls every 3 min)."""
+    from stockpredictor.data import announcements as A
+
+    st.subheader("Company filings today")
+    live = A.load_live(config.DATA_DIR / "cache")
+    if live.empty:
+        st.caption("None yet today. The Mac checks NSE every 3 minutes from 8:30 to 15:35.")
+        return
+    today = pd.Timestamp(now_ist().date()).tz_localize("Asia/Kolkata").tz_convert("UTC")
+    t = live[live["published"] >= today - pd.Timedelta(hours=17)].sort_values("published", ascending=False)
+    if t.empty:
+        st.caption("No material filings since yesterday's close.")
+        return
+    held = set()
+    try:
+        c = conn()
+        held = {r[0] for r in c.execute("SELECT DISTINCT symbol FROM paper_trades WHERE status = 'open'")}
+    except Exception:
+        pass
+    t = t.assign(When=t["published"].dt.tz_convert("Asia/Kolkata").dt.strftime("%d %b %H:%M"),
+                 Held=t["symbol"].map(lambda s: "yes" if s in held else ""),
+                 Tone=t["sentiment"].map(lambda v: f"{v:+.1f}" if pd.notna(v) else ""))
+    st.dataframe(t[["When", "symbol", "title", "Tone", "Held", "url"]].rename(columns={
+        "symbol": "Stock", "title": "What the company filed", "url": "Document"}),
+        hide_index=True, width="stretch", height=min(36 * (len(t) + 1), 420),
+        column_config={"Document": st.column_config.LinkColumn(display_text="pdf"),
+                       "What the company filed": st.column_config.TextColumn(width="large")})
+    st.caption("Tone here is a quick rule by filing type (orders up, penalties and resignations "
+               "down); GitHub replaces it with FinBERT's reading at its next news run.")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _coming(day: str) -> pd.DataFrame:
+    from datetime import date as _d
+
+    from stockpredictor.data import announcements as A
+    from stockpredictor.data import ipo as IPO
+
+    try:
+        return A.coming_events(IPO.session(), _d.fromisoformat(day), 14)
+    except Exception:
+        return pd.DataFrame()
+
+
+def coming_up(x) -> None:
+    """Known in advance: board meetings and ex-dates for our stocks in the next two weeks."""
+    st.subheader("Coming up")
+    ev = _coming(f"{now_ist():%Y-%m-%d}")
+    if x is not None and not ev.empty:
+        ev = ev[ev["symbol"].isin(set(x.universe["symbol"]))]
+    if ev.empty:
+        st.caption("No board meetings or ex-dates for our stocks in the next two weeks.")
+        return
+    ev = ev.drop_duplicates(["symbol", "date", "what"])
+    st.dataframe(ev.assign(Date=ev["date"].dt.strftime("%a %d %b"))[["Date", "symbol", "kind", "what"]]
+                 .rename(columns={"symbol": "Stock", "kind": "Event", "what": "Purpose"}),
+                 hide_index=True, width="stretch")
+    st.caption("Results and other board decisions are announced after these meetings, usually "
+               "after 15:30 or during the day; the stock moves on the surprise. The intraday "
+               "rules can skip stocks reporting that day. On an ex-date the price drops by the "
+               "dividend; splits and bonuses are adjusted in the paper books.")
 
 
 def html_escape(s: str) -> str:

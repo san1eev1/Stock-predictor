@@ -121,11 +121,16 @@ def news_scores(news: pd.DataFrame, universe: pd.DataFrame, since: pd.Timestamp,
         return pd.DataFrame(columns=cols)
     w = news[(news["published"] > since) & (news["published"] <= until)
              & news["sentiment"].notna()].copy()
-    w = w[~w["title"].astype(str).str.contains(N.PRICE_MOVE)]
+    filing = w["source"].astype(str).eq("NSE filing") if "source" in w else False
+    w = w[filing | ~w["title"].astype(str).str.contains(N.PRICE_MOVE)]   # after-the-move reports out
     w["rel"] = w["relevance"] if "relevance" in w else 1.0
+    if "source" in w:            # the company's own filing: full weight, it comes first
+        w.loc[w["source"].astype(str).eq("NSE filing"), "rel"] = w["rel"].clip(lower=1.0)
     comp = w[~w["symbol"].astype(str).str.startswith(N.THEME_PREFIX)]
     comp = comp[comp["rel"] >= N.RELEVANT * 0.75]
-    comp = comp[about_company(comp, universe)] if len(comp) else comp
+    if len(comp):              # media must name the company; the company's own filing need not
+        own = comp["source"].astype(str).eq("NSE filing") if "source" in comp else False
+        comp = comp[about_company(comp, universe) | own]
     g = comp.groupby("symbol")
     out = pd.DataFrame({
         "n": g.size(),
@@ -259,8 +264,12 @@ def run_picks(conn: sqlite3.Connection, ctx: E.MarketContext, feats: pd.DataFram
     """All cash lab books for today (once a day, after the model's 9:46 picks)."""
     today = pd.Timestamp(now.date())
     until = pd.Timestamp(now).tz_convert("UTC")
-    ns = news_scores(ctx.news, ctx.universe, last_close_utc(ctx, today), until)
-    recent_news = news_scores(ctx.news, ctx.universe, until - pd.Timedelta(hours=36), until)
+    from stockpredictor.config import DATA_DIR
+    from stockpredictor.data import announcements as A
+
+    news = A.merge_news(ctx.news, A.load_live(DATA_DIR / "cache"))
+    ns = news_scores(news, ctx.universe, last_close_utc(ctx, today), until)
+    recent_news = news_scores(news, ctx.universe, until - pd.Timedelta(hours=36), until)
     recent = set(recent_news.loc[recent_news["n"] > 0, "symbol"])
     done = {}
     for st in CASH:

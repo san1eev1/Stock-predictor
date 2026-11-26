@@ -281,6 +281,21 @@ def cmd_news_update(settings, args) -> None:
     d = Path(args.dir)
     uni = store.load_universe(d)
     rows, errors = news.fetch_all(uni[uni["symbol"].isin(store.tradable(uni))])
+    try:                       # NSE filings: the companies' own disclosures, first
+        from datetime import date, timedelta
+
+        from stockpredictor.config import MARKET
+        from stockpredictor.data import announcements as A
+        from stockpredictor.data import ipo as IPO
+
+        if MARKET.name == "in":
+            today = date.today()
+            f = A.fetch(IPO.session(), today - timedelta(days=1), today)
+            filed = A.to_news_rows(f, set(store.tradable(uni)))
+            rows += filed
+            print(f"NSE filings: {len(f)} in two days, {len(filed)} material for our stocks")
+    except Exception as exc:
+        errors.append(f"NSE filings: {exc}")
     new = news.append_news(d, rows)
     print(f"Fetched {len(rows)} headlines, {len(new)} new, {len(errors)} feed errors")
     for e in errors[:10]:

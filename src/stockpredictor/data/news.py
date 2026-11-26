@@ -33,7 +33,7 @@ SEVERE_MEAN_3D = -0.6
 # Headlines that only report a price move; the model already sees prices.
 PRICE_MOVE = re.compile(
     r"(?:share|stock|price)s?\b.*\b(?:fall|fell|drop|declin|slip|slump|down|tumbl|plung|los|"
-    r"crash|sink|sank|tank)|top (?:loser|gainer)|\b(?:sensex|nifty)\b|52[- ]?w(?:ee)?k|trades? flat|"
+    r"crash|sink|sank|tank|rise|rose|jump|surge|gain|climb|rall|soar|zoom|spurt|up \d|higher)|top (?:loser|gainer)|\b(?:sensex|nifty)\b|52[- ]?w(?:ee)?k|trades? flat|"
     r"price target|target (?:price|cut)|stock (?:price|analysis)", re.I)
 
 # Tips and recommendations, not news: we don't copy other people's buy/sell calls, the
@@ -112,7 +112,9 @@ JUNK = re.compile(
     r"why .{0,60} (?:stock|shares) (?:is|are|was|were) (?:up|down|soaring|falling|rising|sinking|jumping)|"
     r"if you (?:had )?invested|you would have|what does .{0,80} mean|fair value|"
     r"analysts?'? (?:price )?targets?|(?:stock|shares) (?:joins?|leads?|lags?) .{0,40}(?:sell-?off|rally|slide)|"
-    r"(?:stock|shares) tests? \$|\b(?:nasdaq|s&p 500|dow) (?:falls?|rises?|drops?|gains?|jumps?|slides?)", re.I)
+    r"(?:stock|shares) tests? \$|\b(?:nasdaq|s&p 500|dow) (?:falls?|rises?|drops?|gains?|jumps?|slides?)|"
+    r"\btop \w+ picks?\b|\bpick with\b|\btarget of ₹|with ₹[\d,]+ target|"
+    r"^(?:can|will|should|could|is|are|does|do|what|why|how)\b[^?]*\?$|\b(?:can|will) [^?]{0,80}\?$", re.I)
 JUNK_SOURCES = {"univest", "marketsmojo", "multibagg ai", "ad-hoc-news.de", "simply wall st",
                 "trade brains", "facebook", "freejobalert.com", "openpr.com", "instagram",
                 "youtube", "x.com", "scripbox", "stockinvest.us", "marketbeat", "getmoneyrich",
@@ -252,7 +254,9 @@ def load_news(store_dir: Path) -> pd.DataFrame:
     df = pd.concat((pd.read_csv(f) for f in files), ignore_index=True)
     df["published"] = pd.to_datetime(df["published"], utc=True)
     src = df["source"] if "source" in df else pd.Series("", index=df.index)
-    keep = [not is_noise(t, s) for t, s in zip(df["title"], src.fillna(""))]
+    # NSE filings are the company's own disclosures: never noise (routine ones are dropped
+    # when fetched, data/announcements.py)
+    keep = [s == "NSE filing" or not is_noise(t, s) for t, s in zip(df["title"], src.fillna(""))]
     return df[keep].reset_index(drop=True)
 
 

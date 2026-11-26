@@ -111,3 +111,28 @@ def test_pick_quality_trades_3_to_5_and_skips_news_against_and_sideways():
     flat = day.assign(sec_r30=-0.01, mkt_r30=-0.01)
     _, k2, _ = PI.pick_quality(flat.head(25), flat, "long", {})
     assert k2 == 5 or k2 == 3                                 # always within 3-5
+
+
+def test_filings_become_news_and_after_the_move_reports_drop_out():
+    from datetime import datetime
+
+    from stockpredictor.data import announcements as A
+
+    f = pd.DataFrame({"symbol": ["AAA", "BBB", "CCC"],
+                      "time": [datetime(2026, 11, 26, 12, 0, 7)] * 3,
+                      "category": ["Bagging/Receiving of orders/contracts",
+                                   "Copy of Newspaper Publication", "Press Release"],
+                      "summary": ["AAA Limited received an order worth Rs 500 crore from NHAI.",
+                                  "Newspaper copy.", "Please find enclosed a press release."],
+                      "url": ["u1", "u2", "u3"]})
+    rows = A.to_news_rows(f, {"AAA", "BBB", "CCC"}, with_tone=True)
+    assert [r["symbol"] for r in rows] == ["AAA", "CCC"]            # routine notice dropped
+    assert rows[0]["sentiment"] > 0 and rows[0]["published"] == "2026-11-26T06:30:07Z"
+    assert rows[1]["title"] == "Press Release"                      # no content: the category
+    assert N.PRICE_MOVE.search("Hero MotoCorp Strengthens Harley Partnership; Shares Rise 0.67%")
+    uni = pd.DataFrame({"symbol": ["AAA"], "name": ["Aaa Infra Ltd"], "industry": ["Construction"]})
+    news = pd.DataFrame(rows[:1]).assign(published=lambda d: pd.to_datetime(d["published"], utc=True),
+                                         relevance=0.5)
+    ns = LAB.news_scores(news, uni, pd.Timestamp("2026-11-26", tz="UTC"),
+                         pd.Timestamp("2026-11-27", tz="UTC"))
+    assert ns.set_index("symbol").loc["AAA", "n"] == 1             # filing counted at full weight

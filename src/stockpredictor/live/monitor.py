@@ -141,6 +141,7 @@ class Monitor:
         self.background = None                   # live/background.py BackgroundTrainer
         self._started = False
         self._last_pick_try: datetime | None = None
+        self._last_filings: datetime | None = None
         self.capital_intraday = capital_intraday
         E.ensure_account(conn, capital)
         for book in PI.BOOKS:
@@ -213,6 +214,10 @@ class Monitor:
             done.append("startup")
             if self.background is not None:
                 self.background.ready.set()
+        if now.weekday() < 5 and time(8, 30) <= now.time() <= time(15, 35) \
+                and (self._last_filings is None or (now - self._last_filings).total_seconds() >= 180):
+            self._last_filings = now
+            self.poll_filings(now)
         if in_market_hours(now) and self.trading_today(now):
             day = f"{now:%Y-%m-%d}"
             if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
@@ -521,7 +526,7 @@ class Monitor:
         feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
         prices = self.prices.get(sorted(feats["symbol"]))
         self._feats_today = (day, feats, prices)
-        summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
+        summary = N.news_summary(self.news_now(ctx), pd.Timestamp(now).tz_convert("UTC"))
         negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
         strengths = PI.recent_strengths(model, self.store_dir, ctx, rules) \
             if rules.skip_quantile > 0 else None
@@ -577,11 +582,46 @@ class Monitor:
         except Exception as exc:
             log.warning("option selling paper book: %s", exc)
 
+    def poll_filings(self, now: datetime) -> None:
+        """NSE company filings since yesterday (the first public source of company news),
+        kept in data/cache/filings_live.csv; alerts for stocks the books or you hold."""
+        from stockpredictor.data import announcements as A
+        from stockpredictor.data import ipo as IPO
+
+        try:
+            uni = set(store.tradable(self.ctx().universe))
+            f = A.fetch(IPO.session(), now.date() - timedelta(days=1), now.date())
+            rows = A.to_news_rows(f, uni, with_tone=True)
+            if not rows:
+                return
+            path = config.DATA_DIR / "cache" / A.LIVE_FILE
+            old = set()
+            if path.exists():
+                o = pd.read_csv(path)
+                old = set(zip(o["symbol"], o["title"]))
+            A.save_live(config.DATA_DIR / "cache", rows)
+            watched = self.watched_symbols()
+            for r in rows:
+                if (r["symbol"], r["title"]) not in old and r["symbol"] in watched:
+                    alert(self.conn, "news", "filing", r["symbol"],
+                          f"{now:%Y-%m-%d %H:%M} NSE filing, {r['symbol']}: {r['title'][:200]}")
+        except Exception as exc:
+            log.warning("NSE filings: %s", exc)
+
+    def news_now(self, ctx) -> pd.DataFrame:
+        """Stored news + today's live NSE filings."""
+        from stockpredictor.data import announcements as A
+
+        try:
+            return A.merge_news(ctx.news, A.load_live(config.DATA_DIR / "cache"))
+        except Exception:
+            return ctx.news
+
     def news_tone(self, ctx, now: datetime) -> dict[str, float]:
         """Company + sector news since the last close, per stock (paper/lab.news_scores)."""
         try:
             until = pd.Timestamp(now).tz_convert("UTC")
-            ns = LAB.news_scores(ctx.news, ctx.universe,
+            ns = LAB.news_scores(self.news_now(ctx), ctx.universe,
                                  LAB.last_close_utc(ctx, pd.Timestamp(now.date())), until)
             return dict(zip(ns["symbol"], ns["score"]))
         except Exception:
