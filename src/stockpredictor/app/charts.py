@@ -8,18 +8,18 @@ import pandas as pd
 import streamlit as st
 
 # Fixed entity -> categorical slot (light, dark).
-SERIES = {
-    "Model": ("#2a78d6", "#3987e5"),
-    "Nifty 50": ("#eb6834", "#d95926"),
-    "Equal-weight Nifty 250": ("#1baf7a", "#199e70"),
-    "Momentum only": ("#eda100", "#c98500"),
-    "Long-term": ("#2a78d6", "#3987e5"),
-    "Intraday": ("#eb6834", "#d95926"),
-    "Buy book": ("#2a78d6", "#3987e5"),
-    "Sell book": ("#1baf7a", "#199e70"),
+SERIES = {     # the dashboard palette (app/ui.py): signal blue, ochre, slate violet, teal
+    "Model": ("#3A6EA5", "#7FA6D6"),
+    "Nifty 50": ("#A8762A", "#D6A452"),
+    "Equal-weight Nifty 250": ("#6B5EA8", "#A79BDB"),
+    "Momentum only": ("#2C8585", "#5DB8B8"),
+    "Long-term": ("#3A6EA5", "#7FA6D6"),
+    "Intraday": ("#A8762A", "#D6A452"),
+    "Buy book": ("#3A6EA5", "#7FA6D6"),
+    "Sell book": ("#6B5EA8", "#A79BDB"),
 }
-SINGLE = ("#2a78d6", "#3987e5")
-GOOD, CRITICAL = "#0ca30c", "#d03b3b"
+SINGLE = ("#3A6EA5", "#7FA6D6")
+GOOD, CRITICAL = "#3E9E6B", "#C25E45"
 
 
 def _dark() -> bool:

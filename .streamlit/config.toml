@@ -1,19 +1,19 @@
 # Light and dark modes: choose in the menu (⋮ top right) → Settings → Light / Dark / System.
 [theme]
 font = "sans serif"
-baseRadius = "medium"
+baseRadius = "small"
 
 [theme.light]
-primaryColor = "#2563eb"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f3f5f9"
-textColor = "#1f2937"
+primaryColor = "#3A6EA5"
+backgroundColor = "#EEF1EC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B2430"
 
 [theme.dark]
-primaryColor = "#60a5fa"
-backgroundColor = "#0f172a"
-secondaryBackgroundColor = "#1e293b"
-textColor = "#e2e8f0"
+primaryColor = "#7FA6D6"
+backgroundColor = "#1B2430"
+secondaryBackgroundColor = "#222D3B"
+textColor = "#E8ECE6"
 
 [client]
 toolbarMode = "viewer"

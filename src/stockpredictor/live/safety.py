@@ -192,7 +192,8 @@ def health(conn: sqlite3.Connection, now: datetime, daily_last=None) -> list[dic
     if ps:
         try:
             r = json.loads(ps)
-            if r.get("avg_gap", 0) > PAPER_SIM_MAX_GAP:
+            recent = (now.date() - pd.Timestamp(r["day"]).date()).days <= 7
+            if recent and r.get("avg_gap", 0) > PAPER_SIM_MAX_GAP:
                 add("warning", f"Paper trades on {r['day']} differ from the simulator by "
                                f"{r['avg_gap']:.2%} on average - live and backtest disagree")
         except ValueError:
