@@ -1,133 +1,128 @@
-"""Look and feel: quiet and exact. Ink navy and ivory with one champagne accent; serif
-display headings, condensed tabular figures; every book an order slip (figure first).
-Dark by default (switchable in ⋮ → Settings); colours follow the active theme."""
+"""Look and feel: the night desk. Deep green-graphite, one marigold accent, jade gains and
+coral losses on numbers only; Bricolage Grotesque for headings and figures, Geist for text,
+tabular digits everywhere. Dark only (no theme switching, no reload on first visit)."""
 
 from __future__ import annotations
 
 import html
 
 import streamlit as st
-import streamlit.components.v1 as components
 
-# Mid tones that read on both themes (charts, tables); CSS uses per-theme shades below.
-UP, DOWN, NEUTRAL = "#4FAE80", "#D0675F", "#B59A60"
+# Chart / table colours.
+UP, DOWN, NEUTRAL = "#5CC99B", "#F2706A", "#EFA43F"
 
-# Ink navy, ivory, one champagne accent; jade gains, rose-red losses.
-PALETTE = {
-    True: {"bg": "#121826", "surface": "#19202E", "rule": "#283041", "ink": "#EDE9E1",
-           "muted": "#8F97A6", "up": "#6CC59A", "down": "#E07A74", "signal": "#CBB27C"},
-    False: {"bg": "#F2F3F1", "surface": "#FFFFFF", "rule": "#DADDD8", "ink": "#151B27",
-            "muted": "#5E6573", "up": "#2E7D57", "down": "#B4483F", "signal": "#8C6D35"},
-}
+_NIGHT = {"bg": "#0E1312", "surface": "#151C1A", "raised": "#1B2421", "rule": "#25302C",
+          "ink": "#E8ECE7", "muted": "#8D9994", "up": UP, "down": DOWN, "signal": NEUTRAL}
+PALETTE = {True: _NIGHT, False: _NIGHT}
+# Categories in charts: never red / green (those mean loss / gain here).
+CATEGORIES = ["#EFA43F", "#6FB3C9", "#A99BE0", "#4DB6A8", "#E8D5A8", "#8FA2F5", "#D99BB8",
+              "#B7C96A", "#C98A5A", "#7FD1D1", "#9C8FB0", "#E1B66B", "#6C9CB0", "#C4A7E7",
+              "#88B89E", "#D6C27A"]      # one theme; kept as a mapping for callers
 
-# Streamlit keeps the light/dark choice per page in the browser and starts from the system
-# setting. This makes Dark the default and carries the viewer's last choice to every page.
-_THEME_JS = """
-<script>
-(function () {
-  try {
-    const w = window.parent, ls = w.localStorage;
-    const key = "stActiveTheme-" + w.location.pathname + "-v2";
-    const mine = ls.getItem(key);
-    if (mine) { ls.setItem("sp-theme", mine); return; }
-    if (w.sessionStorage.getItem("sp-theme-set-" + w.location.pathname)) return;
-    w.sessionStorage.setItem("sp-theme-set-" + w.location.pathname, "1");
-    ls.setItem(key, ls.getItem("sp-theme") || '"Dark"');
-    w.location.reload();
-  } catch (e) {}
-})();
-</script>
-"""
-
-FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700"
-         "&family=IBM+Plex+Sans:wght@400;500;600&family=Cormorant+Garamond:wght@500;600;700"
-         "&display=swap")
+FONTS = ("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700"
+         "&family=Geist:wght@400;500;600&display=swap")
 
 
 def dark() -> bool:
-    try:
-        return (st.context.theme.type or "dark") == "dark"
-    except Exception:
-        return True
+    return True
 
 
 def colors() -> dict:
-    return PALETTE[dark()]
+    return _NIGHT
 
 
 def setup() -> None:
     """Call once per run, before the page."""
-    components.html(_THEME_JS, height=0)
-    c = colors()
+    c = _NIGHT
     st.markdown(f"""<style>
 @import url('{FONTS}');
-html, body, p, li, label, input, textarea, button, [data-testid="stMarkdownContainer"] {{
-  font-family: 'IBM Plex Sans', system-ui, sans-serif; }}
+html, body, p, li, label, input, textarea, button, td, th, span, div,
+[data-testid="stMarkdownContainer"], [data-testid="stSidebar"] {{
+  font-family: 'Geist', system-ui, sans-serif; font-feature-settings: 'tnum' 1; }}
 [data-testid="stIconMaterial"], .material-symbols-rounded {{
   font-family: 'Material Symbols Rounded' !important; }}
-h1, h2, h3 {{ font-family: 'Cormorant Garamond', Georgia, serif; color: {c['ink']}; }}
-h4, [data-testid="stMetricValue"], .sp-figure, .sp-value, .sp-next time {{
-  font-family: 'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif;
+.stApp {{ background: {c['bg']}; }}
+h1, h2, h3, h1 *, h2 *, h3 *, .sp-figure, .sp-value, [data-testid="stMetricValue"],
+[data-testid="stHeading"] * {{
+  font-family: 'Bricolage Grotesque', 'Geist', sans-serif !important; color: {c['ink']};
   font-variant-numeric: tabular-nums; }}
-.block-container {{ padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1180px; }}
-h1 {{ font-weight: 600; font-size: 2.9rem; letter-spacing: 0; line-height: 1.05; }}
-h2, h3 {{ font-weight: 600; letter-spacing: 0.005em; }}
-h3 {{ font-size: 1.65rem; margin-top: 1.8rem; }}
+h1 {{ font-size: 2.6rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.05;
+  padding-bottom: 0.2rem; }}
+h2, h3 {{ font-weight: 600; letter-spacing: -0.01em; }}
+h3 {{ font-size: 1.35rem; margin-top: 1.6rem; }}
+.block-container {{ padding-top: 3.4rem; padding-bottom: 4rem; max-width: 1200px; }}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p, .sp-note {{
-  font-size: 0.95rem; line-height: 1.6; color: {c['muted']}; max-width: 72ch; }}
-a {{ color: {c['signal']} !important; }}
-[data-testid="stSidebar"] {{ border-right: 1px solid {c['rule']}; }}
-[data-testid="stSidebarNav"] a[aria-current="page"] {{ background: transparent !important;
-  box-shadow: inset 2px 0 0 {c['signal']}; }}
-[data-testid="stMetric"] {{ background: {c['surface']}; border: 1px solid {c['rule']};
-  border-radius: 4px; padding: 14px 18px; }}
-[data-testid="stMetricValue"] {{ font-size: 1.6rem; font-weight: 600; }}
-[data-testid="stDataFrame"] {{ border: 1px solid {c['rule']}; border-radius: 6px; }}
-[data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 8px; }}
-[data-baseweb="tab-list"] {{ gap: 1.4rem; border-bottom: 1px solid {c['rule']}; }}
+  font-size: 0.92rem; line-height: 1.6; color: {c['muted']}; max-width: 75ch; }}
+a {{ color: {c['signal']} !important; text-decoration-thickness: 1px; text-underline-offset: 3px; }}
+
+/* sidebar: quieter than the page, marigold marks where you are */
+[data-testid="stSidebar"] {{ background: #0B0F0E; border-right: 1px solid {c['rule']}; }}
+[data-testid="stSidebarNav"] a {{ border-radius: 8px; }}
+[data-testid="stSidebarNav"] a:hover {{ background: {c['surface']} !important; }}
+[data-testid="stSidebarNav"] a[aria-current="page"] {{ background: {c['raised']} !important;
+  box-shadow: inset 3px 0 0 {c['signal']}; }}
+[data-testid="stSidebarNav"] a[aria-current="page"] span {{ color: {c['ink']} !important; font-weight: 600; }}
+[data-testid="stNavSectionHeader"] {{ color: {c['muted']} !important; font-size: 0.78rem;
+  letter-spacing: 0.02em; }}
+
+/* surfaces */
+[data-testid="stMetric"], [data-testid="stExpander"] details {{ background: {c['surface']};
+  border: 1px solid {c['rule']} !important; border-radius: 10px; }}
+[data-testid="stMetric"] {{ padding: 14px 18px; }}
+[data-testid="stExpander"] summary:hover {{ color: {c['signal']}; }}
+[data-testid="stDataFrame"] {{ border: 1px solid {c['rule']}; border-radius: 10px; overflow: hidden; }}
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 12px; }}
+[data-baseweb="tab-list"] {{ gap: 1.2rem; border-bottom: 1px solid {c['rule']}; }}
+[data-baseweb="tab"] p {{ font-size: 0.95rem; }}
 [data-baseweb="tab-highlight"] {{ background-color: {c['signal']}; }}
+[data-testid="stAlert"] {{ border-radius: 10px; }}
+.stButton button {{ border-radius: 999px; border: 1px solid {c['rule']}; background: {c['surface']}; }}
+.stButton button:hover {{ border-color: {c['signal']}; color: {c['signal']}; }}
 :focus-visible {{ outline: 2px solid {c['signal']} !important; outline-offset: 2px; }}
 @media (prefers-reduced-motion: reduce) {{ * {{ transition: none !important; animation: none !important; }} }}
 
-.sp-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px; margin: 8px 0 22px; }}
-.sp-ticket {{ background: {c['surface']}; border: 1px solid {c['rule']};
-  border-radius: 4px; padding: 16px 18px 0; display: flex; flex-direction: column; }}
-.sp-label {{ font-size: 0.9rem; font-weight: 500; color: {c['muted']}; }}
-.sp-value {{ font-size: 1.75rem; font-weight: 600; line-height: 1.2; margin-top: 2px; color: {c['ink']}; }}
+/* tickets: one figure each, its note, and a thin meter */
+.sp-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px; margin: 6px 0 22px; }}
+.sp-ticket {{ background: {c['surface']}; border: 1px solid {c['rule']}; border-radius: 12px;
+  padding: 16px 18px 14px; display: flex; flex-direction: column; min-height: 118px; }}
+.sp-label {{ font-size: 0.86rem; font-weight: 500; color: {c['muted']}; }}
+.sp-value {{ font-size: 1.85rem; font-weight: 600; line-height: 1.15; margin-top: 4px;
+  letter-spacing: -0.01em; }}
 .sp-value.up {{ color: {c['up']}; }} .sp-value.down {{ color: {c['down']}; }}
-.sp-sub {{ font-size: 0.85rem; color: {c['muted']}; margin: 2px 0 14px; }}
-.sp-meter {{ height: 2px; margin: auto -18px 0 -18px; background: {c['rule']}; }}
-.sp-meter > span {{ display: block; height: 100%; border-radius: 0 0 0 0; }}
+.sp-sub {{ font-size: 0.84rem; color: {c['muted']}; margin: 3px 0 12px; }}
+.sp-meter {{ height: 3px; margin-top: auto; background: {c['rule']}; border-radius: 3px; overflow: hidden; }}
+.sp-meter > span {{ display: block; height: 100%; border-radius: 3px; }}
 .sp-meter.up > span {{ background: {c['up']}; }} .sp-meter.down > span {{ background: {c['down']}; }}
 .sp-meter.neutral > span {{ background: {c['signal']}; }}
 
-.sp-hero {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 28px;
-  padding: 6px 0 24px; border-bottom: 1px solid {c['rule']}; margin-bottom: 22px; }}
-.sp-when {{ font-family: 'Cormorant Garamond', Georgia, serif; color: {c['signal']};
-  font-size: 1.25rem; font-weight: 500; }}
-.sp-figure {{ font-size: clamp(3.4rem, 9vw, 6.4rem); font-weight: 600; line-height: 1;
-  letter-spacing: -0.02em; margin: 6px 0 8px; color: {c['ink']}; }}
+/* the overview's one loud element */
+.sp-hero {{ display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(240px, 1fr); gap: 32px;
+  padding: 4px 0 26px; border-bottom: 1px solid {c['rule']}; margin-bottom: 24px; }}
+.sp-when {{ color: {c['signal']}; font-size: 0.95rem; font-weight: 500; }}
+.sp-figure {{ font-size: clamp(3.6rem, 9vw, 6.6rem); font-weight: 650; line-height: 1;
+  letter-spacing: -0.035em; margin: 10px 0 12px; }}
 .sp-figure.up {{ color: {c['up']}; }} .sp-figure.down {{ color: {c['down']}; }}
-.sp-next {{ border-left: 1px solid {c['rule']}; padding-left: 22px; }}
-.sp-next h4 {{ margin: 0 0 8px; font-family: 'Cormorant Garamond', Georgia, serif;
-  font-size: 1.35rem; font-weight: 600; }}
+.sp-next {{ background: {c['surface']}; border: 1px solid {c['rule']}; border-radius: 14px;
+  padding: 16px 18px; }}
+.sp-next h4 {{ margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.05rem;
+  font-weight: 600; color: {c['ink']}; }}
 .sp-next ol {{ list-style: none; margin: 0; padding: 0; }}
-.sp-next li {{ display: grid; grid-template-columns: 3.4rem 1fr; gap: 10px; padding: 6px 0;
-  border-bottom: 1px solid {c['rule']}; font-size: 0.95rem; }}
-.sp-next li.done {{ opacity: 0.45; }}
-.sp-next time {{ font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600;
-  font-variant-numeric: tabular-nums; color: {c['signal']}; }}
+.sp-next li {{ display: grid; grid-template-columns: 3.3rem 1fr; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid {c['rule']}; font-size: 0.9rem; color: {c['ink']}; }}
+.sp-next li:last-child {{ border-bottom: 0; }}
+.sp-next li.done {{ opacity: 0.4; }}
+.sp-next time {{ font-weight: 600; font-variant-numeric: tabular-nums; color: {c['signal']}; }}
 @media (max-width: 760px) {{
   .sp-hero {{ grid-template-columns: 1fr; }}
-  .sp-next {{ border-left: 0; padding-left: 0; }}
+  h1 {{ font-size: 2.1rem; }}
 }}
 </style>""", unsafe_allow_html=True)
 
 
 def card(label: str, value: str, sub: str = "", fill: float = 0.0, tone: str = "neutral",
          ring_text: str = "") -> str:
-    """One order-slip ticket: label, the figure, a short note, and a meter for `fill` (0..1)."""
+    """One ticket: label, the figure, a short note, and a meter for `fill` (0..1)."""
     tone = tone if tone in ("up", "down") else "neutral"
     f = max(0.0, min(1.0, fill))
     title = f' title="{html.escape(ring_text)}"' if ring_text else ""
@@ -165,8 +160,8 @@ def share_card(label: str, part: float, whole: float, value: str, sub: str = "")
 
 def hero(when: str, figure: float, caption: str, upcoming: list[tuple[str, str, bool]],
          cur: str = "₹") -> None:
-    """The overview's one loud element: today's P&L as a big tabular figure, and what the
-    system does next. upcoming: [(HH:MM, what, already done)]."""
+    """Today's P&L as one big figure, and what the system does next.
+    upcoming: [(HH:MM, what, already done)]."""
     tone = "up" if figure > 0 else "down" if figure < 0 else ""
     items = "".join(f'<li class="{"done" if done else ""}"><time>{html.escape(t)}</time>'
                     f'<span>{html.escape(w)}</span></li>' for t, w, done in upcoming)
@@ -174,19 +169,17 @@ def hero(when: str, figure: float, caption: str, upcoming: list[tuple[str, str, 
         f'<section class="sp-hero"><div><div class="sp-when">{html.escape(when)}</div>'
         f'<div class="sp-figure {tone}">{html.escape(money(figure, cur))}</div>'
         f'<div class="sp-note">{html.escape(caption)}</div></div>'
-        f'<div class="sp-next"><h4>Next</h4><ol>{items}</ol></div></section>',
+        f'<div class="sp-next"><h4>Today on the desk</h4><ol>{items}</ol></div></section>',
         unsafe_allow_html=True)
 
 
 def pnl_colors(df, cols):
-    """Green / brick text for gain-loss columns; a Styler for st.dataframe."""
-    c = colors()
-
+    """Jade / coral text for gain-loss columns; a Styler for st.dataframe."""
     def tint(v):
         try:
             v = float(v)
         except (TypeError, ValueError):
             return ""
-        return (f"color: {c['up']}; font-weight: 600" if v > 0 else
-                f"color: {c['down']}; font-weight: 600" if v < 0 else "")
+        return (f"color: {UP}; font-weight: 600" if v > 0 else
+                f"color: {DOWN}; font-weight: 600" if v < 0 else "")
     return df.style.map(tint, subset=[col for col in cols if col in df.columns])

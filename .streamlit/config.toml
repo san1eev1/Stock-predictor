@@ -1,19 +1,12 @@
-# Light and dark modes: choose in the menu (⋮ top right) → Settings → Light / Dark / System.
+# One theme: the night desk (dark). Colours match app/ui.py.
 [theme]
+base = "dark"
+primaryColor = "#EFA43F"
+backgroundColor = "#0E1312"
+secondaryBackgroundColor = "#151C1A"
+textColor = "#E8ECE7"
 font = "sans serif"
-baseRadius = "small"
-
-[theme.light]
-primaryColor = "#8C6D35"
-backgroundColor = "#F2F3F1"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#151B27"
-
-[theme.dark]
-primaryColor = "#CBB27C"
-backgroundColor = "#121826"
-secondaryBackgroundColor = "#19202E"
-textColor = "#EDE9E1"
+baseRadius = "medium"
 
 [client]
 toolbarMode = "viewer"

@@ -6,6 +6,7 @@ import json
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import altair as alt
 import numpy as np
@@ -199,6 +200,38 @@ def health_banner():
         (st.error if i["level"] == "error" else st.warning)(i["text"], icon="⚠️")
 
 
+ALERT_ICON = {"stop-loss": ":material/trending_down:", "target": ":material/flag:",
+              "fill": ":material/swap_horiz:", "filing": ":material/description:",
+              "negative-news": ":material/feedback:", "decision": ":material/checklist:",
+              "info": ":material/info:"}
+
+
+@st.fragment(run_every=REFRESH)
+def alerts_bar():
+    """Today's alerts, on top of every page: the newest three in full, the rest one click away."""
+    c = conn()
+    since = (now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
+             .astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S"))
+    rows = c.execute("SELECT ts, kind, symbol, message FROM alerts WHERE ts >= ? "
+                     "ORDER BY id DESC LIMIT 200", (since,)).fetchall()
+    if not rows:
+        return
+
+    def line(r):
+        t = (pd.Timestamp(r["ts"]).tz_localize("UTC").tz_convert("Asia/Kolkata")
+             if r["ts"] else None)
+        msg = str(r["message"])
+        msg = msg.split(" ", 2)[-1] if msg[:4].isdigit() and msg.count(" ") >= 2 else msg
+        return f"{ALERT_ICON.get(r['kind'], ':material/notifications:')} **{t:%H:%M}** {msg}"
+
+    with st.container(border=True):
+        st.markdown(f"**{len(rows)} alert{'s' if len(rows) != 1 else ''} today**  \n"
+                    + "  \n".join(line(r) for r in rows[:3]))
+        if len(rows) > 3:
+            with st.expander(f"All {len(rows)} today"):
+                st.markdown("  \n".join(line(r) for r in rows[3:]))
+
+
 def sidebar():
     c = conn()
     with st.sidebar:
@@ -212,12 +245,6 @@ def sidebar():
         st.caption(f"Data to **{m.daily['date'].max():%d %b}** · monitor {live}"
                    if m is not None else f"Monitor {live}")
         accuracy_now_sidebar()
-        alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 12").fetchall()
-        with st.expander(f"Alerts ({len(alerts)})" if alerts else "Alerts"):
-            if not alerts:
-                st.caption("Nothing yet.")
-            for a in alerts:
-                st.caption(a["message"])
 
 
 @st.fragment(run_every=REFRESH)
@@ -874,7 +901,8 @@ def lab_board(LAB):
         h["day"] = pd.to_datetime(h["day"])
         st.altair_chart(alt.Chart(h).mark_line(point=True).encode(
             x=alt.X("day:T", title=None), y=alt.Y("Cumulative return:Q", axis=alt.Axis(format="%")),
-            color=alt.Color("Strategy:N", legend=alt.Legend(orient="bottom", columns=3)),
+            color=alt.Color("Strategy:N", legend=alt.Legend(orient="bottom", columns=3),
+                            scale=alt.Scale(range=UI.CATEGORIES)),
             tooltip=["Strategy", alt.Tooltip("day:T"), alt.Tooltip("Cumulative return:Q", format="+.2%")]
         ).properties(height=320), width="stretch")
 
@@ -2297,6 +2325,7 @@ pages = {
 }
 UI.setup()
 sidebar()
+alerts_bar()
 health_banner()
 def angel_status() -> None:
     """Red banner when, during market hours, live prices are not coming from Angel One."""
@@ -2319,5 +2348,4 @@ def angel_status() -> None:
 
 
 angel_status()
-st.sidebar.caption("Light or dark: menu ⋮ (top right) → Settings")
 st.navigation(pages).run()

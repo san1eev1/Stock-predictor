@@ -8,25 +8,25 @@ import pandas as pd
 import streamlit as st
 
 # Fixed entity -> categorical slot (light, dark).
-SERIES = {     # the dashboard palette (app/ui.py): champagne, slate blue, lilac, teal
-    "Model": ("#8C6D35", "#CBB27C"),
-    "Nifty 50": ("#3F5F8A", "#7F9CC4"),
-    "Equal-weight Nifty 250": ("#6B5EA8", "#A79BDB"),
-    "Momentum only": ("#2C8585", "#5DB8B8"),
-    "Long-term": ("#8C6D35", "#CBB27C"),
-    "Intraday": ("#3F5F8A", "#7F9CC4"),
-    "Buy book": ("#8C6D35", "#CBB27C"),
-    "Sell book": ("#6B5EA8", "#A79BDB"),
+SERIES = {     # the night desk (app/ui.py): marigold, cyan, lilac, jade-teal
+    "Model": ("#EFA43F", "#EFA43F"),
+    "Nifty 50": ("#6FB3C9", "#6FB3C9"),
+    "Equal-weight Nifty 250": ("#A99BE0", "#A99BE0"),
+    "Momentum only": ("#4DB6A8", "#4DB6A8"),
+    "Long-term": ("#EFA43F", "#EFA43F"),
+    "Intraday": ("#6FB3C9", "#6FB3C9"),
+    "Buy book": ("#EFA43F", "#EFA43F"),
+    "Sell book": ("#A99BE0", "#A99BE0"),
 }
-SINGLE = ("#8C6D35", "#CBB27C")
-GOOD, CRITICAL = "#2E7D57", "#B4483F"
+SINGLE = ("#EFA43F", "#EFA43F")
+GOOD, CRITICAL = "#5CC99B", "#F2706A"
 
 
 def _dark() -> bool:
     try:
-        return st.context.theme.type == "dark"
+        return True
     except Exception:
-        return False
+        return True
 
 
 def _color(pair: tuple[str, str]) -> str:
