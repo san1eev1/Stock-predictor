@@ -171,3 +171,28 @@ hedged intraday selling after costs. Five books, Rs 1.5 lakh each, Angel One LTP
 target / 1x credit stop, same condor only when VIX > 20-day realized vol, expiry-day (Tuesday)
 iron fly. Judge after >= 60 traded days each: daily P&L t-stat, worst day, deepest fall.
 Caveat: public 9:20-straddle backtests show the year's result depends on a handful of days.
+
+## E-014 Intraday profit levers (2026-11-27, research run 45899279970)
+'Until close' model, walk-forward scores, 2,441 out-of-sample days, 545k stock-days. Daily
+long-short spread per pair (mean long move - mean short move), equal size:
+
+| Variant | Gross | Net 0.37% (Angel-like) | Net 0.19% (0.03% broker) | Net 0.11% (+limit orders) |
+|---|---|---|---|---|
+| top/bottom 3, exit 15:15 | +72.8 bp, t 18.6 | -1.2 bp, t -0.3 | **+34.8 bp, t 8.9** | +50.8 bp, t 13.0 |
+| top/bottom 5, exit 15:15 (now) | +63.5 bp | -10.5 bp, t -3.5 | +25.5 bp, t 8.3 | +41.5 bp |
+| top/bottom 10, exit 15:15 | +52.2 bp | -21.8 bp | +14.2 bp | +30.2 bp |
+| top/bottom 5, exit 12:30 | +36.0 bp | -38.0 bp, t -18 | -2.0 bp | +14.0 bp |
+| sector pairs 5, exit 15:15 | +55.6 bp | -18.4 bp | +17.6 bp | +33.6 bp |
+
+Last two years gross (top/bottom 5, close): +30.5 bp, t 5.5 (half the full-period edge).
+News since the last close vs 9:45->15:15 (187 days, 5,304 stock-days): IC t -0.31; good news
++6.9 bp vs market (t 1.0); bad news +2.1 bp (t 0.2) -> no intraday predictive power.
+
+Conclusions (fixed rule: net t >= 2 and beats now with paired t >= 2):
+- The model has a real gross edge; at Angel-like 0.37% round trips NOTHING passes (best: 3 a
+  side to the close, break-even). Costs are the binding constraint, not the model.
+- At 0.19% (0.03%-brokerage broker) or lower, every close-exit variant passes; 3 a side best.
+- Exit at 15:15 beats 12:30 in every case; the 12:30 book loses at any cost >= 0.19%.
+- Fewer picks are better (3 > 5 > 10); sector-neutral pairs are worse than plain top/bottom.
+- News does not predict the rest of the day: keep it as a veto only, not a ranking input.
+Live gap: live stock picking (last 60 days) is ~0 vs +30 bp backtest recently -> watch.
