@@ -30,3 +30,22 @@ Measured weaknesses: intraday rank skill is real (IC 0.04–0.06, 59% direction)
 | 5 | Cost-aware execution filter / no-trade zone: trade only when the predicted move exceeds the round-trip cost | Jensen, Kelly, Malamud, Pedersen, "Machine Learning and the Implementable Efficient Frontier" (RFS) | intraday costs | low-medium | proposed (we have min_prob; tuner keeps it off) |
 | 6 | Trees and shallow (≤3-layer) nets are the best ML return predictors; deeper nets worse | Gu, Kelly, Xiu (2020) RFS | confirms our LightGBM choice; DL already rejected (E-005) | — | no change |
 | 7 | Learning-to-rank objective, purged CV | qlib / QRT 2026 challenge repos | already have rank objective + CPCV harness | — | done |
+
+## Intraday profitability after costs (reading, 2026-11-27)
+- Huddleston, Liu & Stentoft (J. Financial Econometrics 2023), *Intraday Market Predictability: A
+  Machine Learning Approach*: ensembles predict intraday market returns; Sharpe ~0.98 after costs.
+  Market-level, not single stocks -> supports the Nifty futures book (lab_mim), not stock picking.
+- Aleti, Bollerslev & Siggaard (Management Science 2025), *Intraday Market Return Predictability
+  Culled from the Factor Zoo*: lagged high-frequency cross-sectional returns predict the market;
+  profitable after costs on liquid ETFs -> again: trade the index, cheaply.
+- Cost-aware construction: Hautsch & Voigt (arXiv 1709.06296) and Fan, Medeiros, Yang & Yang (arXiv
+  2412.11575): turnover penalties set by costs beat naive rebalancing; with high costs shift
+  weight to slower-decaying signals (alpha-decay literature, Qian-Sorensen-Hua 2007).
+- Trade size vs speed (CESifo wp8143): post-cost returns fall with size; cost savings must be
+  weighed against alpha decay.
+- India announcements: NSE-NYU working paper on unscheduled announcements (Nawn & Banerjee 2024):
+  HFT/institutions trade first, retail loses intraday -> our filings feed must act within minutes
+  or not at all; NSE tick-data paper: prices drift for days after news (slow at daily horizon).
+Implication for this system: (1) costs and execution first, (2) index-level intraday signals are
+the best-documented after-cost edge, (3) single-stock intraday needs signals that persist past
+costs (news drift at daily horizon) rather than faster trading. Tested in E-014.

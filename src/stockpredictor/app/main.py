@@ -461,8 +461,30 @@ def _us_prices(c) -> dict[str, float]:
     return dict(zip(last["symbol"], last["close"]))
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _us_quotes(symbols: tuple[str, ...], slot: str) -> dict[str, float]:
+    """Latest Yahoo prices for US symbols (BRK.B -> BRK-B). `slot` sets how often: a
+    5-minute bucket for holdings, the date for sold stocks (once a day)."""
+    import yfinance as yf
+
+    out = {}
+    for sym in symbols:
+        try:
+            p = yf.Ticker(sym.replace(".", "-")).fast_info["last_price"]
+            if p and p == p:
+                out[sym] = float(p)
+        except Exception:
+            pass
+    return out
+
+
 def page_us_paper():
     st.title("US stocks paper book")
+    us_paper_body()
+
+
+@st.fragment(run_every=300)
+def us_paper_body():
     st.caption("The S&P 500 long-term book, run on GitHub after each US close: it buys the "
                "top-ranked stocks (fractional shares, no commission) and sells a holding when it "
                "drops out of the top ranks, hits its stop-loss or gets strongly negative news. "
@@ -477,7 +499,10 @@ def page_us_paper():
     if acct is None:
         st.info("No paper account yet.")
         return
-    held["price"] = held["symbol"].map(px)
+    now_ny = pd.Timestamp.now(tz="America/New_York")
+    live = _us_quotes(tuple(sorted(held["symbol"])), f"{now_ny:%Y-%m-%d %H}:{now_ny.minute // 5}")
+    held["close"] = held["symbol"].map(px)
+    held["price"] = held["symbol"].map(live).fillna(held["close"])
     held["value"] = held["qty"] * held["price"].fillna(held["entry_price"])
     held["gain"] = held["value"] - held["qty"] * held["entry_price"]
     inv = float(held["value"].sum())
@@ -499,29 +524,41 @@ def page_us_paper():
         sells = ", ".join(pend.loc[pend["side"] == "sell", "symbol"]) or "none"
         st.info(f"**Next US close** — buy: {buys} · sell: {sells}")
     st.subheader("Holdings")
+    open_ = 9.5 <= now_ny.hour + now_ny.minute / 60 < 16 and now_ny.weekday() < 5
+    st.caption(f"Prices live from Yahoo, refreshed every 5 minutes (last {now_ny:%H:%M} New York; "
+               f"{'market open' if open_ else 'market closed: last trade'}). Book decisions still "
+               "use the official close.")
     if held.empty:
         st.caption("Nothing held yet.")
     else:
-        st.dataframe(UI.pnl_colors(held[["symbol", "qty", "entry_price", "price", "value", "gain"]]
+        held["day"] = held["price"] / held["close"] - 1
+        st.dataframe(UI.pnl_colors(held[["symbol", "qty", "entry_price", "close", "price", "day",
+                                         "value", "gain"]]
                                    .rename(columns={"symbol": "Stock", "qty": "Shares",
-                                                    "entry_price": "Bought at", "price": "Last close",
+                                                    "entry_price": "Bought at", "close": "Last close",
+                                                    "price": "Now", "day": "Today",
                                                     "value": "Value", "gain": "Gain / loss"}),
-                                   ["Gain / loss"]), hide_index=True, width="stretch", column_config={
+                                   ["Gain / loss", "Today"]), hide_index=True, width="stretch", column_config={
             k: st.column_config.NumberColumn(format="$%.2f")
-            for k in ("Bought at", "Last close", "Value", "Gain / loss")}
-            | {"Shares": st.column_config.NumberColumn(format="%.4f")})
+            for k in ("Bought at", "Last close", "Now", "Value", "Gain / loss")}
+            | {"Shares": st.column_config.NumberColumn(format="%.4f"),
+               "Today": st.column_config.NumberColumn(format="percent")})
     st.subheader("Sold")
     if closed.empty:
         st.caption("No sells yet.")
     else:
         closed["Return"] = closed["exit_price"] / closed["entry_price"] - 1
+        today_px = _us_quotes(tuple(sorted(set(closed["symbol"]))), f"{now_ny:%Y-%m-%d}")
+        closed["Price today"] = closed["symbol"].map(today_px)
+        closed["Since sold"] = closed["Price today"] / closed["exit_price"] - 1
         st.dataframe(UI.pnl_colors(closed.rename(columns={
             "symbol": "Stock", "qty": "Shares", "entry_time": "Bought", "entry_price": "Bought at",
             "exit_time": "Sold", "exit_price": "Sold at", "pnl": "Gain / loss",
             "exit_reason": "Why sold"}), ["Gain / loss", "Return"]), hide_index=True,
             width="stretch", column_config={k: st.column_config.NumberColumn(format="$%.2f")
-                                            for k in ("Bought at", "Sold at", "Gain / loss")}
+                                            for k in ("Bought at", "Sold at", "Gain / loss", "Price today")}
             | {"Return": st.column_config.NumberColumn(format="percent"),
+               "Since sold": st.column_config.NumberColumn(format="percent"),
                "Shares": st.column_config.NumberColumn(format="%.4f")})
     us_news_section(list(held["symbol"]) + list(pend["symbol"]) if not pend.empty
                     else list(held["symbol"]), "News on the book's stocks")
