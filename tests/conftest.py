@@ -48,3 +48,9 @@ def no_network_git(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "default_remote", lambda: str(tmp_path / "no-remote.git"))
     original = store._fetch
     monkeypatch.setattr(store, "_fetch", lambda *a, cwd, tries=4: original(*a, cwd=cwd, tries=1))
+
+
+@pytest.fixture(autouse=True)
+def no_option_selling(monkeypatch):
+    """The monitor's option-selling book needs Angel One; tests switch it off unless they test it."""
+    monkeypatch.setattr(config, "OPTSELL_CAPITAL", 0.0)

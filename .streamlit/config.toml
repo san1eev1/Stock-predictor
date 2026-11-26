@@ -4,16 +4,16 @@ font = "sans serif"
 baseRadius = "small"
 
 [theme.light]
-primaryColor = "#3A6EA5"
-backgroundColor = "#EEF1EC"
+primaryColor = "#8C6D35"
+backgroundColor = "#F2F3F1"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#1B2430"
+textColor = "#151B27"
 
 [theme.dark]
-primaryColor = "#7FA6D6"
-backgroundColor = "#1B2430"
-secondaryBackgroundColor = "#222D3B"
-textColor = "#E8ECE6"
+primaryColor = "#CBB27C"
+backgroundColor = "#121826"
+secondaryBackgroundColor = "#19202E"
+textColor = "#EDE9E1"
 
 [client]
 toolbarMode = "viewer"

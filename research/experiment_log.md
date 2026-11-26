@@ -162,3 +162,12 @@ Weekly IC 0.027 (t = 3.1), positive in 56% of weeks (India 0.050).
 Higher return than the index but lower Sharpe and much deeper falls; survivorship-biased (today's
 list), so the real edge is smaller still. Top features: market 63-day return, crude, VIX, dollar,
 market volatility, sector return, beta. The US book starts trading on Monday's close.
+
+## E-013 Option-selling lab (live paper, started 2026-11-27)
+Hypothesis: Nifty weekly index options carry a volatility risk premium (Coval & Shumway 2001;
+Bakshi & Kapadia 2003; VIX typically 2-4 pts above subsequent realized vol), harvestable by
+hedged intraday selling after costs. Five books, Rs 1.5 lakh each, Angel One LTPs, exit 15:15:
+9:20 iron fly (25% leg stop, stop-to-cost), 11:00 iron fly, 9:30 iron condor with 50% profit
+target / 1x credit stop, same condor only when VIX > 20-day realized vol, expiry-day (Tuesday)
+iron fly. Judge after >= 60 traded days each: daily P&L t-stat, worst day, deepest fall.
+Caveat: public 9:20-straddle backtests show the year's result depends on a handful of days.

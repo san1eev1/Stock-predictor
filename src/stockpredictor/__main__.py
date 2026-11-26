@@ -457,7 +457,11 @@ def cmd_cloud_train(settings, args) -> None:
 
     model = T.retrain_longterm(ctx, None, force=True)
     print(f"Long-term model retrained on outcomes up to {model.train_to}", flush=True)
-    news = R.train(ctx.news, ctx.universe, ctx.daily, ctx.indices)
+    try:                      # a news-model failure must not stop the price models' training
+        news = R.train(ctx.news, ctx.universe, ctx.daily, ctx.indices)
+    except Exception as exc:
+        print(f"::warning::News relevance model failed: {exc}", flush=True)
+        news = None
     print("News relevance: " + (f"{news['headlines']} headlines, out-of-sample corr "
                                 f"{news['test_corr']:.3f} (tone only {news['baseline_sentiment_corr']:.3f})"
                                 if news else "not enough headlines yet"), flush=True)

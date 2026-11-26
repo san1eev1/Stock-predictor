@@ -8,6 +8,7 @@ from datetime import time as dtime
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -202,47 +203,38 @@ def sidebar():
     c = conn()
     with st.sidebar:
         m = ctx()
-        if m is not None:
-            st.caption(f"Data up to **{m.daily['date'].max():%d %b %Y}**")
         hb = setting(c, "monitor_heartbeat", None)
+        live = "not started"
         if hb:
             age = (now_ist() - datetime.fromisoformat(hb)).total_seconds() / 60
-            state = "🟢 running" if age < 3 else f"⚪ last seen {age:.0f} min ago"
-            st.caption(f"Live monitor: {state} · prices from {setting(c, 'live_source', '—')}")
-        else:
-            st.caption("Live monitor: ⚪ not started (`python -m stockpredictor run`)")
-        st.divider()
+            live = (f"live, prices from {setting(c, 'live_source', '—')}" if age < 3
+                    else f"last seen {age:.0f} min ago")
+        st.caption(f"Data to **{m.daily['date'].max():%d %b}** · monitor {live}"
+                   if m is not None else f"Monitor {live}")
         accuracy_now_sidebar()
-        st.divider()
-        st.subheader("🔔 Alerts")
-        alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 8").fetchall()
-        if not alerts:
-            st.caption("No alerts yet.")
-        icons = {"stop-loss": "🛑", "negative-news": "📰", "decision": "🧭", "fill": "✅",
-                 "info": "ℹ️"}
-        for a in alerts:
-            st.caption(f"{icons.get(a['kind'], '•')} {a['message']}")
+        alerts = c.execute("SELECT ts, kind, message FROM alerts ORDER BY id DESC LIMIT 12").fetchall()
+        with st.expander(f"Alerts ({len(alerts)})" if alerts else "Alerts"):
+            if not alerts:
+                st.caption("Nothing yet.")
+            for a in alerts:
+                st.caption(a["message"])
 
 
 @st.fragment(run_every=REFRESH)
 def accuracy_now_sidebar():
     sb = SB.compute(conn(), now_ist().replace(tzinfo=None))
-    st.subheader("📊 Accuracy now")
-    it, ij, lo, lj = (sb["intraday_today"], sb["intraday_judged"], sb["longterm_open"],
-                      sb["longterm_judged"])
+    it, ij, lj = sb["intraday_today"], sb["intraday_judged"], sb["longterm_judged"]
+    lines = []
     if it["buy_n"] + it["sell_n"]:
-        st.metric("Intraday today", f"{it['right']:.0%}",
-                  f"{(it['right'] - (it['random'] or 0)) * 100:+.0f} pts vs random"
-                  if it["random"] is not None else None)
-        st.caption(f"Buys {it['buy_right']}/{it['buy_n']} up · sells {it['sell_right']}/{it['sell_n']} down")
-    else:
-        st.caption("Intraday today: picks at 9:46")
+        lines.append(f"Intraday today **{it['right']:.0%}** right"
+                     + (f" ({(it['right'] - (it['random'] or 0)) * 100:+.0f} vs random)"
+                        if it["random"] is not None else ""))
     if ij["n"]:
-        st.caption(f"Intraday judged: **{ij['accuracy']:.0%}** of {ij['n']} (random {ij['random']:.0%})")
-    if lo["n"]:
-        st.caption(f"Long-term this week: **{lo['on_track']}/{lo['n']}** on track")
-    st.caption(f"Long-term judged: **{lj['accuracy']:.0%}** of {lj['n']} (random {lj['random']:.0%})"
-               if lj["n"] else "Long-term judged: first results after 1 week")
+        lines.append(f"Intraday overall **{ij['accuracy']:.0%}** of {ij['n']}")
+    if lj["n"]:
+        lines.append(f"Long-term overall **{lj['accuracy']:.0%}** of {lj['n']}")
+    if lines:
+        st.caption("  \n".join(lines))
 
 
 # --- Money in each paper book ---------------------------------------------------------
@@ -430,9 +422,10 @@ def page_overview():
 
 
 SCHEDULE = [("09:15", "Market opens; live prices every minute"),
+            ("09:20", "Option selling: first iron fly; others at 9:30, 9:45, 11:00"),
             ("09:46", "Picks: 25 + 25 shortlisted, the strongest 3–5 a side traded"),
             ("12:30", "First intraday book closes"),
-            ("15:15", "Close book, candle experiment and F&O close"),
+            ("15:15", "Close book, candle experiment, F&O and option selling close"),
             ("15:40", "Day's paper results go to GitHub"),
             ("18:37", "GitHub: market data, then training on today's results")]
 
@@ -472,6 +465,13 @@ def overview_cards():
             [(t, w, weekday and hhmm >= t) for t, w in SCHEDULE])
     st.subheader("Books today")
     UI.cards(items)
+    from stockpredictor.paper import optsell as OS
+    os_pnl = [OS.value(c, stg.book, live, today)["pnl"] for stg in OS.STRATEGIES]
+    if any(os_pnl):
+        st.subheader("Option selling today")
+        UI.cards([UI.card(stg.label, UI.money(v), "", abs(v) / (0.02 * config.OPTSELL_CAPITAL),
+                          "up" if v > 0 else "down" if v < 0 else "neutral")
+                  for stg, v in zip(OS.STRATEGIES, os_pnl)])
     E.ensure_account(c, SETTINGS.paper_capital_longterm)
     lt = E.value(c, live)
     longterm = []
@@ -652,6 +652,214 @@ def page_us_research():
             width="stretch", column_config={"Confidence": st.column_config.ProgressColumn(
                 format="percent", min_value=0, max_value=1),
                 "Last close": st.column_config.NumberColumn(format="$%.2f")})
+
+# --- Option selling lab ------------------------------------------------------------------
+
+def page_optsell():
+    from stockpredictor.paper import optsell as OS
+
+    st.title("Option selling")
+    st.caption("Five hedged Nifty weekly strategies run side by side on paper, each with its own "
+               f"{rupees(config.OPTSELL_CAPITAL)}, so the live results show which idea earns. All sell "
+               "time value (index options are usually priced for more movement than arrives) and buy "
+               "wings that cap the worst day. Prices from Angel One; everything closes at 15:15.")
+    optsell_board(OS)
+
+
+@st.fragment(run_every=REFRESH)
+def optsell_board(OS):
+    c = conn()
+    live = live_prices(c)
+    day = f"{now_ist():%Y-%m-%d}"
+    hist = OS.history(c)
+    items, rows = [], []
+    for stg in OS.STRATEGIES:
+        v = OS.value(c, stg.book, live, day)
+        skip = setting(c, f"os_skip_{stg.book}_{day}", None)
+        note = (f"{v['open']} of {v['legs']} legs open" if v["legs"] else
+                f"No trade today: {skip}" if skip else f"Enters at {stg.entry:%H:%M}")
+        items.append(UI.card(stg.label, UI.money(v["pnl"]), note,
+                             abs(v["pnl"]) / (0.02 * config.OPTSELL_CAPITAL),
+                             "up" if v["pnl"] > 0 else "down" if v["pnl"] < 0 else "neutral"))
+        h = hist[hist["book"] == stg.book]["pnl"]
+        eq = h.cumsum()
+        rows.append({"Strategy": stg.label, "Days traded": len(h), "Total": h.sum(),
+                     "Average day": h.mean() if len(h) else None,
+                     "Winning days": (h > 0).mean() if len(h) else None,
+                     "Worst day": h.min() if len(h) else None,
+                     "Deepest fall": (eq - eq.cummax()).min() if len(h) else None,
+                     "On capital": h.sum() / config.OPTSELL_CAPITAL})
+    st.subheader("Today")
+    UI.cards(items)
+    st.subheader("Leaderboard")
+    board = pd.DataFrame(rows).sort_values("Total", ascending=False)
+    money_cols = ("Total", "Average day", "Worst day", "Deepest fall")
+    if not board["Days traded"].any():
+        when = {s.label: f"{s.entry:%H:%M}" + (", expiry day only" if s.expiry_only else "")
+                + (", only when VIX > realized" if s.vrp_filter else "") for s in OS.STRATEGIES}
+        board = board[["Strategy", "Days traded"]].assign(Entry=board["Strategy"].map(when))
+    st.dataframe(UI.pnl_colors(board, list(money_cols) + ["On capital"]), hide_index=True,
+                 width="stretch", column_config={
+                     **{k: st.column_config.NumberColumn(format="₹%,.0f") for k in money_cols},
+                     "Winning days": st.column_config.NumberColumn(format="percent"),
+                     "On capital": st.column_config.NumberColumn(format="percent")})
+    st.subheader("What the results lean towards")
+    traded = board[board["Days traded"] >= 20]
+    if len(traded) < 2:
+        st.caption("Each strategy needs about 20 trading days before the comparison means much; "
+                   f"the most so far is {int(board['Days traded'].max() or 0)}. The questions it will "
+                   "answer: does entering later beat 9:20? does managing to a 50% profit beat holding "
+                   "to 15:15? does the VIX-above-realized filter skip the bad days? is expiry day "
+                   "where the edge is?")
+    else:
+        best = traded.iloc[0]
+        st.caption(f"Best so far: **{best['Strategy']}**, {UI.money(best['Total'])} over "
+                   f"{best['Days traded']} days ({best['Winning days']:.0%} winning days). "
+                   "Treat differences of a few hundred rupees as noise until each has 60+ days.")
+    for stg in OS.STRATEGIES:
+        legs = pd.read_sql("SELECT entry_time, symbol, side, qty, entry_price, stop_loss, "
+                           "exit_price, pnl, status, exit_reason FROM paper_trades WHERE horizon = ? "
+                           "ORDER BY id DESC LIMIT 40", c, params=(stg.book,))
+        with st.expander(f"{stg.label}: legs"):
+            if legs.empty:
+                st.caption("No trades yet.")
+            else:
+                legs["now"] = legs["symbol"].map(live)
+                st.dataframe(UI.pnl_colors(legs, ["pnl"]), hide_index=True, width="stretch")
+
+
+# --- Learn --------------------------------------------------------------------------------
+
+def page_learn():
+    st.title("Learn")
+    st.caption("How to read an IPO, how algorithmic trading is done properly, and how option "
+               "selling works, with the evidence from this project's own experiments.")
+    t1, t2, t3, t4 = st.tabs(["Analysing an IPO", "Algo trading", "Option selling", "Reading list"])
+    with t1:
+        st.markdown("""
+### Analysing an IPO, step by step
+
+1. **Read the red herring prospectus (RHP).** The business, the risk factors, three years of
+   financials and the "objects of the issue". It is on SEBI's and NSE's sites.
+2. **Fresh issue or offer for sale?** A fresh issue raises money for the company; an offer for
+   sale (OFS) is existing owners selling. A large OFS from private-equity holders is a reason
+   to look harder at the price.
+3. **Price it against listed peers.** At the top of the price band compare P/E, EV/EBITDA,
+   price-to-book, return on equity and growth. Paying more than peers needs faster growth.
+4. **Check ownership after listing.** Promoter holding, any pledged shares, and lock-ins.
+5. **Read the anchor book.** Large institutions buy the day before opening; their names and
+   the 30/90-day lock-in tell you who is committed.
+6. **Watch subscription by category, especially on the last day.** Institutions (QIBs) bid
+   mostly on the final day, and their demand is the strongest single signal. In our data
+   (NSE mainboard IPOs since late 2023):
+   - QIB under 3×: 26% listed above the issue price (median −5%)
+   - QIB 10–50×: 57% (median +5%)
+   - QIB 50–100×: 86% (median +19%)
+   - QIB over 100×: 95% (median +29%)
+7. **Treat the grey-market premium as gossip.** It is unofficial and easy to move.
+8. **Know your allotment odds.** Heavy retail oversubscription makes allotment a lottery.
+9. **Decide the listing-day plan in advance.** IPOs list worse in falling markets; decide what
+   you will do at the open before it happens.
+
+The **IPO analysis** page applies a model trained on past listings (subscription by category,
+issue size, market mood). Tested year by year on IPOs it had not seen, its "Apply" calls
+listed up 88% of the time (median +23%) versus 65% for all IPOs.
+
+**Red flags:** QIB demand under 3×, a mostly-OFS issue at a premium to peers, pledged promoter
+shares, a sector in decline, and a lot so large that it is hard to sell on listing day.
+""")
+    with t2:
+        st.markdown("""
+### Algo trading, done properly
+
+An algorithm is a rule a computer follows exactly: what to buy or sell, how much, and when to
+get out. Writing the rule is easy; knowing whether it has an edge is the work.
+
+**The path from idea to money:** an idea with a reason behind it → a backtest on history →
+walk-forward testing (each year judged by a model trained only on earlier years) → paper
+trading on live prices → small real money. Each step kills most ideas, which is the point.
+
+**The traps this project has hit, with numbers:**
+- **Survivorship bias.** Testing only on today's index members hides the companies that
+  failed. Our long-term backtest fell from 21.6% to 12.4% a year once delisted stocks were
+  included.
+- **Overfitting and multiple testing.** Try enough settings and one will look brilliant by
+  luck. We require a paired t-statistic of at least 2 against the current model, a held-out
+  period, and a stricter bar the more settings we try.
+- **Costs.** Brokerage with a ₹5 minimum turned ₹1,000 trades into 1.32% round-trip costs; at
+  3 trades a side on ₹10,000 it is 0.84%. A model with a 0.05% edge per trade cannot beat that.
+- **New information beats cleverer models.** Ten price-only ideas failed; F&O open-interest
+  data was the first to clearly improve the intraday model (t = 9 over 2,433 days).
+
+**Risk before return:** size each position so one bad day cannot hurt much, cap the daily
+loss, and judge a strategy by its worst fall as well as its average.
+
+**How this system learns:** every pick is judged after its horizon, every paper trade's result
+goes to the nightly GitHub training, and new settings are adopted only when they beat the
+current ones on data they have not seen.
+""")
+    with t3:
+        st.markdown("""
+### Option selling
+
+**Why it can work.** An option's price includes the volatility the market expects. Index
+options are usually priced for more movement than actually happens (the volatility risk
+premium): Nifty's VIX typically sits 2–4 points above the volatility that follows. A seller
+collects that difference as the option loses time value (theta) through the day.
+
+**Why it is dangerous.** The seller's gain is small and frequent, the loss rare and large. A
+few big-move days decide a year: one public backtest of a time-based Nifty straddle made
+₹19,405 in a year but −₹94,377 without its 25 best days. Costs and spreads eat thin edges;
+same-day iron condors that win 75% of the time can still lose money at realistic fills.
+
+**The structures** (all sell time value; the bought wings cap the worst loss):
+- **Straddle:** sell the at-the-money call and put. Most premium, unlimited risk.
+- **Strangle:** sell a call and put away from the money. Less premium, more room.
+- **Iron fly:** a straddle plus bought wings. Capped loss, lower margin.
+- **Iron condor:** a strangle plus bought wings. Capped loss, wider profit zone.
+
+**Rules in India (2025–26).** Nifty weekly options expire on Tuesdays; one weekly index
+contract per exchange; Nifty lot size 65; extra margin on short options on expiry day.
+
+**What the five paper books test:** whether entering at 9:20 or 11:00 is better, whether
+taking 50% of the credit early beats holding to 15:15, whether selling only when VIX is above
+realized volatility avoids the bad days, and whether expiry day is where the edge is.
+""")
+        x = np.arange(25200, 26801, 10)
+        credit, lot = 252.0, 65
+        pnl = (credit - np.abs(x - 26000) + np.maximum(np.abs(x - 26000) - 500, 0)) * lot
+        pay = pd.DataFrame({"Nifty at the close": x, "Profit or loss (₹)": pnl})
+        st.altair_chart(alt.Chart(pay).mark_area(opacity=0.25, color=UI.NEUTRAL,
+                                                 line={"color": UI.NEUTRAL}).encode(
+            x=alt.X("Nifty at the close:Q", scale=alt.Scale(zero=False)),
+            y="Profit or loss (₹):Q").properties(height=240, title="Iron fly at 26,000, wings "
+                                                    "500 points away, ₹252 credit, 1 lot of 65"),
+            width="stretch")
+    with t4:
+        st.markdown("""
+### Reading list
+
+**Papers**
+- Coval & Shumway (2001), [Expected Option Returns](https://business.baylor.edu/don_cunningham/Option%20Returns.pdf), Journal of Finance.
+- Bakshi & Kapadia (2003), *Delta-Hedged Gains and the Negative Market Volatility Risk Premium*, Review of Financial Studies.
+- Gu, Kelly & Xiu (2020), [Empirical Asset Pricing via Machine Learning](https://dachxiu.chicagobooth.edu/download/ML.pdf), Review of Financial Studies.
+- Pan & Poteshman (2006), [The Information in Option Volume for Future Stock Prices](https://www.mit.edu/~junpan/volume.pdf), Review of Financial Studies.
+- Lou, Polk & Skouras (2019), [A Tug of War: Overnight Versus Intraday Expected Returns](https://www.sciencedirect.com/science/article/abs/pii/S0304405X19300650), Journal of Financial Economics.
+- Gao, Han, Li & Zhou (2018), [Market Intraday Momentum](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2440866), Journal of Financial Economics.
+- Ritter & Welch (2002), *A Review of IPO Activity, Pricing, and Allocations*, Journal of Finance.
+
+**Books**
+- Marcos López de Prado, *Advances in Financial Machine Learning*: backtest overfitting, purged cross-validation.
+- Ernest Chan, *Algorithmic Trading: Winning Strategies and Their Rationale*.
+- Sheldon Natenberg, *Option Volatility and Pricing*.
+- Euan Sinclair, *Volatility Trading*.
+
+**Practitioner material**
+- AlgoTest, [The 9:20 straddle strategy](https://algotest.in/blog/the-920-straddle-strategy-defined/).
+- Option Alpha, [0DTE strategies: insights from 25k trades](https://optionalpha.com/blog/0dte).
+- Quantsapp, [Backtests of NSE option strategies](https://www.quantsapp.com/backtesting/strategies).
+""")
+
 
 # --- Pages -------------------------------------------------------------------------
 
@@ -1856,24 +2064,25 @@ def page_settings():
 
 
 pages = {
-    "Home": [st.Page(page_overview, title="Overview", icon="🏠", default=True)],
-    "Today's picks": [
-        st.Page(page_picks, url_path="longterm_picks", title="Long-term picks", icon="📈"),
-        st.Page(page_intraday_1230, url_path="intraday_1230", title="Intraday until 12:30", icon="⚡"),
-        st.Page(page_intraday_close, url_path="intraday_close", title="Intraday until the close", icon="🔔")],
-    "Paper trading": [
-        st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday + candle experiment", icon="🕯️"),
-        st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon="📊"),
-        st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term", icon="🌱"),
-        st.Page(page_us_paper, url_path="paper_us", title="US stocks ($1,000)", icon="🇺🇸")],
-    "Research": [
-        st.Page(page_us_research, url_path="us", title="US stocks (S&P 500)", icon="🇺🇸"),
-        st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon="🆕"),
-        st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon="🎯"),
-        st.Page(page_model, url_path="model", title="Model", icon="🧠")],
+    "Today": [st.Page(page_overview, title="Overview", icon=":material/space_dashboard:", default=True)],
+    "Trading desk": [
+        st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday book", icon=":material/bolt:"),
+        st.Page(page_optsell, url_path="option_selling", title="Option selling", icon=":material/hourglass_bottom:"),
+        st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon=":material/candlestick_chart:"),
+        st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term book", icon=":material/park:"),
+        st.Page(page_us_paper, url_path="paper_us", title="US book ($1,000)", icon=":material/public:")],
+    "Picks & research": [
+        st.Page(page_picks, url_path="longterm_picks", title="Long-term picks", icon=":material/trending_up:"),
+        st.Page(page_intraday_1230, url_path="intraday_1230", title="Intraday until 12:30", icon=":material/schedule:"),
+        st.Page(page_intraday_close, url_path="intraday_close", title="Intraday until the close", icon=":material/alarm:"),
+        st.Page(page_us_research, url_path="us", title="US picks (S&P 500)", icon=":material/travel_explore:"),
+        st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon=":material/rocket_launch:"),
+        st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon=":material/target:"),
+        st.Page(page_model, url_path="model", title="Model", icon=":material/neurology:")],
+    "Learn": [st.Page(page_learn, url_path="learn", title="IPOs, algos, options", icon=":material/school:")],
     "You": [
-        st.Page(page_portfolio, url_path="portfolio", title="My portfolio", icon="💼"),
-        st.Page(page_settings, url_path="settings", title="Settings", icon="⚙️")],
+        st.Page(page_portfolio, url_path="portfolio", title="My portfolio", icon=":material/account_balance_wallet:"),
+        st.Page(page_settings, url_path="settings", title="Settings", icon=":material/settings:")],
 }
 UI.setup()
 sidebar()
@@ -1899,5 +2108,5 @@ def angel_status() -> None:
 
 
 angel_status()
-st.sidebar.caption("🌓 Light / dark mode: menu ⋮ (top right) → Settings")
+st.sidebar.caption("Light or dark: menu ⋮ (top right) → Settings")
 st.navigation(pages).run()

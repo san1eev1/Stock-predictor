@@ -1,5 +1,5 @@
-"""Look and feel: the trading-floor ticket. Every book reads like an order slip - the rupee
-figure first, then what changed - in condensed tabular figures, with short serif captions.
+"""Look and feel: quiet and exact. Ink navy and ivory with one champagne accent; serif
+display headings, condensed tabular figures; every book an order slip (figure first).
 Dark by default (switchable in ⋮ → Settings); colours follow the active theme."""
 
 from __future__ import annotations
@@ -10,13 +10,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # Mid tones that read on both themes (charts, tables); CSS uses per-theme shades below.
-UP, DOWN, NEUTRAL = "#3E9E6B", "#C25E45", "#4F7FB8"
+UP, DOWN, NEUTRAL = "#4FAE80", "#D0675F", "#B59A60"
 
+# Ink navy, ivory, one champagne accent; jade gains, rose-red losses.
 PALETTE = {
-    True: {"bg": "#1B2430", "surface": "#222D3B", "rule": "#33404F", "ink": "#E8ECE6",
-           "muted": "#9AA6B2", "up": "#5BB884", "down": "#D9775C", "signal": "#7FA6D6"},
-    False: {"bg": "#EEF1EC", "surface": "#FFFFFF", "rule": "#D3D9D0", "ink": "#1B2430",
-            "muted": "#5D6874", "up": "#2E8B57", "down": "#B5523B", "signal": "#3A6EA5"},
+    True: {"bg": "#121826", "surface": "#19202E", "rule": "#283041", "ink": "#EDE9E1",
+           "muted": "#8F97A6", "up": "#6CC59A", "down": "#E07A74", "signal": "#CBB27C"},
+    False: {"bg": "#F2F3F1", "surface": "#FFFFFF", "rule": "#DADDD8", "ink": "#151B27",
+            "muted": "#5E6573", "up": "#2E7D57", "down": "#B4483F", "signal": "#8C6D35"},
 }
 
 # Streamlit keeps the light/dark choice per page in the browser and starts from the system
@@ -39,7 +40,7 @@ _THEME_JS = """
 """
 
 FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700"
-         "&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500"
+         "&family=IBM+Plex+Sans:wght@400;500;600&family=Cormorant+Garamond:wght@500;600;700"
          "&display=swap")
 
 
@@ -64,18 +65,22 @@ html, body, p, li, label, input, textarea, button, [data-testid="stMarkdownConta
   font-family: 'IBM Plex Sans', system-ui, sans-serif; }}
 [data-testid="stIconMaterial"], .material-symbols-rounded {{
   font-family: 'Material Symbols Rounded' !important; }}
-h1, h2, h3, h4, [data-testid="stMetricValue"], .sp-figure, .sp-value {{
+h1, h2, h3 {{ font-family: 'Cormorant Garamond', Georgia, serif; color: {c['ink']}; }}
+h4, [data-testid="stMetricValue"], .sp-figure, .sp-value, .sp-next time {{
   font-family: 'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif;
   font-variant-numeric: tabular-nums; }}
-.block-container {{ padding-top: 1.4rem; padding-bottom: 3rem; max-width: 1240px; }}
-h1 {{ font-weight: 700; font-size: 2.15rem; letter-spacing: -0.01em; line-height: 1.15; }}
-h2, h3 {{ font-weight: 600; letter-spacing: 0; }}
-h3 {{ font-size: 1.3rem; margin-top: 1.4rem; }}
+.block-container {{ padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1180px; }}
+h1 {{ font-weight: 600; font-size: 2.9rem; letter-spacing: 0; line-height: 1.05; }}
+h2, h3 {{ font-weight: 600; letter-spacing: 0.005em; }}
+h3 {{ font-size: 1.65rem; margin-top: 1.8rem; }}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p, .sp-note {{
-  font-family: 'Source Serif 4', Georgia, serif; font-size: 0.98rem; line-height: 1.6;
-  color: {c['muted']}; max-width: 72ch; }}
+  font-size: 0.95rem; line-height: 1.6; color: {c['muted']}; max-width: 72ch; }}
+a {{ color: {c['signal']} !important; }}
+[data-testid="stSidebar"] {{ border-right: 1px solid {c['rule']}; }}
+[data-testid="stSidebarNav"] a[aria-current="page"] {{ background: transparent !important;
+  box-shadow: inset 2px 0 0 {c['signal']}; }}
 [data-testid="stMetric"] {{ background: {c['surface']}; border: 1px solid {c['rule']};
-  border-left: 3px solid {c['signal']}; border-radius: 6px; padding: 12px 16px; }}
+  border-radius: 4px; padding: 14px 18px; }}
 [data-testid="stMetricValue"] {{ font-size: 1.6rem; font-weight: 600; }}
 [data-testid="stDataFrame"] {{ border: 1px solid {c['rule']}; border-radius: 6px; }}
 [data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 8px; }}
@@ -86,29 +91,27 @@ h3 {{ font-size: 1.3rem; margin-top: 1.4rem; }}
 
 .sp-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px; margin: 8px 0 22px; }}
-.sp-ticket {{ background: {c['surface']}; border: 1px solid {c['rule']}; border-left-width: 3px;
-  border-radius: 6px; padding: 13px 16px 0; display: flex; flex-direction: column; }}
-.sp-ticket.up {{ border-left-color: {c['up']}; }}
-.sp-ticket.down {{ border-left-color: {c['down']}; }}
-.sp-ticket.neutral {{ border-left-color: {c['signal']}; }}
+.sp-ticket {{ background: {c['surface']}; border: 1px solid {c['rule']};
+  border-radius: 4px; padding: 16px 18px 0; display: flex; flex-direction: column; }}
 .sp-label {{ font-size: 0.9rem; font-weight: 500; color: {c['muted']}; }}
 .sp-value {{ font-size: 1.75rem; font-weight: 600; line-height: 1.2; margin-top: 2px; color: {c['ink']}; }}
 .sp-value.up {{ color: {c['up']}; }} .sp-value.down {{ color: {c['down']}; }}
-.sp-sub {{ font-family: 'Source Serif 4', Georgia, serif; font-size: 0.88rem; color: {c['muted']};
-  margin: 2px 0 11px; }}
-.sp-meter {{ height: 4px; margin: auto -16px 0 -13px; background: {c['rule']}; border-radius: 0 0 5px 0; }}
+.sp-sub {{ font-size: 0.85rem; color: {c['muted']}; margin: 2px 0 14px; }}
+.sp-meter {{ height: 2px; margin: auto -18px 0 -18px; background: {c['rule']}; }}
 .sp-meter > span {{ display: block; height: 100%; border-radius: 0 0 0 0; }}
 .sp-meter.up > span {{ background: {c['up']}; }} .sp-meter.down > span {{ background: {c['down']}; }}
 .sp-meter.neutral > span {{ background: {c['signal']}; }}
 
 .sp-hero {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); gap: 28px;
   padding: 6px 0 24px; border-bottom: 1px solid {c['rule']}; margin-bottom: 22px; }}
-.sp-when {{ font-family: 'Source Serif 4', Georgia, serif; color: {c['muted']}; font-size: 1rem; }}
-.sp-figure {{ font-size: clamp(3.2rem, 8vw, 5.6rem); font-weight: 700; line-height: 1;
+.sp-when {{ font-family: 'Cormorant Garamond', Georgia, serif; color: {c['signal']};
+  font-size: 1.25rem; font-weight: 500; }}
+.sp-figure {{ font-size: clamp(3.4rem, 9vw, 6.4rem); font-weight: 600; line-height: 1;
   letter-spacing: -0.02em; margin: 6px 0 8px; color: {c['ink']}; }}
 .sp-figure.up {{ color: {c['up']}; }} .sp-figure.down {{ color: {c['down']}; }}
 .sp-next {{ border-left: 1px solid {c['rule']}; padding-left: 22px; }}
-.sp-next h4 {{ margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; }}
+.sp-next h4 {{ margin: 0 0 8px; font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 1.35rem; font-weight: 600; }}
 .sp-next ol {{ list-style: none; margin: 0; padding: 0; }}
 .sp-next li {{ display: grid; grid-template-columns: 3.4rem 1fr; gap: 10px; padding: 6px 0;
   border-bottom: 1px solid {c['rule']}; font-size: 0.95rem; }}

@@ -16,6 +16,7 @@ import sqlite3
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from stockpredictor import config, store
@@ -399,6 +400,7 @@ class Monitor:
                           f"{now:%Y-%m-%d} paper stop-loss ({'buy' if side == 'long' else 'sell'} "
                           f"book): closed {sym} at {p:.2f}")
 
+        self.option_selling(now)
         fno_live = self.fno_prices(stamp)
         from stockpredictor.paper import fno as FO
 
@@ -530,6 +532,27 @@ class Monitor:
         alert(self.conn, "paper-intraday", "decision", None,
               f"{day} intraday picks{' (late start, entered at ' + now.strftime('%H:%M') + ' prices)' if late else ''}: {msg}")
         log.info("Intraday picks made%s: %s", " (late start)" if late else "", msg)
+
+    def option_selling(self, now: datetime) -> None:
+        """Option selling paper book (paper/optsell.py): entry 9:20, stops, exit 15:15."""
+        if config.OPTSELL_CAPITAL <= 0:
+            return
+        from stockpredictor.paper import optsell as OS
+
+        try:
+            client = self._nfo_client()
+            if client is None:
+                return
+            ix = self.ctx().indices
+            v = ix[ix["symbol"] == "INDIAVIX"]["close"]
+            n = ix[ix["symbol"] == "NIFTY50"].sort_values("date")["close"]
+            rv = float(np.log(n).diff().tail(20).std() * np.sqrt(252) * 100) if len(n) > 21 else None
+            for line in OS.tick(self.conn, client, now, config.OPTSELL_CAPITAL,
+                                float(v.iloc[-1]) if len(v) else None, rv):
+                alert(self.conn, "paper-optsell", "fill", None, f"{now:%Y-%m-%d %H:%M} {line}")
+                log.info("Option selling: %s", line)
+        except Exception as exc:
+            log.warning("option selling paper book: %s", exc)
 
     def candle_picks(self, now: datetime, feats: pd.DataFrame | None = None,
                      prices: dict | None = None, negative: set | None = None) -> None:

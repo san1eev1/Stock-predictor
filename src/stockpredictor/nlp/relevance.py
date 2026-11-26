@@ -114,11 +114,12 @@ def reaction(news: pd.DataFrame, daily: pd.DataFrame, indices: pd.DataFrame) -> 
     # Before 15:30 IST the same day's close reacts; later headlines react the next day.
     first = ist.dt.normalize() + np.where(ist - ist.dt.normalize() < CLOSE_IST,
                                           pd.Timedelta(0), pd.Timedelta(days=1))
-    left = pd.DataFrame({"symbol": news["symbol"].values,
+    left = pd.DataFrame({"symbol": news["symbol"].astype(str).astype(object).values,
                          "first": pd.to_datetime(first.values).astype("datetime64[ns]"),
                          "_i": news.index}).sort_values("first")
     right = px[["symbol", "date", "z"]].dropna()
-    right = right.assign(date=right["date"].astype("datetime64[ns]")).sort_values("date")
+    right = right.assign(date=right["date"].astype("datetime64[ns]"),
+                         symbol=right["symbol"].astype(str).astype(object)).sort_values("date")
     m = pd.merge_asof(left, right, left_on="first", right_on="date", by="symbol",
                       direction="forward", tolerance=pd.Timedelta(days=5))
     return m.set_index("_i")["z"].reindex(news.index)
