@@ -206,30 +206,38 @@ ALERT_ICON = {"stop-loss": ":material/trending_down:", "target": ":material/flag
               "info": ":material/info:"}
 
 
+def _alert_line(r) -> str:
+    t = pd.Timestamp(r["ts"]).tz_localize("UTC").tz_convert("Asia/Kolkata") if r["ts"] else None
+    msg = str(r["message"])
+    msg = msg.split(" ", 2)[-1] if msg[:4].isdigit() and msg.count(" ") >= 2 else msg
+    return (f"{ALERT_ICON.get(r['kind'], ':material/notifications:')} "
+            f"**{t:%H:%M}** {msg}" if t is not None else msg)
+
+
 @st.fragment(run_every=REFRESH)
-def alerts_bar():
-    """Today's alerts, on top of every page: the newest three in full, the rest one click away."""
+def top_bar():
+    """Fixed at the top right of every page (stays while scrolling): today's alerts in a
+    panel, My portfolio, Settings."""
     c = conn()
     since = (now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
              .astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S"))
     rows = c.execute("SELECT ts, kind, symbol, message FROM alerts WHERE ts >= ? "
                      "ORDER BY id DESC LIMIT 200", (since,)).fetchall()
-    if not rows:
-        return
-
-    def line(r):
-        t = (pd.Timestamp(r["ts"]).tz_localize("UTC").tz_convert("Asia/Kolkata")
-             if r["ts"] else None)
-        msg = str(r["message"])
-        msg = msg.split(" ", 2)[-1] if msg[:4].isdigit() and msg.count(" ") >= 2 else msg
-        return f"{ALERT_ICON.get(r['kind'], ':material/notifications:')} **{t:%H:%M}** {msg}"
-
-    with st.container(border=True):
-        st.markdown(f"**{len(rows)} alert{'s' if len(rows) != 1 else ''} today**  \n"
-                    + "  \n".join(line(r) for r in rows[:3]))
-        if len(rows) > 3:
-            with st.expander(f"All {len(rows)} today"):
-                st.markdown("  \n".join(line(r) for r in rows[3:]))
+    with st.container(key="topbar", horizontal=True, gap="small"):
+        with st.popover(f"Alerts · {len(rows)}" if rows else "Alerts",
+                        icon=":material/notifications:"):
+            if rows:
+                st.markdown(f"**Today, {len(rows)} alert{'s' if len(rows) != 1 else ''}**")
+                st.markdown("  \n".join(_alert_line(r) for r in rows[:60]))
+            else:
+                st.caption("No alerts today.")
+            older = c.execute("SELECT ts, kind, symbol, message FROM alerts WHERE ts < ? "
+                              "ORDER BY id DESC LIMIT 15", (since,)).fetchall()
+            if older:
+                st.caption("Earlier")
+                st.markdown("  \n".join(_alert_line(r) for r in older))
+        st.page_link(PORTFOLIO_PAGE, label="My portfolio", icon=":material/account_balance_wallet:")
+        st.page_link(SETTINGS_PAGE, label="Settings", icon=":material/settings:")
 
 
 def sidebar():
@@ -332,8 +340,9 @@ def _ipos_now(day: str) -> tuple[pd.DataFrame, str]:
         issues = IPO.open_issues(s)
     except Exception as exc:
         return pd.DataFrame(), str(exc)
-    rows = []
-    for _, r in issues.iterrows():
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(r):
         extra = {}
         try:
             extra = IPO.detail(s, r["symbol"], "SME" if r["segment"] == "sme" else "EQ")
@@ -346,7 +355,10 @@ def _ipos_now(day: str) -> tuple[pd.DataFrame, str]:
                 extra["bids"] = live
         except Exception:
             pass
-        rows.append({**r.to_dict(), **extra})
+        return {**r.to_dict(), **extra}
+
+    with ThreadPoolExecutor(max_workers=6) as pool:      # all IPOs at once, not one by one
+        rows = list(pool.map(one, [r for _, r in issues.iterrows()]))
     return pd.DataFrame(rows), ""
 
 
@@ -472,6 +484,17 @@ def _us_state(slot: int) -> str | None:
     return str(dest)
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _us_actions(day: str, repo: str) -> pd.DataFrame:
+    """US corporate actions (splits), downloaded once a day."""
+    import io
+    import urllib.request
+
+    with urllib.request.urlopen(f"https://raw.githubusercontent.com/{repo}/market-data-us/"
+                                "corporate_actions.csv", timeout=60) as r:
+        return pd.read_csv(io.BytesIO(r.read()))
+
+
 def _us_fix_splits(db_path, repo: str) -> None:
     """Splits / bonus issues on the downloaded copy (the same once-only repair GitHub's run
     applies), so a split never shows as a loss while the next run is pending."""
@@ -482,9 +505,7 @@ def _us_fix_splits(db_path, repo: str) -> None:
     from stockpredictor.paper import splits as SP
 
     try:
-        with urllib.request.urlopen(f"https://raw.githubusercontent.com/{repo}/market-data-us/"
-                                    "corporate_actions.csv", timeout=60) as r:
-            acts = pd.read_csv(io.BytesIO(r.read()))
+        acts = _us_actions(f"{datetime.now():%Y-%m-%d}", repo)
         c = sqlite3.connect(db_path)
         c.row_factory = sqlite3.Row
         today = f"{pd.Timestamp.now(tz='America/New_York'):%Y-%m-%d}"
@@ -516,17 +537,18 @@ def _us_prices(c) -> dict[str, float]:
 def _us_quotes(symbols: tuple[str, ...], slot: str) -> dict[str, float]:
     """Latest Yahoo prices for US symbols (BRK.B -> BRK-B). `slot` sets how often: a
     5-minute bucket for holdings, the date for sold stocks (once a day)."""
+    from concurrent.futures import ThreadPoolExecutor
+
     import yfinance as yf
 
-    out = {}
-    for sym in symbols:
+    def one(sym):
         try:
             p = yf.Ticker(sym.replace(".", "-")).fast_info["last_price"]
-            if p and p == p:
-                out[sym] = float(p)
+            return sym, float(p) if p and p == p else None
         except Exception:
-            pass
-    return out
+            return sym, None
+    with ThreadPoolExecutor(max_workers=8) as pool:      # all at once, not one by one
+        return {k: v for k, v in pool.map(one, symbols) if v is not None}
 
 
 def page_us_paper():
@@ -2300,6 +2322,10 @@ def page_settings():
     st.write(f"Angel One keys: {'✅ set' if SETTINGS.angel.is_complete else '— not set (Yahoo used for live prices)'}")
 
 
+PORTFOLIO_PAGE = st.Page(page_portfolio, url_path="portfolio", title="My portfolio",
+                         icon=":material/account_balance_wallet:")
+SETTINGS_PAGE = st.Page(page_settings, url_path="settings", title="Settings",
+                        icon=":material/settings:")
 pages = {
     "Today": [st.Page(page_overview, title="Overview", icon=":material/space_dashboard:", default=True)],
     "Trading desk": [
@@ -2320,12 +2346,10 @@ pages = {
         st.Page(page_model, url_path="model", title="Model", icon=":material/neurology:")],
     "Learn": [st.Page(page_learn, url_path="learn", title="IPOs, algos, options", icon=":material/school:")],
     "You": [
-        st.Page(page_portfolio, url_path="portfolio", title="My portfolio", icon=":material/account_balance_wallet:"),
-        st.Page(page_settings, url_path="settings", title="Settings", icon=":material/settings:")],
+        PORTFOLIO_PAGE, SETTINGS_PAGE],
 }
 UI.setup()
 sidebar()
-alerts_bar()
 health_banner()
 def angel_status() -> None:
     """Red banner when, during market hours, live prices are not coming from Angel One."""
@@ -2348,4 +2372,6 @@ def angel_status() -> None:
 
 
 angel_status()
-st.navigation(pages).run()
+_nav = st.navigation(pages, expanded=True)
+top_bar()
+_nav.run()

@@ -1,10 +1,10 @@
 # One theme: the night desk (dark). Colours match app/ui.py.
 [theme]
 base = "dark"
-primaryColor = "#EFA43F"
-backgroundColor = "#0E1312"
-secondaryBackgroundColor = "#151C1A"
-textColor = "#E8ECE7"
+primaryColor = "#C4AB7C"
+backgroundColor = "#111413"
+secondaryBackgroundColor = "#171B1A"
+textColor = "#E3E6E2"
 font = "sans serif"
 baseRadius = "medium"
 

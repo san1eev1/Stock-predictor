@@ -8,16 +8,16 @@ import html
 
 import streamlit as st
 
-# Chart / table colours.
-UP, DOWN, NEUTRAL = "#5CC99B", "#F2706A", "#EFA43F"
+# Muted on purpose: nothing glows. Sand accent, sage gains, clay losses.
+UP, DOWN, NEUTRAL = "#8DBA9E", "#D08C80", "#C4AB7C"
 
-_NIGHT = {"bg": "#0E1312", "surface": "#151C1A", "raised": "#1B2421", "rule": "#25302C",
-          "ink": "#E8ECE7", "muted": "#8D9994", "up": UP, "down": DOWN, "signal": NEUTRAL}
-PALETTE = {True: _NIGHT, False: _NIGHT}
-# Categories in charts: never red / green (those mean loss / gain here).
-CATEGORIES = ["#EFA43F", "#6FB3C9", "#A99BE0", "#4DB6A8", "#E8D5A8", "#8FA2F5", "#D99BB8",
-              "#B7C96A", "#C98A5A", "#7FD1D1", "#9C8FB0", "#E1B66B", "#6C9CB0", "#C4A7E7",
-              "#88B89E", "#D6C27A"]      # one theme; kept as a mapping for callers
+_NIGHT = {"bg": "#111413", "surface": "#171B1A", "raised": "#1D2220", "rule": "#283029",
+          "ink": "#E3E6E2", "muted": "#8E9792", "up": UP, "down": DOWN, "signal": NEUTRAL}
+PALETTE = {True: _NIGHT, False: _NIGHT}      # one theme; kept as a mapping for callers
+# Categories in charts: muted, and never red / green (those mean loss / gain here).
+CATEGORIES = ["#C4AB7C", "#7FA3B5", "#A59CC6", "#7FAFA5", "#D6C8A4", "#8E9BB8", "#C39CAE",
+              "#A9B27F", "#B8957A", "#86BFC0", "#9C93AA", "#CDB98A", "#7898A6", "#B6A6D2",
+              "#93B49F", "#C9BE8C"]
 
 FONTS = ("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700"
          "&family=Geist:wght@400;500;600&display=swap")
@@ -56,7 +56,7 @@ h3 {{ font-size: 1.35rem; margin-top: 1.6rem; }}
 a {{ color: {c['signal']} !important; text-decoration-thickness: 1px; text-underline-offset: 3px; }}
 
 /* sidebar: quieter than the page, marigold marks where you are */
-[data-testid="stSidebar"] {{ background: #0B0F0E; border-right: 1px solid {c['rule']}; }}
+[data-testid="stSidebar"] {{ background: #0D100F; border-right: 1px solid {c['rule']}; }}
 [data-testid="stSidebarNav"] a {{ border-radius: 8px; }}
 [data-testid="stSidebarNav"] a:hover {{ background: {c['surface']} !important; }}
 [data-testid="stSidebarNav"] a[aria-current="page"] {{ background: {c['raised']} !important;
@@ -64,6 +64,17 @@ a {{ color: {c['signal']} !important; text-decoration-thickness: 1px; text-under
 [data-testid="stSidebarNav"] a[aria-current="page"] span {{ color: {c['ink']} !important; font-weight: 600; }}
 [data-testid="stNavSectionHeader"] {{ color: {c['muted']} !important; font-size: 0.78rem;
   letter-spacing: 0.02em; }}
+
+/* fixed top-right bar: alerts, portfolio, settings (stays while scrolling) */
+.st-key-topbar {{ position: fixed; top: 0.6rem; right: 3.6rem; z-index: 999990; width: auto !important;
+  background: rgba(23, 27, 26, 0.92); border: 1px solid {c['rule']}; border-radius: 999px;
+  padding: 3px 6px; backdrop-filter: blur(6px); flex-wrap: nowrap; }}
+.st-key-topbar [data-testid="stPageLink"] a, .st-key-topbar button {{ border-radius: 999px;
+  padding: 2px 10px; min-height: 0; border: 0; background: transparent; }}
+.st-key-topbar [data-testid="stPageLink"] a:hover, .st-key-topbar button:hover {{
+  background: {c['raised']} !important; }}
+.st-key-topbar p {{ font-size: 0.86rem; white-space: nowrap; }}
+@media (max-width: 760px) {{ .st-key-topbar {{ right: 0.6rem; top: 3.2rem; }} }}
 
 /* surfaces */
 [data-testid="stMetric"], [data-testid="stExpander"] details {{ background: {c['surface']};

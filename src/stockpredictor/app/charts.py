@@ -9,17 +9,17 @@ import streamlit as st
 
 # Fixed entity -> categorical slot (light, dark).
 SERIES = {     # the night desk (app/ui.py): marigold, cyan, lilac, jade-teal
-    "Model": ("#EFA43F", "#EFA43F"),
-    "Nifty 50": ("#6FB3C9", "#6FB3C9"),
-    "Equal-weight Nifty 250": ("#A99BE0", "#A99BE0"),
-    "Momentum only": ("#4DB6A8", "#4DB6A8"),
-    "Long-term": ("#EFA43F", "#EFA43F"),
-    "Intraday": ("#6FB3C9", "#6FB3C9"),
-    "Buy book": ("#EFA43F", "#EFA43F"),
-    "Sell book": ("#A99BE0", "#A99BE0"),
+    "Model": ("#C4AB7C", "#C4AB7C"),
+    "Nifty 50": ("#7FA3B5", "#7FA3B5"),
+    "Equal-weight Nifty 250": ("#A59CC6", "#A59CC6"),
+    "Momentum only": ("#7FAFA5", "#7FAFA5"),
+    "Long-term": ("#C4AB7C", "#C4AB7C"),
+    "Intraday": ("#7FA3B5", "#7FA3B5"),
+    "Buy book": ("#C4AB7C", "#C4AB7C"),
+    "Sell book": ("#A59CC6", "#A59CC6"),
 }
-SINGLE = ("#EFA43F", "#EFA43F")
-GOOD, CRITICAL = "#5CC99B", "#F2706A"
+SINGLE = ("#C4AB7C", "#C4AB7C")
+GOOD, CRITICAL = "#8DBA9E", "#D08C80"
 
 
 def _dark() -> bool:
