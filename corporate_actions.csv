@@ -1505,6 +1505,7 @@ AMCR,2026-01-15,split,0.2
 AMCR,2026-02-25,dividend,0.65
 AMCR,2026-05-28,dividend,0.65
 AMCR,2026-09-04,dividend,0.65
+AMCR,2026-11-25,dividend,0.66
 AME,2005-03-15,dividend,0.0178
 AME,2005-06-14,dividend,0.0178
 AME,2005-09-14,dividend,0.0178
@@ -5040,6 +5041,7 @@ CDW,2025-11-25,dividend,0.63
 CDW,2026-02-25,dividend,0.63
 CDW,2026-05-22,dividend,0.63
 CDW,2026-08-25,dividend,0.63
+CDW,2026-11-25,dividend,0.68
 CEG,2022-02-24,dividend,0.141
 CEG,2022-05-12,dividend,0.141
 CEG,2022-08-12,dividend,0.141
@@ -8819,6 +8821,7 @@ EFX,2025-11-24,dividend,0.5
 EFX,2026-03-09,dividend,0.56
 EFX,2026-05-22,dividend,0.56
 EFX,2026-08-31,dividend,0.56
+EFX,2026-11-25,dividend,0.56
 EG,2005-03-03,dividend,0.11
 EG,2005-05-25,dividend,0.11
 EG,2005-08-25,dividend,0.11
@@ -16008,6 +16011,7 @@ L,2025-11-26,dividend,0.063
 L,2026-02-25,dividend,0.063
 L,2026-05-27,dividend,0.063
 L,2026-08-19,dividend,0.063
+L,2026-11-25,dividend,0.063
 LDOS,2012-04-12,dividend,0.2963
 LDOS,2012-07-12,dividend,0.2963
 LDOS,2012-10-11,dividend,0.2963
@@ -19512,6 +19516,7 @@ NEM,2025-11-26,dividend,0.25
 NEM,2026-03-03,dividend,0.26
 NEM,2026-05-27,dividend,0.26
 NEM,2026-09-03,dividend,0.26
+NEM,2026-11-25,dividend,0.26
 NFLX,2015-07-15,split,7
 NFLX,2025-11-17,split,10
 NI,2005-01-27,dividend,0.0904
@@ -24892,6 +24897,7 @@ SPGI,2026-02-25,dividend,0.9177
 SPGI,2026-05-29,dividend,0.9177
 SPGI,2026-07-01,split,1.057
 SPGI,2026-08-26,dividend,0.97
+SPGI,2026-11-25,dividend,0.97
 SRE,2005-03-22,dividend,0.145
 SRE,2005-06-21,dividend,0.145
 SRE,2005-09-27,dividend,0.145
@@ -26460,6 +26466,7 @@ TMUS,2025-11-26,dividend,1.02
 TMUS,2026-02-27,dividend,1.02
 TMUS,2026-05-29,dividend,1.02
 TMUS,2026-08-28,dividend,1.02
+TMUS,2026-11-25,dividend,1.17
 TPL,2006-03-03,dividend,0.0144
 TPL,2007-03-05,dividend,0.0178
 TPL,2007-07-13,split,5
