@@ -73,7 +73,7 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON,
             skip_friday=bool(learned.get("skip_friday", False)),
             avoid_results=bool(learned.get("avoid_results", False)),
             avoid_expiry=bool(learned.get("avoid_expiry", False)))
-    if s.get("id_every_day", "0") == "1":
+    if s.get("id_every_day", "1") == "1":
         # Trade every day (no day is skipped): each day's paper result feeds the learning.
         from dataclasses import replace
 
@@ -169,12 +169,46 @@ def shortlist_by_candles(short: pd.DataFrame, side: str) -> pd.DataFrame:
     return out.sort_values(["final", "model_rank"], ascending=[False, True])
 
 
+def pick_quality(side_df: pd.DataFrame, day: pd.DataFrame, side: str,
+                 news_tone: dict[str, float] | None) -> tuple[pd.DataFrame, int, list[str]]:
+    """Of one side's 25 candidates (best first), which are worth trading today: 3-5 of them.
+    A candidate is left out when its news goes against the trade or it is moving sideways
+    (its first-30-minute range is in the narrowest quarter of today's stocks); it earns
+    points for news, its sector and the market moving its way, and a top-10 model rank.
+    Returns the candidates re-ordered (traded first), how many to trade, and notes."""
+    if side_df.empty:
+        return side_df, 0, []
+    sign = 1 if side == "long" else -1
+    tone = news_tone or {}
+    rng = pd.to_numeric(day.get("range30_atr"), errors="coerce") if "range30_atr" in day else None
+    narrow = float(rng.quantile(0.25)) if rng is not None and rng.notna().sum() > 20 else None
+    rows = []
+    for i, (_, r) in enumerate(side_df.iterrows()):
+        t = tone.get(r["symbol"], 0.0)
+        r_rng = pd.to_numeric(r.get("range30_atr"), errors="coerce")
+        sideways = narrow is not None and pd.notna(r_rng) and r_rng < narrow
+        against = sign * t <= -0.3
+        pts = int(i < 10) + int(sign * t >= 0.3)
+        for col in ("sec_r30", "mkt_r30"):
+            v = pd.to_numeric(r.get(col), errors="coerce")
+            pts += int(pd.notna(v) and sign * v > 0)
+        note = ("news against" if against else "moving sideways" if sideways else
+                f"{pts} of 4 checks agree" + (f" (news {t:+.2f})" if t else ""))
+        rows.append((not (against or sideways), pts, i, note))
+    q = pd.DataFrame(rows, columns=["ok", "pts", "order", "note"], index=side_df.index)
+    good = int((q["ok"] & (q["pts"] >= 2)).sum())
+    n = min(TRADED_MAX, max(TRADED_MIN, good))
+    order = q.sort_values(["ok", "pts", "order"], ascending=[False, False, True])
+    return side_df.loc[order.index], n, list(q.loc[order.index, "note"])
+
+
 def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.IntradayModel,
               prices: dict[str, float], today: pd.Timestamp, rules: B.IntradayRules,
               capital: float, negative_news: set[str] = frozenset(),
               strengths: pd.Series | None = None,
               costs: IntradayCosts = DEFAULT_INTRADAY_COSTS, horizon: str = HORIZON,
-              candles: bool = False, at: str = "09:45") -> dict:
+              candles: bool = False, at: str = "09:45",
+              news_tone: dict[str, float] | None = None) -> dict:
     """Score, pick, save predictions and open paper trades at live prices (in `horizon`'s
     own Rs 1 lakh book)."""
     E.ensure_account(conn, capital, horizon)
@@ -202,6 +236,16 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
         longs = clean.head(n_buy).assign(side="long")
         shorts = ranked.tail(n_sell).iloc[::-1].assign(side="short")
     shorts = shorts[~shorts["symbol"].isin(longs["symbol"])].head(n_sell)
+    notes: dict = {}
+    if news_tone is not None:      # live: 3-5 a side by how many are good (pick_quality)
+        from dataclasses import replace
+
+        longs, n_l, nl = pick_quality(longs, day, "long", news_tone)
+        shorts, n_s, ns_ = pick_quality(shorts, day, "short", news_tone)
+        notes = {**dict(zip(longs.index, nl)), **dict(zip(shorts.index, ns_))}
+        # a book stopped for the day (kill switch: n = 0) stays stopped
+        rules = replace(rules, n_long=n_l if rules.n_long else 0,
+                        n_short=n_s if rules.n_short else 0)
     longs = longs.assign(rank=range(1, len(longs) + 1))
     shorts = shorts.assign(rank=range(1, len(shorts) + 1))
     picks = pd.concat([longs, shorts])
@@ -214,6 +258,8 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
     if candles:
         reasons = [w + [f"model #{int(m)} of {SHORTLIST}, candles {int(c)}/{len(CANDLE_CHECKS)}"]
                    for w, m, c in zip(reasons, picks["model_rank"], picks["candle"])]
+    if notes:
+        reasons = [w + [notes[i]] if i in notes else w for w, i in zip(reasons, picks.index)]
     take = take_probs(day, feats_today, horizon) if rules.min_prob > 0 else {}
     slot = capital / max(1, rules.n_long + rules.n_short)     # no margin: capital is the limit
     budget = capital

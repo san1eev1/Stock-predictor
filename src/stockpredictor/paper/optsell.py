@@ -92,16 +92,16 @@ def instruments(today: date) -> list[dict]:
     path = _cache_path()
     if path.exists():
         cached = json.loads(path.read_text())
-        if cached.get("day") == f"{today}":
+        if cached.get("day") == f"{today}" and cached.get("v") == 2:
             return cached["items"]
     resp = requests.get(SCRIP_MASTER_URL, timeout=60)
     resp.raise_for_status()
     items = [{k: i[k] for k in ("token", "symbol", "name", "expiry", "strike", "lotsize")}
              for i in resp.json()
-             if i.get("exch_seg") == "NFO" and i.get("instrumenttype") == "OPTIDX"
+             if i.get("exch_seg") == "NFO" and i.get("instrumenttype") in ("OPTIDX", "FUTIDX")
              and i.get("name") == UNDERLYING]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"day": f"{today}", "items": items}))
+    path.write_text(json.dumps({"day": f"{today}", "v": 2, "items": items}))
     return items
 
 

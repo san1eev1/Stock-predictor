@@ -30,6 +30,7 @@ from stockpredictor.models import trainer as T
 from stockpredictor.paper import daily as D
 from stockpredictor.paper import engine as E
 from stockpredictor.paper import intraday as PI
+from stockpredictor.paper import lab as LAB
 from stockpredictor.paper import scoreboard as SB
 from stockpredictor.portfolio import real as R
 
@@ -168,7 +169,8 @@ class Monitor:
 
     def watched_symbols(self) -> set[str]:
         syms = set(E.holdings(self.conn)) | set(E.holdings(self.conn, E.SHORT_HORIZON))
-        syms |= {t["symbol"] for h in PI.BOOKS for t in PI.open_trades(self.conn, h)}
+        syms |= {t["symbol"] for h in PI.BOOKS + LAB.CASH_BOOKS
+                 for t in PI.open_trades(self.conn, h)}
         syms |= {r[0] for r in self.conn.execute(
             "SELECT symbol FROM paper_orders WHERE status = 'pending'")}
         for h in R.HORIZONS:
@@ -222,6 +224,11 @@ class Monitor:
                     and _setting(self.conn, "candle_day") != day:
                 self.candle_picks(now)
                 done.append("candle-picks")
+            if INTRADAY_PICKS <= now.time() <= INTRADAY_LATEST \
+                    and _setting(self.conn, "id_last_picks") == day \
+                    and _setting(self.conn, "lab_day") != day:
+                self.lab_picks(now)
+                done.append("lab-picks")
             self.minute_job(now)
             done.append("minute")
             if now.time() >= INTRADAY_SQUARE_OFF and _setting(self.conn, "id_last_squareoff") != day:
@@ -230,6 +237,8 @@ class Monitor:
             if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "id_close_squareoff") != day:
                 self.square_off_job(now, PI.CLOSE_HORIZON)
                 self.square_off_job(now, PI.CANDLE_HORIZON)
+                for book in LAB.CASH_BOOKS:
+                    self.square_off_job(now, book)
             if now.time() >= CLOSE_SQUARE_OFF and _setting(self.conn, "fno_squareoff") != day:
                 _set(self.conn, "fno_squareoff", day)
                 self.fno_square_off(now)
@@ -401,6 +410,7 @@ class Monitor:
                           f"book): closed {sym} at {p:.2f}")
 
         self.option_selling(now)
+        self.lab_futures(now)
         fno_live = self.fno_prices(stamp)
         from stockpredictor.paper import fno as FO
 
@@ -412,7 +422,7 @@ class Monitor:
             self.fno_open(now)
 
         # Intraday paper: stop-loss / target exits.
-        for line in PI.check_exits(self.conn, prices, stamp):
+        for line in PI.check_exits(self.conn, prices, stamp, PI.BOOKS + LAB.CASH_BOOKS):
             kind = "target" if "target" in line else "stop-loss"
             alert(self.conn, "paper-intraday", kind, line.split()[1], f"{stamp} {line}")
 
@@ -500,6 +510,7 @@ class Monitor:
             return
         feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
         prices = self.prices.get(sorted(feats["symbol"]))
+        self._feats_today = (day, feats, prices)
         summary = N.news_summary(ctx.news, pd.Timestamp(now).tz_convert("UTC"))
         negative = set(summary.loc[summary["strong_negative"].astype(bool), "symbol"])
         strengths = PI.recent_strengths(model, self.store_dir, ctx, rules) \
@@ -510,8 +521,10 @@ class Monitor:
                                 MI.current_params(MI.TRADE).get("peer_weight") or 0)
         rules = self.kill_switch(now, ctx, rules, PI.HORIZON, trade_view.score(feats), prices,
                                  len(feats))
+        tone = self.news_tone(ctx, now)
         r = PI.run_picks(self.conn, feats, trade_view, prices, pd.Timestamp(now.date()), rules,
-                         self.capital_intraday, negative, strengths, at=now.strftime("%H:%M"))
+                         self.capital_intraday, negative, strengths, at=now.strftime("%H:%M"),
+                         news_tone=tone)
         if close_model is not None:              # second book: 9:45 -> 15:15, its own rules
             crules, _ = PI.get_rules(self.conn, PI.CLOSE_HORIZON, capital=self.capital_intraday)
             cstrengths = PI.recent_strengths(close_model, self.store_dir, ctx, crules) \
@@ -522,7 +535,7 @@ class Monitor:
                                       prices, len(feats))
             rc = PI.run_picks(self.conn, feats, close_view, prices, pd.Timestamp(now.date()),
                               crules, self.capital_intraday, negative, cstrengths,
-                              horizon=PI.CLOSE_HORIZON, at=now.strftime("%H:%M"))
+                              horizon=PI.CLOSE_HORIZON, at=now.strftime("%H:%M"), news_tone=tone)
             log.info("Intraday picks (until close): %s", "skip today (weak signal)"
                      if rc["skipped"] else "; ".join(rc["picks"]) or "none")
             self.fno_open(now, rc)
@@ -553,6 +566,54 @@ class Monitor:
                 log.info("Option selling: %s", line)
         except Exception as exc:
             log.warning("option selling paper book: %s", exc)
+
+    def news_tone(self, ctx, now: datetime) -> dict[str, float]:
+        """Company + sector news since the last close, per stock (paper/lab.news_scores)."""
+        try:
+            until = pd.Timestamp(now).tz_convert("UTC")
+            ns = LAB.news_scores(ctx.news, ctx.universe,
+                                 LAB.last_close_utc(ctx, pd.Timestamp(now.date())), until)
+            return dict(zip(ns["symbol"], ns["score"]))
+        except Exception:
+            log.exception("news scores failed")
+            return {}
+
+    def lab_picks(self, now: datetime) -> None:
+        """Strategy lab (paper/lab.py): rule-based books next to the model's, once a day."""
+        day = f"{now:%Y-%m-%d}"
+        _set(self.conn, "lab_day", day)
+        try:
+            ctx = self.ctx()
+            cached = getattr(self, "_feats_today", None)
+            if cached and cached[0] == day:
+                _, feats, prices = cached
+            else:
+                f30 = intraday_bars.first30(self.prices, store.tradable(ctx.universe), now.date(),
+                                            angel=False)
+                feats = PI.todays_features(ctx, f30, pd.Timestamp(now.date()), self.store_dir)
+                prices = self.prices.get(sorted(feats["symbol"]))
+            for book, opened in LAB.run_picks(self.conn, ctx, feats, prices, now,
+                                              self.capital_intraday).items():
+                log.info("Strategy lab %s: %s", book, "; ".join(opened) or "no trade")
+        except Exception:
+            log.exception("strategy lab picks failed")
+
+    def lab_futures(self, now: datetime) -> None:
+        """Strategy lab: Nifty last-half-hour momentum (one future, 14:55-15:25)."""
+        if config.OPTSELL_CAPITAL <= 0 or now.time() < time(9, 45):
+            return
+        try:
+            client = self._nfo_client()
+            if client is None:
+                return
+            ix = self.ctx().indices
+            n = ix[(ix["symbol"] == "NIFTY50") & (ix["date"] < pd.Timestamp(now.date()))]
+            prev = float(n.sort_values("date")["close"].iloc[-1]) if len(n) else None
+            for line in LAB.mim_tick(self.conn, client, now, prev):
+                alert(self.conn, "paper-lab", "fill", None, f"{now:%Y-%m-%d %H:%M} {line}")
+                log.info("Strategy lab futures: %s", line)
+        except Exception as exc:
+            log.warning("strategy lab futures: %s", exc)
 
     def candle_picks(self, now: datetime, feats: pd.DataFrame | None = None,
                      prices: dict | None = None, negative: set | None = None) -> None:
@@ -763,9 +824,10 @@ class Monitor:
 
         since = f"{now - timedelta(days=30):%Y-%m-%d}"
         rows = self.conn.execute(
-            "SELECT DISTINCT date, horizon FROM predictions WHERE horizon IN (?, ?, ?) AND "
-            "date < ? AND date >= ? AND correct IS NULL ORDER BY date",
-            (*PI.BOOKS, f"{now:%Y-%m-%d}", since)).fetchall()
+            "SELECT DISTINCT date, horizon FROM predictions WHERE horizon IN (%s) AND "
+            "date < ? AND date >= ? AND correct IS NULL ORDER BY date"
+            % ",".join("?" * len(PI.BOOKS + LAB.CASH_BOOKS)),
+            (*PI.BOOKS, *LAB.CASH_BOOKS, f"{now:%Y-%m-%d}", since)).fetchall()
         if not rows:
             return 0
         summ = I.load_summaries(self.store_dir)

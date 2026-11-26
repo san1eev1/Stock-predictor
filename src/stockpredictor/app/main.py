@@ -728,6 +728,167 @@ def optsell_board(OS):
                 st.dataframe(UI.pnl_colors(legs, ["pnl"]), hide_index=True, width="stretch")
 
 
+# --- Strategy lab: every paper book side by side --------------------------------------------
+
+def _all_books() -> tuple[dict[str, str], dict[str, float]]:
+    from stockpredictor.paper import lab as LAB
+    from stockpredictor.paper import optsell as OS
+
+    cash = SETTINGS.paper_capital_intraday
+    labels = {PI.HORIZON: "Model, until 12:30", PI.CLOSE_HORIZON: "Model, until the close",
+              PI.CANDLE_HORIZON: "Model + morning candles",
+              **{s.book: s.label for s in LAB.CASH},
+              FO.FUT_BOOK: "Model picks as stock futures", FO.OPT_BOOK: "Model picks as options",
+              LAB.MIM_BOOK: LAB.FUTURES.label,
+              **{s.book: f"Option selling: {s.label}" for s in OS.STRATEGIES}}
+    caps = {**{b: cash for b in (*PI.BOOKS, *LAB.CASH_BOOKS)}, FO.FUT_BOOK: config.FUT_CAPITAL,
+            FO.OPT_BOOK: config.OPT_CAPITAL, LAB.MIM_BOOK: LAB.MIM_CAPITAL,
+            **{s.book: config.OPTSELL_CAPITAL for s in OS.STRATEGIES}}
+    return labels, caps
+
+
+def page_lab():
+    from stockpredictor.paper import lab as LAB
+
+    st.title("Strategy lab")
+    st.caption("Every paper book on one board: the model's books, rule-based strategies from the "
+               "research literature, F&O and option selling. Each trades its own capital on the "
+               "same live prices with the same costs, so over time the board shows which ideas "
+               "earn. Judge a strategy by its t-stat and worst day as well as its total; under "
+               "about 20 days each, differences are mostly luck.")
+    lab_board(LAB)
+
+
+@st.fragment(run_every=REFRESH)
+def lab_board(LAB):
+    c = conn()
+    labels, caps = _all_books()
+    hist = LAB.history(c, tuple(labels))
+    since = st.segmented_control("Period", ["Last 30 days", "Since the start"],
+                                 default="Since the start", label_visibility="collapsed")
+    if since == "Last 30 days" and not hist.empty:
+        hist = hist[hist["day"] >= f"{now_ist() - timedelta(days=30):%Y-%m-%d}"]
+    board = LAB.leaderboard(hist, caps, labels)
+    board["Capital"] = [caps[b] for b in (next(k for k, v in labels.items() if v == s)
+                                          for s in board["Strategy"])]
+    money_cols = ["Total", "Average day", "Worst day", "Deepest fall", "Capital"]
+    show = board.copy()
+    for col in money_cols:
+        show[col] = show[col].map(lambda v: "" if pd.isna(v) else UI.money(v) if col != "Capital"
+                                  else rupees(v))
+    show["Winning days"] = board["Winning days"].map(lambda v: "" if pd.isna(v) else f"{v:.0%}")
+    show["t-stat"] = board["t-stat"].map(lambda v: "" if pd.isna(v) else f"{v:+.1f}")
+    show["On capital"] = board["On capital"].map(lambda v: f"{v:+.2%}")
+    st.dataframe(show[["Strategy", "Days traded", "Total", "On capital", "Average day",
+                       "Winning days", "Worst day", "Deepest fall", "t-stat", "Capital"]],
+                 hide_index=True, width="stretch")
+    traded = board[board["Days traded"] >= 20]
+    if len(traded):
+        lead = traded.sort_values("On capital", ascending=False).iloc[0]
+        st.caption(f"Leaning towards **{lead['Strategy']}**: {lead['On capital']:+.2%} on its capital "
+                   f"over {lead['Days traded']} days (t-stat {lead['t-stat'] or 0:+.1f}). A t-stat "
+                   "above 2 is the bar this project uses before trusting an edge.")
+    else:
+        st.caption("No book has 20 traded days yet; the board starts to mean something after that.")
+    if not hist.empty:
+        h = hist.assign(Strategy=hist["book"].map(labels),
+                        ret=hist["pnl"] / hist["book"].map(caps))
+        h = h.sort_values("day")
+        h["Cumulative return"] = h.groupby("book")["ret"].cumsum()
+        h["day"] = pd.to_datetime(h["day"])
+        st.altair_chart(alt.Chart(h).mark_line(point=True).encode(
+            x=alt.X("day:T", title=None), y=alt.Y("Cumulative return:Q", axis=alt.Axis(format="%")),
+            color=alt.Color("Strategy:N", legend=alt.Legend(orient="bottom", columns=3)),
+            tooltip=["Strategy", alt.Tooltip("day:T"), alt.Tooltip("Cumulative return:Q", format="+.2%")]
+        ).properties(height=320), width="stretch")
+
+    st.subheader("Today in the lab")
+    day = f"{now_ist():%Y-%m-%d}"
+    live = live_prices(c)
+    for stg in (*LAB.CASH, LAB.FUTURES):
+        t = book_trades(c, stg.book, live, fno=stg.book == LAB.MIM_BOOK, days=1)
+        t = t[t["entry_time"].str.startswith(day)] if not t.empty else t
+        g = float(t["gain"].sum()) if not t.empty else 0.0
+        skip = setting(c, f"os_skip_{stg.book}_{day}", None)
+        with st.expander(f"{stg.label}: {UI.money(g)}" + (f" ({len(t)} trades)" if len(t) else
+                                                          f" ({skip})" if skip else "")):
+            st.caption(stg.idea + ".")
+            if t.empty:
+                st.caption("No trades today.")
+            else:
+                st.dataframe(t[["symbol", "side", "qty", "entry_price", "now", "gain", "status",
+                                "reason"]].rename(columns={"reason": "why"}),
+                             hide_index=True, width="stretch")
+
+
+# --- News that moves stocks -----------------------------------------------------------------
+
+def page_news():
+    from stockpredictor.paper import lab as LAB
+
+    st.title("Stock news")
+    st.caption("Only news about a company or its sector: results, orders, approvals, management, "
+               "regulation, policy. Tips, price reports and market commentary are dropped. Each "
+               "headline's tone comes from FinBERT; its weight from a model that learned, on "
+               f"past headlines, which kinds came with real moves in the stock. The News drift "
+               "book in the Strategy lab trades on this.")
+    df = news()
+    x = ctx()
+    if df.empty or x is None:
+        st.info("No news yet: GitHub fetches it at 8:30, 10:00, 12:00, 14:00 and 17:00 on weekdays.")
+        return
+    hours = st.segmented_control("Since", ["Last close", "24 hours", "3 days", "7 days"],
+                                 default="Last close", label_visibility="collapsed")
+    until = pd.Timestamp.now(tz="UTC")
+    since = (LAB.last_close_utc(x, pd.Timestamp(now_ist().date())) if hours == "Last close"
+             else until - pd.Timedelta(hours={"24 hours": 24, "3 days": 72, "7 days": 168}[hours]))
+    w = df[(df["published"] > since) & df["sentiment"].notna()].copy()
+    w = w[~w["title"].astype(str).str.contains(N.PRICE_MOVE)]
+    themes = w[w["symbol"].astype(str).str.startswith(N.THEME_PREFIX)]
+    comp = w[~w.index.isin(themes.index)]
+    comp = comp.assign(weight=comp["sentiment"] * comp.get("relevance", 1.0))
+    ns = LAB.news_scores(df, x.universe, since, until)
+    top = ns[ns["n"] > 0].sort_values("score")
+    left, right = st.columns(2)
+    for col, part, title in ((left, top.tail(8).iloc[::-1], "Best news"),
+                             (right, top.head(8), "Worst news")):
+        with col:
+            st.subheader(title)
+            part = part[(part["score"] > 0) if title == "Best news" else (part["score"] < 0)]
+            if part.empty:
+                st.caption("Nothing strong.")
+            for r in part.itertuples():
+                st.markdown(f"**{r.symbol}** · tone {r.score:+.2f} · {int(r.n)} headline"
+                            f"{'s' if r.n != 1 else ''}  \n{html_escape(str(r.headline or ''))}")
+    st.subheader("Sector and policy news")
+    tone = N.sector_tone(w, x.universe)
+    if themes.empty:
+        st.caption("No sector news in this window.")
+    else:
+        rows = []
+        for key, (_, inds) in N.THEMES.items():
+            t = themes[themes["symbol"] == N.THEME_PREFIX + key]
+            if t.empty:
+                continue
+            best = t.loc[t["sentiment"].abs().idxmax()]
+            rows.append({"Theme": key, "Affects": ", ".join(inds), "Headlines": len(t),
+                         "Tone": f"{t['sentiment'].mean():+.2f}", "Strongest": best["title"]})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.subheader("All company headlines")
+    show = comp.sort_values("weight", key=abs, ascending=False)
+    show = show.assign(When=show["published"].dt.tz_convert("Asia/Kolkata").dt.strftime("%d %b %H:%M"),
+                       Tone=show["sentiment"].map(lambda v: f"{v:+.2f}"),
+                       Weight=show.get("relevance", pd.Series(1.0, show.index)).map(lambda v: f"{v:.1f}"))
+    st.dataframe(show[["When", "symbol", "title", "Tone", "Weight", "url"]].rename(
+        columns={"symbol": "Stock", "title": "Headline", "url": "Link"}).head(300),
+        hide_index=True, width="stretch",
+        column_config={"Link": st.column_config.LinkColumn(display_text="open")})
+
+
+def html_escape(s: str) -> str:
+    return s.replace("*", "\\*").replace("_", "\\_").replace("[", "\\[")
+
+
 # --- Learn --------------------------------------------------------------------------------
 
 def page_learn():
@@ -2067,6 +2228,7 @@ pages = {
     "Today": [st.Page(page_overview, title="Overview", icon=":material/space_dashboard:", default=True)],
     "Trading desk": [
         st.Page(page_paper_intraday, url_path="paper_intraday", title="Intraday book", icon=":material/bolt:"),
+        st.Page(page_lab, url_path="lab", title="Strategy lab", icon=":material/science:"),
         st.Page(page_optsell, url_path="option_selling", title="Option selling", icon=":material/hourglass_bottom:"),
         st.Page(page_paper_fno, url_path="paper_fno", title="F&O", icon=":material/candlestick_chart:"),
         st.Page(page_paper_longterm, url_path="paper_longterm", title="Long-term book", icon=":material/park:"),
@@ -2076,6 +2238,7 @@ pages = {
         st.Page(page_intraday_1230, url_path="intraday_1230", title="Intraday until 12:30", icon=":material/schedule:"),
         st.Page(page_intraday_close, url_path="intraday_close", title="Intraday until the close", icon=":material/alarm:"),
         st.Page(page_us_research, url_path="us", title="US picks (S&P 500)", icon=":material/travel_explore:"),
+        st.Page(page_news, url_path="news", title="Stock news", icon=":material/newspaper:"),
         st.Page(page_ipo, url_path="ipo", title="IPO analysis", icon=":material/rocket_launch:"),
         st.Page(page_accuracy, url_path="accuracy", title="Accuracy", icon=":material/target:"),
         st.Page(page_model, url_path="model", title="Model", icon=":material/neurology:")],

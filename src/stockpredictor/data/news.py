@@ -81,10 +81,34 @@ EVENT = re.compile(
     r"proposal|regulat|policy|government|govt|ministry|fssai|duty|gst|excise|tax)", re.I)
 
 
-def is_noise(title: str) -> bool:
-    """Tips, or a price move with no company event behind it."""
+# Not news about the company: generated ratings and valuation pages, comparisons, lists,
+# chart and positioning commentary, "what should investors do", jobs, admin filings.
+JUNK = re.compile(
+    r"(?:up|down)grade[sd]? to (?:strong )?(?:buy|sell|hold)|technicals?\b|technical (?:signals|view)|"
+    r"open interest|gap[- ](?:up|down)|opens? [\d.]+% (?:higher|lower)|"
+    r"share price news|share price:? [\d.]+% cagr|\bcagr\b.*\bvs\b|\bvs\.? .{0,60}20\d\d|"
+    r"stocks? compared|stock prediction|price prediction|what should (?:investors|you) do|"
+    r"buy on dips|(?:buying|investment) opportunity|here'?s what (?:charts|analysts|experts)|"
+    r"top traded|most active|weekly recap|market outlook 20\d\d|nse/bse live|"
+    r"\b\d+\s+(?:\w+\s+){0,2}stocks\b|stocks (?:trading|to|under|below|above)|"
+    r"recruitment|vacanc|admit card|apply online|\bposts\b|exam\b|"
+    r"results? 20\d\d:? date|results date|record date for .{0,20}(?:agm|egm)|"
+    r"\brta\b|registrar|employee stock option|\besops?\b|superannuat|trading window|"
+    r"how to check|allotment status|news by .{0,40} on tradingview|"
+    r"valuation(?:s)? (?:check|snapshot)|key (?:financial )?ratios|fundamental analysis|"
+    r"brokerage calls|how should you trade|market holiday|buildup report|price action|"
+    r"and momentum\b|where is he betting|trade spotlight|share news today", re.I)
+JUNK_SOURCES = {"univest", "marketsmojo", "multibagg ai", "ad-hoc-news.de", "simply wall st",
+                "trade brains", "facebook", "freejobalert.com", "openpr.com", "instagram",
+                "youtube", "x.com", "scripbox", "stockinvest.us", "marketbeat", "getmoneyrich",
+                "equitypandit", "stocksrunner", "findarticles.com", "news today"}
+
+
+def is_noise(title: str, source: str = "") -> bool:
+    """Tips, generated commentary, junk sources, or a price move with no company event."""
     t = str(title)
-    return bool(TIPS.search(t)) or (bool(MOVE_ONLY.search(t)) and not EVENT.search(t))
+    return (str(source).strip().lower() in JUNK_SOURCES or bool(TIPS.search(t))
+            or bool(JUNK.search(t)) or (bool(MOVE_ONLY.search(t)) and not EVENT.search(t)))
 
 
 _SUFFIXES = re.compile(r"\b(ltd|limited|corporation|corp|inc)\b\.?", re.I)
@@ -108,7 +132,7 @@ def parse_rss(xml_text: str, symbol: str) -> list[dict]:
             title = title[: -len(source) - 3].strip()
         pub = item.findtext("pubDate")
         if not title or not pub or (_MARKET.drop_foreign and FOREIGN.search(title)) \
-                or is_noise(title):
+                or is_noise(title, source):
             continue
         items.append({
             "symbol": symbol,
@@ -129,6 +153,63 @@ def fetch_company_news(symbol: str, name: str) -> list[dict]:
     return parse_rss(resp.text, symbol)
 
 
+# Sector and policy news that moves particular groups of stocks (not market commentary):
+# stored with symbol "@<theme>" and mapped to the industries it affects (NSE industry names).
+THEME_PREFIX = "@"
+THEMES = {
+    "rbi": ('RBI "repo rate" OR "monetary policy" OR "RBI norms" banks',
+            ["Financial Services", "Realty"]),
+    "steel": ('India steel prices OR "safeguard duty" OR "import duty" steel', ["Metals & Mining"]),
+    "metals": ('India aluminium OR copper OR zinc prices OR "mining policy"', ["Metals & Mining"]),
+    "crude": ('crude oil prices India OR "windfall tax" OR "fuel prices" OMC',
+              ["Oil Gas & Consumable Fuels", "Chemicals"]),
+    "pharma": ('USFDA India pharma OR "drug pricing" OR "US tariffs" pharma', ["Healthcare"]),
+    "it": ('Indian IT services demand OR "H-1B" OR "US tariff" IT outsourcing',
+           ["Information Technology"]),
+    "auto": ('India auto sales OR "EV policy" OR "vehicle sales" monthly',
+             ["Automobile and Auto Components"]),
+    "fmcg": ('India FMCG demand OR "rural demand" OR monsoon rainfall crops',
+             ["Fast Moving Consumer Goods"]),
+    "cement": ('India cement prices OR cement demand', ["Construction Materials"]),
+    "telecom": ('India telecom tariff OR TRAI OR spectrum auction', ["Telecommunication"]),
+    "power": ('India power demand OR electricity tariff OR "renewable energy" policy', ["Power"]),
+    "realty": ('India housing sales OR "real estate" demand OR RERA', ["Realty"]),
+    "defence": ('India defence orders OR "defence ministry" contract OR railway orders',
+                ["Capital Goods", "Construction"]),
+    "consumer": ('India GST council OR "consumer durables" demand OR gold prices jewellery',
+                 ["Consumer Durables", "Consumer Services"]),
+    "capmkt": ('SEBI F&O rules OR "demat accounts" OR "mutual fund" inflows India',
+               ["Financial Services"]),
+}
+
+
+def fetch_themes(pause: float = 0.5) -> tuple[list[dict], list[str]]:
+    """Sector / policy headlines (India only): one Google News query per theme."""
+    if _MARKET.name != "in":
+        return [], []
+    rows, errors = [], []
+    for key, (query, _) in THEMES.items():
+        try:
+            resp = requests.get(RSS_URL.format(q=quote_plus(query + " when:3d")),
+                                headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            rows += parse_rss(resp.text, THEME_PREFIX + key)
+        except Exception as exc:
+            errors.append(f"{THEME_PREFIX}{key}: {exc}")
+        time.sleep(pause)
+    return rows, errors
+
+
+def sector_tone(news: pd.DataFrame, universe: pd.DataFrame) -> pd.Series:
+    """industry -> average FinBERT tone of its themes' headlines in `news` (already windowed)."""
+    th = news[news["symbol"].astype(str).str.startswith(THEME_PREFIX) & news["sentiment"].notna()]
+    vals: dict[str, list[float]] = {}
+    for sym, sent in th[["symbol", "sentiment"]].itertuples(index=False):
+        for ind in THEMES.get(str(sym)[len(THEME_PREFIX):], ("", []))[1]:
+            vals.setdefault(ind, []).append(float(sent))
+    return pd.Series({k: sum(v) / len(v) for k, v in vals.items() if len(v) >= 2}, dtype=float)
+
+
 def fetch_all(universe: pd.DataFrame, pause: float = 0.5) -> tuple[list[dict], list[str]]:
     rows, errors = [], []
     for sym, name in universe[["symbol", "name"]].itertuples(index=False):
@@ -137,7 +218,8 @@ def fetch_all(universe: pd.DataFrame, pause: float = 0.5) -> tuple[list[dict], l
         except Exception as exc:  # one bad feed must not stop the rest
             errors.append(f"{sym}: {exc}")
         time.sleep(pause)
-    return rows, errors
+    more, errs = fetch_themes(pause)
+    return rows + more, errors + errs
 
 
 # --- CSV storage ----------------------------------------------------------------
@@ -148,7 +230,9 @@ def load_news(store_dir: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=NEWS_COLS)
     df = pd.concat((pd.read_csv(f) for f in files), ignore_index=True)
     df["published"] = pd.to_datetime(df["published"], utc=True)
-    return df[~df["title"].map(is_noise)].reset_index(drop=True)
+    src = df["source"] if "source" in df else pd.Series("", index=df.index)
+    keep = [not is_noise(t, s) for t, s in zip(df["title"], src.fillna(""))]
+    return df[keep].reset_index(drop=True)
 
 
 def append_news(store_dir: Path, rows: list[dict]) -> pd.DataFrame:
