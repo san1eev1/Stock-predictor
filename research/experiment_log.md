@@ -196,3 +196,17 @@ Conclusions (fixed rule: net t >= 2 and beats now with paired t >= 2):
 - Fewer picks are better (3 > 5 > 10); sector-neutral pairs are worse than plain top/bottom.
 - News does not predict the rest of the day: keep it as a veto only, not a ranking input.
 Live gap: live stock picking (last 60 days) is ~0 vs +30 bp backtest recently -> watch.
+
+## E-015 Morning candles (2026-11-27, research run 45901706002) — candle book rule changed
+'Until close' model, walk-forward, 2,441 days. Each 9:15-9:45 candle check, stocks agreeing
+minus disagreeing, 9:45 -> 15:15: closed up -5.1 bp (t -7.1), top half of range -2.8 (t -4.1),
+above VWAP -1.6 (t -2.5), ORB-15 up -0.8 (t -0.4), most 1-min green +0.7 (t +0.5); the 0-5
+candle score has IC t -11.0. The morning candle tends to REVERSE over the rest of the day
+(consistent with the literature: candlestick rules add nothing after costs; Marshall, Young &
+Rose; Duvinage et al.; Thai / South African replications).
+Candle-book variants, top 3 a side, per position: the live rule (weight 0.5, cut at entry)
+-34.6 bp net of 0.37% (6% winners) - the source of the live -22%. Holding to 15:15 is best at
+every weight (w 0.25: +0.1 bp at 0.37%, +18.1 bp t 9.7 at 0.19%); 1% stops are worse than
+holding. Change applied to the paper candle book: weight 0.25, no cut at entry, 3% safety
+stop, no target (paired t vs the old rule +18.9). Main books unchanged (their stops are tuned
+nightly by profit).

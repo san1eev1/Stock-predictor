@@ -34,7 +34,8 @@ TRADED_MIN, TRADED_MAX = 3, 5   # ... and only the 3-5 strongest of each side ar
                                 # number the nightly rule tuning chose, kept within 3-5)
 MIN_EFFICIENT_TRADE = 5_000     # ₹: below this the ₹5 minimum brokerage dominates the costs
 SHORTLIST = N_CANDIDATES  # candle book: those 25 + 25 re-ranked by their 9:15-9:45 candles
-CANDLE_WEIGHT = 0.5      # final order = (1 - w) x model rank in the shortlist + w x candle score
+CANDLE_WEIGHT = 0.25     # E-015: candles alone point the wrong way (the morning move tends
+                         # to reverse); a light weight did best. final order = (1 - w) x model rank in the shortlist + w x candle score
 HISTORY_DAYS = 45        # recent summaries needed for relative-volume features
 
 
@@ -88,9 +89,10 @@ def get_rules(conn: sqlite3.Connection, horizon: str = HORIZON,
                     n_long=min(max(min(rules.n_long, carry), TRADED_MIN), TRADED_MAX),
                     n_short=min(max(min(rules.n_short, carry), TRADED_MIN), TRADED_MAX))
     if horizon == CANDLE_HORIZON:
-        # Candle experiment: each trade is cut as soon as it slips below its entry price;
-        # winners run to 15:15 (or the target).
-        rules = replace(rules, breakeven=True)
+        # Candle experiment, after E-015 (2,441 days): cutting a trade as soon as it slipped
+        # below entry lost 35 bp a position (6% winners) and tight stops lost too; holding to
+        # 15:15 was best. So: no cut at entry, a wide 3% safety stop, no target.
+        rules = replace(rules, breakeven=False, stop_loss=3.0, target=0.0)
     return rules, s.get("id_enabled", "1") == "1"
 
 
