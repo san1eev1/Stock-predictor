@@ -1,0 +1,241 @@
+{
+ "features": [
+  "log_qib",
+  "log_nii",
+  "log_rii",
+  "log_size_cr",
+  "nifty_20d",
+  "recent_listings"
+ ],
+ "mean": [
+  3.341644159714753,
+  2.999197566541323,
+  2.058499383672834,
+  6.476046449020981,
+  0.003929837890953979,
+  0.14622218032214518
+ ],
+ "std": [
+  1.6029411535577356,
+  1.8700428829493922,
+  1.2078033200321987,
+  0.8772045349180642,
+  0.037931705153389526,
+  0.14416616768358964
+ ],
+ "w": [
+  1.0917080262711791,
+  1.097744078021988,
+  0.49874505607278374,
+  0.045001103236866846,
+  0.3112561325242641,
+  0.0923318911117542,
+  -0.05079135936549937
+ ],
+ "info": {
+  "ipos": 435,
+  "since": "2003-01-02",
+  "base_rate": 0.6735632183908046,
+  "qib_buckets": [
+   {
+    "lo": 0.0,
+    "hi": 3.0,
+    "n": 75,
+    "listed_up": 0.26666666666666666,
+    "median_gain": -0.04447368421052622
+   },
+   {
+    "lo": 3.0,
+    "hi": 10.0,
+    "n": 75,
+    "listed_up": 0.4,
+    "median_gain": -0.0058743169398906
+   },
+   {
+    "lo": 10.0,
+    "hi": 50.0,
+    "n": 86,
+    "listed_up": 0.627906976744186,
+    "median_gain": 0.050290070242656415
+   },
+   {
+    "lo": 50.0,
+    "hi": 100.0,
+    "n": 63,
+    "listed_up": 0.9206349206349206,
+    "median_gain": 0.29095744680851054
+   },
+   {
+    "lo": 100.0,
+    "hi": Infinity,
+    "n": 136,
+    "listed_up": 0.9632352941176471,
+    "median_gain": 0.35864219753038373
+   }
+  ],
+  "recent_listings_now": 0.07964581445686092,
+  "recent": [
+   {
+    "symbol": "ACEVECTOR",
+    "company": "AceVector Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 32.0,
+    "qib_x": 3.3779290332,
+    "total_x": 4.9326039309,
+    "gain_open": -0.115,
+    "gain_close": -0.185
+   },
+   {
+    "symbol": "GERMAN",
+    "company": "German Green Steel and Power Limited",
+    "listing_date": "2026-10-05T00:00:00.000",
+    "issue_price": 139.0,
+    "qib_x": 20.9273145873,
+    "total_x": 28.9794993164,
+    "gain_open": 0.0215827338,
+    "gain_close": -0.0767625899
+   },
+   {
+    "symbol": "HDFIRE",
+    "company": "HD Fire Protect Limited",
+    "listing_date": "2026-10-21T00:00:00.000",
+    "issue_price": 271.0,
+    "qib_x": 256.6520669231,
+    "total_x": 131.7012200326,
+    "gain_open": 0.2361623616,
+    "gain_close": 0.1319188192
+   },
+   {
+    "symbol": "FUSIONCX",
+    "company": "Fusion CX Limited",
+    "listing_date": "2026-10-22T00:00:00.000",
+    "issue_price": 289.0,
+    "qib_x": 4.0072202505,
+    "total_x": 4.4490307692,
+    "gain_open": 0.0553633218,
+    "gain_close": 0.0022491349
+   },
+   {
+    "symbol": "ZETWERK",
+    "company": "Zetwerk Manufacturing Businesses Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 151.0,
+    "qib_x": 4.7332388072,
+    "total_x": 3.0597630548,
+    "gain_open": 0.0546357616,
+    "gain_close": -0.0844370861
+   },
+   {
+    "symbol": "SMT",
+    "company": "Sahajanand Medical Technologies Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 344.0,
+    "qib_x": 34.6960676357,
+    "total_x": 14.2016334167,
+    "gain_open": 0.0789244186,
+    "gain_close": 0.0978197674
+   },
+   {
+    "symbol": "BONFIG",
+    "company": "Bonfiglioli Transmissions Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 586.0,
+    "qib_x": 120.7839622043,
+    "total_x": 46.0551359489,
+    "gain_open": 0.0,
+    "gain_close": -0.0196245734
+   },
+   {
+    "symbol": "TONBO",
+    "company": "Tonbo Imaging India Limited",
+    "listing_date": "2026-10-23T00:00:00.000",
+    "issue_price": 700.0,
+    "qib_x": 293.5569379061,
+    "total_x": 135.9036784164,
+    "gain_open": 0.6571428571,
+    "gain_close": 0.6197142857
+   },
+   {
+    "symbol": "PARASHLTH",
+    "company": "Paras Healthcare Limited",
+    "listing_date": "2026-10-28T00:00:00.000",
+    "issue_price": 693.0,
+    "qib_x": 3.0923799877,
+    "total_x": 2.2298250375,
+    "gain_open": 0.038961039,
+    "gain_close": 0.0614718615
+   },
+   {
+    "symbol": "JPL",
+    "company": "Jio Platforms Limited",
+    "listing_date": "2026-10-28T00:00:00.000",
+    "issue_price": 1119.0,
+    "qib_x": 70.5511275985,
+    "total_x": 22.1875450947,
+    "gain_open": 0.2135835567,
+    "gain_close": 0.2667560322
+   },
+   {
+    "symbol": "EDELALTS",
+    "company": "EAAA India Alternatives Limited",
+    "listing_date": "2026-11-02T00:00:00.000",
+    "issue_price": 1665.0,
+    "qib_x": 13.1347593936,
+    "total_x": 5.2492827874,
+    "gain_open": 0.0063063063,
+    "gain_close": 0.0377177177
+   },
+   {
+    "symbol": "BLSPOLY",
+    "company": "BLS Polymers Limited",
+    "listing_date": "2026-11-03T00:00:00.000",
+    "issue_price": 150.0,
+    "qib_x": 200.2522647059,
+    "total_x": 241.2234117647,
+    "gain_open": 0.6533333333,
+    "gain_close": 0.792
+   },
+   {
+    "symbol": "SFCTECH",
+    "company": "SFC Environmental Technologies Limited",
+    "listing_date": "2026-11-03T00:00:00.000",
+    "issue_price": 330.0,
+    "qib_x": 18.8121585677,
+    "total_x": 9.4728587607,
+    "gain_open": 0.0760606061,
+    "gain_close": 0.2912121212
+   },
+   {
+    "symbol": "CRYSTALCP",
+    "company": "Crystal Crop Protection Limited",
+    "listing_date": "2026-11-26T00:00:00.000",
+    "issue_price": 272.0,
+    "qib_x": 15.4657885637,
+    "total_x": 17.0664657312,
+    "gain_open": 0.0220588235,
+    "gain_close": 0.0215073529
+   },
+   {
+    "symbol": "MAHACOAL",
+    "company": "Mahanadi Coalfields Limited",
+    "listing_date": "2026-11-27T00:00:00.000",
+    "issue_price": 136.0,
+    "qib_x": 4.9489013949,
+    "total_x": 1.5184261028,
+    "gain_open": -0.0147058824,
+    "gain_close": -0.0257352941
+   }
+  ],
+  "walk_forward": {
+   "ipos": 371,
+   "all_listed_up": 0.6819407008086253,
+   "all_median_gain": 0.11527777777777781,
+   "apply_n": 238,
+   "apply_listed_up": 0.865546218487395,
+   "apply_median_gain": 0.27265571352352247,
+   "avoid_n": 101,
+   "avoid_listed_up": 0.3069306930693069,
+   "avoid_median_gain": -0.029861111111111116
+  }
+ }
+}
