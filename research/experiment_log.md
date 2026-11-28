@@ -210,3 +210,25 @@ every weight (w 0.25: +0.1 bp at 0.37%, +18.1 bp t 9.7 at 0.19%); 1% stops are w
 holding. Change applied to the paper candle book: weight 0.25, no cut at entry, 3% safety
 stop, no target (paired t vs the old rule +18.9). Main books unchanged (their stops are tuned
 nightly by profit).
+
+## E-016 Five intraday ideas (2026-11-28, research run 46123630622) — none adopted
+'Until close' model, walk-forward, 2,442 days, 3 a side, held to 15:15. Per position per day,
+net of 0.33% / 0.19% round trip (Zerodha's ~0.21% sits near the second column):
+
+| Variant | Net 0.33% | Net 0.19% | vs base (paired t) |
+|---|---|---|---|
+| base: model top/bottom 3 | +3.2 bp (t 1.6) | +17.2 bp (t 8.8) | - |
+| A candle reversal w 0.25 | +1.0 | +15.0 | -1.97 |
+| A candle reversal w 0.5 | -2.1 | +11.9 | -3.36 |
+| B pure 30-min reversal (no model) | -27.3 (t -11.9) | -13.3 | -10.8 |
+| B model + 30-min reversal | -4.2 | +9.8 | -3.5 |
+| C inverse-volatility sizing | -1.1 | +12.9 | -5.4 |
+| D strong days only (> median, 47% of days) | +12.7 (t 4.2) per traded day | +26.7 | fewer days |
+| D strong days only (> 70th pct, 29% of days) | +17.5 (t 4.5) per traded day | +31.5 | fewer days |
+
+E. Regimes: the base edge is about the same in every India VIX tercile and whether the market
+was down, flat or up in its first 30 minutes (gross ~+34-37 bp, t 9-11 each): no regime filter.
+Conclusions: the model already uses the morning information well - reversing the candle or the
+30-minute move, or sizing by volatility, all do worse. Strong-day filtering raises the profit
+per traded day but at Zerodha costs lowers the total (26.7 x 47% = 12.6 bp a day vs 17.2): the
+nightly rule tuning (skip_quantile, chosen by profit on the new costs) decides it.
