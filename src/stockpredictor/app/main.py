@@ -2285,10 +2285,10 @@ def page_settings():
             irules.skip_quantile) if irules.skip_quantile in (0.0, 0.3, 0.5) else 0,
             help="Skip days whose signal is weaker than this share of the last 60 days")
         st.caption(f"Each book trades 3–5 buys and 3–5 sells on its "
-                   f"{rupees(SETTINGS.paper_capital_intraday)} (no margin). Brokerage is 0.1% an "
-                   "order with a ₹5 minimum and ₹20 maximum; with 6–10 trades a day each is about "
-                   "₹5,000–8,300 and pays about 0.33% a round trip with charges and slippage. The nightly training picks the "
-                   "count and which weak days to skip; these values are the maximums.")
+                   f"{rupees(SETTINGS.paper_capital_intraday)} (no margin). Costs are Zerodha's: "
+                   "0.03% or ₹20 an order, whichever is lower, plus STT, charges and 0.05% "
+                   "slippage, about 0.21% a round trip. The nightly training picks the count and "
+                   "which weak days to skip; these values are the maximums.")
         if st.form_submit_button("Save intraday rules", type="primary"):
             for k_, v_ in {"id_enabled": int(on), "id_n_long": nl, "id_n_short": ns,
                            "id_stop_loss": isl, "id_target": itp, "id_skip_q": skip}.items():

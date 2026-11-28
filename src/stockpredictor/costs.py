@@ -13,15 +13,16 @@ from stockpredictor.config import MARKET as _MARKET
 
 @dataclass(frozen=True)
 class DeliveryCosts:
-    brokerage_pct: float = 0.001        # 0.1% ...
-    brokerage_min: float = 5.0          # ... min Rs 5
-    brokerage_max: float = 20.0         # ... max Rs 20 per order
+    # Zerodha (the user's broker, with Groww): delivery brokerage Rs 0
+    brokerage_pct: float = 0.0
+    brokerage_min: float = 0.0
+    brokerage_max: float = 0.0
     stt_pct: float = 0.001              # 0.1% on buy and sell
     exchange_pct: float = 0.0000297     # NSE transaction charge
     sebi_pct: float = 0.000001          # Rs 10 per crore
     stamp_buy_pct: float = 0.00015      # 0.015% on buy
     gst_pct: float = 0.18               # on brokerage + exchange + SEBI
-    dp_per_sell: float = 20.0           # depository charge per scrip sold
+    dp_per_sell: float = 18.0           # depository charge per scrip sold (~Rs 15.34 + GST)
     slippage_pct: float = 0.0005        # 0.05% execution slippage
 
     def cost(self, side: str, value: float) -> float:
@@ -50,9 +51,10 @@ DEFAULT_COSTS = US_COSTS if _MARKET.name == "us" else DeliveryCosts()
 
 @dataclass(frozen=True)
 class IntradayCosts:
-    """Approximate Indian intraday (MIS) equity charges per order."""
-    brokerage_pct: float = 0.001        # 0.1% ...
-    brokerage_min: float = 5.0
+    """Indian intraday (MIS) equity charges per order, at Zerodha's rates (the user's
+    broker): 0.03% or Rs 20 per order, whichever is lower, no minimum."""
+    brokerage_pct: float = 0.0003       # 0.03% ...
+    brokerage_min: float = 0.0
     brokerage_max: float = 20.0         # ... max Rs 20 per order
     stt_sell_pct: float = 0.00025       # 0.025% on the sell side
     exchange_pct: float = 0.0000297

@@ -13,8 +13,8 @@ def test_delivery_costs():
     c = DeliveryCosts()
     buy = c.cost("buy", 10_000)
     sell = c.cost("sell", 10_000)
-    # STT 10 + brokerage 10 + slippage 5 + stamp 1.5 + GST 1.86 + exchange 0.3
-    assert buy == pytest.approx(28.66, abs=0.01)
+    # Zerodha delivery: STT 10 + brokerage 0 + slippage 5 + stamp 1.5 + exchange 0.3 + GST 0.06
+    assert buy == pytest.approx(16.86, abs=0.01)
     assert sell > buy  # DP charge on sell
     assert c.cost("buy", 0) == 0
 

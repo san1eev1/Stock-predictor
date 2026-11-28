@@ -168,11 +168,12 @@ held positions on the ex-date, so a split never looks like a crash.
 - **Delivery only**: DP charge (about ₹15–20 per stock sold).
 - **Slippage and spread**: the hidden cost, often larger than all of the above.
 
-**This project's measurement:** the intraday paper books pay about **0.37% per round trip**.
-That is 0.1% brokerage each side at a ₹5 minimum, plus STT, charges and 0.05% slippage per
-order, on trades of a few thousand rupees. With ₹50,000 books and 3–5 trades a side
-(₹5,000–8,300 a trade) it is about 0.33%. Over 90 days, costs were larger than the books' whole
-result. Costs are the first thing a trading business attacks.
+**This project's measurement:** until 28 Nov 2026 the intraday paper books paid about
+**0.37% per round trip** (0.1% brokerage each side at a ₹5 minimum, plus STT, charges and
+0.05% slippage, on small trades), and over 90 days costs were larger than the books' whole
+result. At Zerodha's rates (0.03% or ₹20 an order, no minimum) the same trades cost about
+**0.21%**. Research over 2,441 days (E-014) found the model earns after costs at about 0.2%
+but not at 0.37%. Costs are the first thing a trading business attacks.
 """)
     sec("Tax on gains", """
 Resident individuals, rules from the July 2024 budget:
@@ -1037,7 +1038,7 @@ the whole job.
 """)
     sec("Costs and execution", """
 - **Model costs honestly**: brokerage (with minimums), taxes, charges, spread and slippage.
-  Here: about 0.37% per intraday round trip.
+  Here: about 0.21% per intraday round trip at Zerodha's rates (0.37% at the old 0.1% rate).
 - **Edge per trade must beat costs.** An average move in your favour of 0.2% with 0.37% costs
   loses money however accurate the direction calls are.
 - **How professionals cut costs**:
@@ -1075,10 +1076,11 @@ A trading firm is organised so that no single good idea or bad day decides its f
 6. **Monitoring and post-mortems.** Every loss day is reviewed; every live-vs-backtest gap
    is explained.
 
-This system follows the same structure at small scale. The current gap it reports: stock
-picking before costs is close to zero in the intraday books, and costs (0.37% per round
-trip) are larger than the edge. So the work now is better information (news, positioning) and
-lower costs, not more trades.
+This system follows the same structure at small scale. What it found: the model's picks earn
+before costs (E-014: about +36 bp a position a day over 2,441 days, 3 a side, held to the
+close), but the old 0.37% round-trip costs ate all of it. Costs are now modelled at Zerodha's
+rates (about 0.21%), where the same picks earn after costs. The work now is cheaper execution
+and better information, not more trades.
 """)
     sec("How this system works, in one day", """
 | Time | Where | What |
