@@ -3204,6 +3204,7 @@ BAX,2025-11-28,dividend,0.01
 BAX,2026-02-27,dividend,0.01
 BAX,2026-05-29,dividend,0.01
 BAX,2026-08-28,dividend,0.01
+BAX,2026-11-27,dividend,0.01
 BBY,2005-01-03,dividend,0.0733
 BBY,2005-04-18,dividend,0.0733
 BBY,2005-06-30,dividend,0.0733
@@ -11370,6 +11371,7 @@ FTV,2025-11-28,dividend,0.06
 FTV,2026-03-13,dividend,0.06
 FTV,2026-06-22,dividend,0.06
 FTV,2026-09-04,dividend,0.07
+FTV,2026-11-27,dividend,0.07
 GD,2005-01-12,dividend,0.18
 GD,2005-04-05,dividend,0.2
 GD,2005-06-29,dividend,0.2
@@ -12955,6 +12957,7 @@ HII,2025-11-28,dividend,1.38
 HII,2026-02-27,dividend,1.38
 HII,2026-05-29,dividend,1.38
 HII,2026-08-28,dividend,1.38
+HII,2026-11-27,dividend,1.41
 HLT,2015-08-12,dividend,0.1436
 HLT,2015-11-24,dividend,0.1436
 HLT,2016-03-16,dividend,0.1436
@@ -19428,6 +19431,7 @@ NEE,2025-11-21,dividend,0.567
 NEE,2026-02-27,dividend,0.623
 NEE,2026-06-05,dividend,0.623
 NEE,2026-08-28,dividend,0.623
+NEE,2026-11-27,dividend,0.623
 NEM,2005-03-01,dividend,0.1
 NEM,2005-05-27,dividend,0.1
 NEM,2005-09-02,dividend,0.1
@@ -29960,6 +29964,7 @@ YUM,2025-12-02,dividend,0.71
 YUM,2026-02-20,dividend,0.75
 YUM,2026-05-27,dividend,0.75
 YUM,2026-09-09,dividend,0.75
+YUM,2026-11-27,dividend,0.75
 ZBH,2012-03-28,dividend,0.1748
 ZBH,2012-06-26,dividend,0.1748
 ZBH,2012-09-25,dividend,0.1748
