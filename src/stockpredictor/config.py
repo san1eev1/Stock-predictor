@@ -15,7 +15,7 @@ from stockpredictor import markets as _markets  # noqa: E402
 
 # One market per process: MARKET=us runs the US (S&P 500) profile; India by default.
 MARKET = _markets.get(os.getenv("MARKET"))
-_DEFAULT_CAPITAL = "1000" if MARKET.name == "us" else "10000"
+_DEFAULT_CAPITAL = "1000" if MARKET.name == "us" else "100000"   # ₹1 lakh a book (Nov 2026)
 load_dotenv(PROJECT_ROOT / ".env")
 
 # Long-term and news models train on GitHub Actions on all history (2005 onwards) and are
@@ -37,8 +37,8 @@ MAC_STARTS_GITHUB_RUNS = os.getenv("MAC_STARTS_GITHUB_RUNS", "0") != "0"
 CLOUD_EVENING = os.getenv("CLOUD_EVENING", "1") != "0"
 # F&O paper books, their own capital each (cash books: PAPER_CAPITAL). A stock futures lot
 # needs ~₹90k-160k of margin, so the futures book holds about one.
-FUT_CAPITAL = float(os.getenv("FUT_CAPITAL", "100000"))
-OPT_CAPITAL = float(os.getenv("OPT_CAPITAL", "50000"))
+FUT_CAPITAL = float(os.getenv("FUT_CAPITAL", "200000"))
+OPT_CAPITAL = float(os.getenv("OPT_CAPITAL", "200000"))
 # Option selling paper books (paper/optsell.py: five hedged Nifty strategies side by side); 0 = off.
 OPTSELL_CAPITAL = float(os.getenv("OPTSELL_CAPITAL", "150000"))   # per strategy book
 # The live monitor and dashboard keep only this many recent years in memory (predictions
@@ -87,7 +87,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
             pin=os.getenv("ANGEL_PIN", ""),
             totp_secret=os.getenv("ANGEL_TOTP_SECRET", ""),
         ),
-        # India ₹10,000; US $1,000 (old PAPER_CAPITAL_* lines are ignored)
+        # India ₹1,00,000; US $1,000 (old PAPER_CAPITAL_* lines are ignored)
         paper_capital_intraday=float(os.getenv("PAPER_CAPITAL", _DEFAULT_CAPITAL)),
         paper_capital_longterm=float(os.getenv("PAPER_CAPITAL", _DEFAULT_CAPITAL)),
     )

@@ -214,6 +214,7 @@ class Monitor:
             done.append("startup")
             if self.background is not None:
                 self.background.ready.set()
+        self.keep_awake(now)
         if now.weekday() < 5 and time(8, 30) <= now.time() <= time(15, 35) \
                 and (self._last_filings is None or (now - self._last_filings).total_seconds() >= 180):
             self._last_filings = now
@@ -581,6 +582,30 @@ class Monitor:
                 log.info("Option selling: %s", line)
         except Exception as exc:
             log.warning("option selling paper book: %s", exc)
+
+    def keep_awake(self, now: datetime) -> None:
+        """Weekdays 8:45-15:45: hold macOS's 'no idle sleep' assertion (caffeinate) so the
+        Mac does not doze off during market hours. A closed lid on battery still sleeps."""
+        import shutil
+        import subprocess
+
+        import os
+
+        if (config.IN_GITHUB_ACTIONS or "PYTEST_CURRENT_TEST" in os.environ
+                or now.weekday() >= 5 or not shutil.which("caffeinate")):
+            return
+        if not (time(8, 45) <= now.time() < time(15, 45)):
+            return
+        proc = getattr(self, "_caffeinate", None)
+        if proc is not None and proc.poll() is None:
+            return
+        end = now.replace(hour=15, minute=45, second=0, microsecond=0)
+        secs = max(60, int((end - now).total_seconds()))
+        try:
+            self._caffeinate = subprocess.Popen(["caffeinate", "-i", "-s", "-t", str(secs)])
+            log.info("Keeping the Mac awake until 15:45 (market hours)")
+        except OSError as exc:
+            log.warning("caffeinate: %s", exc)
 
     def poll_filings(self, now: datetime) -> None:
         """NSE company filings since yesterday (the first public source of company news),
