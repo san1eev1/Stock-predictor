@@ -3,7 +3,7 @@ stock futures and as bought options, each book starting every day with Rs 1 lakh
 
 - Futures book: near-month stock future, long for buy picks, short for sell picks. Margin
   ~MARGIN_RATE of the contract value is blocked from the book's cash; one lot per pick, best
-  picks first, while the margin fits the Rs 1 lakh (usually 1-3 contracts).
+  picks first, while the margin fits the book's capital (futures ₹5 lakh: usually 3-5).
 - Options book: buy the at-the-money call for buy picks and the at-the-money put for sell
   picks (near-month expiry); the premium is paid from cash, so the loss is limited to it.
 Both square off at 15:15 with the cash 'until close' book. Prices: Angel One (NFO).
