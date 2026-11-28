@@ -1,5 +1,6 @@
 """F&O paper trading (intraday): the 'until close' intraday model's top picks traded as
-stock futures and as bought options, each book starting every day with Rs 1 lakh.
+stock futures and as bought options, each book starting every day with its capital
+(futures ₹5 lakh of margin, options ₹1 lakh of premium).
 
 - Futures book: near-month stock future, long for buy picks, short for sell picks. Margin
   ~MARGIN_RATE of the contract value is blocked from the book's cash; one lot per pick, best
@@ -203,7 +204,7 @@ def open_books(conn: sqlite3.Connection, client, picks: list[tuple[str, str]],
         raise RuntimeError("Angel One returned no F&O prices")
     # One lot's futures margin is Rs 90k-160k and an option lot's premium Rs 5k-20k, so a
     # fixed share per pick fits almost nothing: the best picks take one lot each while the
-    # book's Rs 1 lakh lasts (futures: ~1 position, options: ~6-8).
+    # book's capital lasts (futures ₹5 lakh: ~3-5 positions; options ₹1 lakh: ~5-8).
     free = dict(caps)
     for book, c, side in plans:
         p = prices.get(c.symbol)

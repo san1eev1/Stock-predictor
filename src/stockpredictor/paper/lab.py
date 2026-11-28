@@ -1,7 +1,7 @@
 """Strategy lab: rule-based intraday strategies traded on paper side by side with the model's
 books, each in its own book, so live results show which ideas earn (dashboard: Strategy lab).
 
-Cash books (₹10,000 each, like the model's books; picks at 9:46, square-off 15:15, up to 3 a
+Cash books (each with the model books' capital, ₹20,000; picks at 9:46, square-off 15:15, up to 3 a
 side; every candidate is saved and judged like the model's picks):
 
   lab_news     News drift. Stocks with fresh company news since the last close (relevant

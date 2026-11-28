@@ -2,7 +2,7 @@
 
 Uses the same rules (backtest.intraday) as the backtest. Long and short
 positions each block their full value from the paper account's cash. Every day
-starts fresh with the full capital (Rs 1 lakh); each day's result is kept and
+starts fresh with the full capital (PAPER_CAPITAL, ₹20,000); each day's result is kept and
 compared day by day (daily_results), and the judged picks feed back into training.
 """
 
@@ -212,7 +212,7 @@ def run_picks(conn: sqlite3.Connection, feats_today: pd.DataFrame, model: MI.Int
               candles: bool = False, at: str = "09:45",
               news_tone: dict[str, float] | None = None) -> dict:
     """Score, pick, save predictions and open paper trades at live prices (in `horizon`'s
-    own Rs 1 lakh book)."""
+    own book, fresh each day)."""
     E.ensure_account(conn, capital, horizon)
     start_day(conn, capital, horizon)
     stamp = f"{today:%Y-%m-%d}"

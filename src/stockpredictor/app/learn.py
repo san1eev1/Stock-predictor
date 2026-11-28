@@ -170,7 +170,7 @@ held positions on the ex-date, so a split never looks like a crash.
 
 **This project's measurement:** the intraday paper books pay about **0.37% per round trip**.
 That is 0.1% brokerage each side at a ₹5 minimum, plus STT, charges and 0.05% slippage per
-order, on about ₹9,000 per trade. Over 90 days, costs were larger than the books' whole
+order, on ₹4,000–6,700 per trade (₹20,000 books, 3–5 a side). Over 90 days, costs were larger than the books' whole
 result. Costs are the first thing a trading business attacks.
 """)
     sec("Tax on gains", """

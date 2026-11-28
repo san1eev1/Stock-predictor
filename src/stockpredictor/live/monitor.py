@@ -693,7 +693,7 @@ class Monitor:
     def candle_picks(self, now: datetime, feats: pd.DataFrame | None = None,
                      prices: dict | None = None, negative: set | None = None) -> None:
         """Candle experiment (its own book): the 'until close' model's 25 best buys and sells,
-        re-ranked by their 9:15-9:45 one-minute candles, best 10 a side, cut below entry.
+        re-ranked by their 9:15-9:45 one-minute candles (weight 0.25), 3-5 a side, held to 15:15.
         Once a day; when it missed 9:46 it starts at the current prices (until 14:30)."""
         day = f"{now:%Y-%m-%d}"
         _set(self.conn, "candle_day", day)

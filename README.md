@@ -9,6 +9,8 @@ Midcap 150), with a smaller S&P 500 version:
   and 25 sells are saved and judged every day; 3-5 a side are paper-traded, chosen by news,
   sector and market direction and skipping stocks that are moving sideways. One book trades
   **until 12:30**, the other **until the close (15:15)**, each with its own capital.
+- **Paper capital:** intraday cash books ₹20,000 each; F&O futures ₹5 lakh (margin for
+  3–5 lots), options ₹1 lakh (5–8 lots); option selling ₹1.5 lakh per strategy; US $1,000.
 - **Strategy lab:** rule-based books from the research literature (news drift, gap fade without
   news, stocks in play, weekly reversal, Nifty last-half-hour momentum), F&O books and five
   hedged option-selling books, all ranked on one leaderboard.
@@ -33,7 +35,7 @@ history and [DAILY_GUIDE.md](DAILY_GUIDE.md) for step-by-step daily use.
 | **Intraday: two trades** | Picks at 9:45. **Book 1 trades until 12:30**, **book 2 until the close (15:15 square-off)**, each with its own model (predicting 9:45 → 12:30 and 9:45 → 15:15), its own ₹1 lakh and stop-loss / target. Separate pages: *Intraday — until 12:30* and *Intraday — until close*. |
 | **Compete and learn from each other** | After the close both books are judged; a daily winner and running score are shown (🏆 Competition). Each model's tuning may blend in the other's ranking (`peer_weight`), kept only if it improves accuracy on unseen days. A walk-forward backtest compares 12:30 vs close exits on the same days (refreshed daily). |
 | **Train on buy and sell** | Both models rank every stock from strongest to weakest, so they learn both ends. Judged paper picks — **buy and sell** — feed back into training (wrong calls weigh 2×, right 1.5×); intraday tuning can also focus on the biggest risers and fallers. |
-| **Paper trading** | Intraday: **two sections, each starting fresh with ₹1 lakh every day** (until 12:30 / until close); each day's result is saved and **compared day by day** (P&L, trades won, buy/sell accuracy vs random). Long-term: one running ₹1 lakh portfolio. Buying and selling shown in **separate tables**. |
+| **Paper trading** | Intraday: **two sections, each starting fresh with ₹20,000 every day** (until 12:30 / until close); each day's result is saved and **compared day by day** (P&L, trades won, buy/sell accuracy vs random). Long-term: one running ₹1 lakh portfolio. Buying and selling shown in **separate tables**. |
 | **Accuracy** | Shown on every picks and paper page, for that page's model, with **predicted UP and predicted DOWN in separate tables**; always compared with random picks. Long-term pages include a live "today" row. |
 | **Live data** | Live prices **every minute** for all tradable stocks (Angel One, Yahoo fallback); the dashboard refreshes itself every minute. **Today %**, share move since entry and **P&L after costs** are shown side by side; live price on long-term picks. |
 | **Chart methods** | Candlestick patterns and classic technical / statistical methods are available to the model; only groups that improve out-of-sample accuracy are used (see below). |
@@ -63,7 +65,7 @@ The dashboard is a **local web page** at <http://localhost:8501> (any browser, o
 **Autostart** (starts 09:00 Mon–Fri). That one command:
 
 - opens the dashboard and runs the live monitor (prices every minute, stop-losses, news)
-- 9:46 intraday picks → paper trades on a fresh ₹1 lakh → **12:30 square-off**
+- 9:46 intraday picks → paper trades on a fresh ₹20,000 → **12:30 square-off**
 - 15:30 close → learns from today's session → after-close long-term decision
 - background training all day; downloads the newest GitHub-trained models every 15 minutes
 
@@ -182,7 +184,7 @@ starts in 2026).
   the close page also compares 12:30 vs close exits
 - **Paper trading — Long-term** — accuracy; **Buying** (holdings + queued buys) and **Selling**
   (queued sells + sold) tables with P&L after costs
-- **Paper trading — Intraday** — two books (until 12:30 / until close), each on a fresh ₹1 lakh
+- **Paper trading — Intraday** — two books (until 12:30 / until close), each on a fresh ₹20,000
   a day with buy and sell trades and a **Day by day** comparison; **🏆 Competition** tab
 - **My portfolio** — your Groww trades; live P&L, Today %, stop-loss alerts
 - **Accuracy** — both models in detail, vs random; live strategy race
@@ -221,7 +223,7 @@ src/stockpredictor/
   features/    longterm.py, technical.py (chart methods), intraday.py (9:45 features), labels.py
   models/      longterm.py, intraday.py, engine.py (LightGBM), trainer.py (retrain + tuning)
   backtest/    run.py + portfolio.py (long-term), intraday.py (rules + backtest, 12:30 exit)
-  paper/       engine.py + daily.py (long-term), intraday.py (daily ₹1 lakh), scoreboard.py
+  paper/       engine.py + daily.py (long-term), intraday.py (daily ₹20,000), scoreboard.py
   portfolio/   real.py (your Groww trades)
   live/        prices.py, monitor.py (live loop), background.py (background training)
   app/         main.py (Streamlit dashboard), charts.py

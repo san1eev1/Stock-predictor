@@ -1261,7 +1261,8 @@ def page_paper_longterm():
 
 def page_paper_intraday():
     st.title("Intraday paper trading")
-    st.caption("Every book starts each day with its own ₹10,000 (no margin: ₹10,000 is all that "
+    cap = rupees(SETTINGS.paper_capital_intraday)
+    st.caption(f"Every book starts each day with its own {cap} (no margin: {cap} is all that "
                "is invested). At 9:46 each model shortlists its 25 best buys and 25 best sells (50 "
                "stocks, all judged and learned from) and trades only the 3-5 strongest of each "
                "(the number the nightly tuning chose), held all day with the learned stop-loss "
@@ -1286,15 +1287,15 @@ def page_paper_intraday():
 
 
 def candle_section():
-    st.caption("Its own ₹10,000 book, separate from the main books (which trade only what the "
-               "models learned). At 9:46 "
-               "the 'until close' model's 25 best buys and 25 best sells (50 stocks) are checked "
-               "on their 9:15-9:45 one-minute candles (closed up/down, where it "
-               "closed in its range, vs VWAP, 15-minute breakout, share of green candles). Model "
-               "rank and candles count half each; the best 3-5 buys and sells are traded. A "
-               "trade that slips below its entry price is cut at once; winners run to 15:15. If "
-               "it beats the main 'until close' book over several weeks, it can be adopted. "
-               "Candle data from Yahoo, so Angel One stays free for the main books.")
+    st.caption(f"Its own {rupees(SETTINGS.paper_capital_intraday)} book, separate from the main "
+               "books. At 9:46 the 'until close' model's 25 best buys and 25 best sells (50 "
+               "stocks) are checked on their 9:15-9:45 one-minute candles (closed up/down, where "
+               "it closed in its range, vs VWAP, 15-minute breakout, share of green candles). "
+               "Model rank counts three quarters and candles one quarter; the best 3-5 buys and "
+               "sells are traded and held to 15:15, with a 3% safety stop. Research over 2,441 "
+               "days (E-015) found the morning candle tends to reverse and that cutting trades "
+               "at their entry price caused this book's early losses, so both were changed on "
+               "28 Nov. Candle data from Yahoo, so Angel One stays free for the main books.")
     paper_intraday(PI.CANDLE_HORIZON)
 
 
@@ -1807,10 +1808,10 @@ def paper_intraday(horizon: str = PI.HORIZON):
 
 
 def intraday_days(c, horizon: str = PI.HORIZON):
-    """Every day's result on a fresh ₹1 lakh, compared day by day."""
+    """Every day's result on a fresh book (its daily capital), compared day by day."""
     cap = SETTINGS.paper_capital_intraday
     d = PI.daily_results(c, cap, horizon)
-    st.subheader("📅 Day by day (each day starts with ₹1 lakh)")
+    st.subheader(f"Day by day (each day starts with {rupees(cap)})")
     if d.empty:
         st.caption("The first day's result appears after "
                    f"{'12:30' if horizon == PI.HORIZON else '15:15'}.")
@@ -2283,10 +2284,11 @@ def page_settings():
         skip = cols[2].selectbox("Skip weak days", [0.0, 0.3, 0.5], index=[0.0, 0.3, 0.5].index(
             irules.skip_quantile) if irules.skip_quantile in (0.0, 0.3, 0.5) else 0,
             help="Skip days whose signal is weaker than this share of the last 60 days")
-        st.caption("Each book trades 3–5 buys and 3–5 sells on its ₹10,000 (no margin). Brokerage "
-                   "has a ₹5 minimum an order, so fewer, larger trades cost less: at 3 a side a "
-                   "round trip costs about 0.84%, at 5 a side about 1.32%. The nightly training "
-                   "picks the count and which weak days to skip; these values are the maximums.")
+        st.caption(f"Each book trades 3–5 buys and 3–5 sells on its "
+                   f"{rupees(SETTINGS.paper_capital_intraday)} (no margin). Brokerage is 0.1% an "
+                   "order with a ₹5 minimum and ₹20 maximum, so trades of ₹4,000–6,700 pay about "
+                   "0.37% a round trip with charges and slippage. The nightly training picks the "
+                   "count and which weak days to skip; these values are the maximums.")
         if st.form_submit_button("Save intraday rules", type="primary"):
             for k_, v_ in {"id_enabled": int(on), "id_n_long": nl, "id_n_short": ns,
                            "id_stop_loss": isl, "id_target": itp, "id_skip_q": skip}.items():
