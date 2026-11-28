@@ -2286,8 +2286,8 @@ def page_settings():
             help="Skip days whose signal is weaker than this share of the last 60 days")
         st.caption(f"Each book trades 3–5 buys and 3–5 sells on its "
                    f"{rupees(SETTINGS.paper_capital_intraday)} (no margin). Brokerage is 0.1% an "
-                   "order with a ₹5 minimum and ₹20 maximum, so trades of ₹4,000–6,700 pay about "
-                   "0.37% a round trip with charges and slippage. The nightly training picks the "
+                   "order with a ₹5 minimum and ₹20 maximum; with 6–10 trades a day each is about "
+                   "₹5,000–8,300 and pays about 0.33% a round trip with charges and slippage. The nightly training picks the "
                    "count and which weak days to skip; these values are the maximums.")
         if st.form_submit_button("Save intraday rules", type="primary"):
             for k_, v_ in {"id_enabled": int(on), "id_n_long": nl, "id_n_short": ns,

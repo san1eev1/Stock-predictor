@@ -16,7 +16,7 @@ from stockpredictor import markets as _markets  # noqa: E402
 # One market per process: MARKET=us runs the US (S&P 500) profile; India by default.
 MARKET = _markets.get(os.getenv("MARKET"))
 _DEFAULT_CAPITAL = "1000" if MARKET.name == "us" else "10000"
-_DEFAULT_INTRADAY = "1000" if MARKET.name == "us" else "20000"   # ₹20,000 a cash book (Nov 2026)
+_DEFAULT_INTRADAY = "1000" if MARKET.name == "us" else "50000"   # ₹50,000 a cash book (Nov 2026)
 load_dotenv(PROJECT_ROOT / ".env")
 
 # Long-term and news models train on GitHub Actions on all history (2005 onwards) and are
@@ -88,7 +88,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
             pin=os.getenv("ANGEL_PIN", ""),
             totp_secret=os.getenv("ANGEL_TOTP_SECRET", ""),
         ),
-        # India: cash books ₹20,000, long-term ₹10,000 default; US $1,000 (old PAPER_CAPITAL_* lines are ignored)
+        # India: cash books ₹50,000, long-term ₹10,000 default; US $1,000 (old PAPER_CAPITAL_* lines are ignored)
         paper_capital_intraday=float(os.getenv("PAPER_CAPITAL", _DEFAULT_INTRADAY)),
         paper_capital_longterm=float(os.getenv("PAPER_CAPITAL", _DEFAULT_CAPITAL)),
     )

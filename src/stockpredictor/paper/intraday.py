@@ -2,7 +2,7 @@
 
 Uses the same rules (backtest.intraday) as the backtest. Long and short
 positions each block their full value from the paper account's cash. Every day
-starts fresh with the full capital (PAPER_CAPITAL, ₹20,000); each day's result is kept and
+starts fresh with the full capital (PAPER_CAPITAL, ₹50,000); each day's result is kept and
 compared day by day (daily_results), and the judged picks feed back into training.
 """
 
